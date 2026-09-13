@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
-type Screen = 'briefing' | 'terminal' | 'archive'
+type Screen = 'briefing' | 'terminal' | 'archive' | 'inventory'
 
 function App() {
   const [screen, setScreen] = useState<Screen>(() => {
     const saved = localStorage.getItem('chimera-screen')
-    return saved === 'terminal' || saved === 'archive' ? saved : 'briefing'
+
+    return saved === 'terminal' ||
+      saved === 'archive' ||
+      saved === 'inventory'
+      ? saved
+      : 'briefing'
   })
 
   const [accepted, setAccepted] = useState(() => {
@@ -57,14 +62,14 @@ function App() {
   function checkAnswer() {
     if (answer.trim().toLowerCase() === 'сигнал') {
       setSolved(true)
-      setEcho(3)
+      setEcho((currentEcho) => Math.max(currentEcho, 3))
     }
   }
 
   function checkSecondAnswer() {
     if (secondAnswer.trim().toLowerCase() === 'архив') {
       setSecondSolved(true)
-      setEcho(7)
+      setEcho((currentEcho) => Math.max(currentEcho, 7))
     }
   }
 
@@ -97,7 +102,14 @@ function App() {
       <div className="noise" />
 
       <header className="topbar">
-        <button className="brand" onClick={() => setScreen('terminal')}>
+        <button
+          className="brand"
+          onClick={() => {
+            if (accepted) {
+              setScreen('terminal')
+            }
+          }}
+        >
           <span className="brand-mark">◈</span>
 
           <span>
@@ -184,11 +196,12 @@ function App() {
               ◉ Контур
             </button>
 
-            <button onClick={() => setScreen('archive')}>
-              ▤ Архив
+            <button onClick={() => setScreen('archive')}>▤ Архив</button>
+
+            <button onClick={() => setScreen('inventory')}>
+              ◈ Инвентарь
             </button>
 
-            <button>◈ Инвентарь</button>
             <button>◌ Профиль</button>
 
             <div className="echo-card">
@@ -265,8 +278,7 @@ function App() {
                   <strong>✓ ФРАГМЕНТ РАСШИФРОВАН</strong>
 
                   <p>
-                    Получено: 3 ЭХО. Доступ к следующему архиву будет открыт
-                    позднее.
+                    Получено: 3 ЭХО. Найден сюжетный предмет: КЛЮЧ A-01.
                   </p>
                 </div>
               )}
@@ -335,8 +347,8 @@ function App() {
                       <strong>✓ ФРАГМЕНТ A-02 РАСШИФРОВАН</strong>
 
                       <p>
-                        Получено: 4 ЭХО. Архивный узел ARCHIVE_NODE_04 отмечен
-                        как доступный для дальнейшего исследования.
+                        Получено: 4 ЭХО. Найден сюжетный предмет: МЕТКА
+                        ARCHIVE_NODE_04.
                       </p>
                     </div>
                   )}
@@ -391,6 +403,109 @@ function App() {
               </div>
             </div>
           )}
+        </section>
+      )}
+
+      {screen === 'inventory' && (
+        <section className="inventory">
+          <p className="eyebrow">ИНВЕНТАРЬ / ЛИЧНЫЙ КОНТУР</p>
+
+          <div className="inventory-heading">
+            <div>
+              <h2>Найденные объекты</h2>
+              <p>
+                Предметы не имеют реальной ценности и существуют только внутри
+                истории «Протокола Химера».
+              </p>
+            </div>
+
+            <div className="inventory-count">
+              <span>ОБЪЕКТОВ</span>
+              <strong>{secondSolved ? '02 / 03' : solved ? '01 / 03' : '00 / 03'}</strong>
+            </div>
+          </div>
+
+          <div className="item-grid">
+            {solved ? (
+              <article className="item-card">
+                <div className="item-symbol">⌘</div>
+
+                <span className="file-label">ОБЪЕКТ #01</span>
+
+                <h3>КЛЮЧ A-01</h3>
+
+                <p>
+                  Повреждённый ключ доступа, извлечённый из первого архивного
+                  пакета. Его происхождение пока не установлено.
+                </p>
+
+                <small>СТАТУС: СТАБИЛЬНЫЙ</small>
+              </article>
+            ) : (
+              <article className="item-card locked-item">
+                <div className="item-symbol">?</div>
+
+                <span className="file-label">ОБЪЕКТ #01</span>
+
+                <h3>НЕ ОБНАРУЖЕН</h3>
+
+                <p>Пройдите первую проверку, чтобы извлечь объект.</p>
+
+                <small>СТАТУС: ЗАБЛОКИРОВАН</small>
+              </article>
+            )}
+
+            {secondSolved ? (
+              <article className="item-card">
+                <div className="item-symbol">◉</div>
+
+                <span className="file-label">ОБЪЕКТ #02</span>
+
+                <h3>МЕТКА NODE_04</h3>
+
+                <p>
+                  Адрес архивного узла, оставленный неизвестным источником.
+                  Может открыть доступ к следующему уровню расследования.
+                </p>
+
+                <small>СТАТУС: ТРЕБУЕТ АНАЛИЗА</small>
+              </article>
+            ) : (
+              <article className="item-card locked-item">
+                <div className="item-symbol">?</div>
+
+                <span className="file-label">ОБЪЕКТ #02</span>
+
+                <h3>НЕ ОБНАРУЖЕН</h3>
+
+                <p>Расшифруйте журнал A-02, чтобы получить метку узла.</p>
+
+                <small>СТАТУС: ЗАБЛОКИРОВАН</small>
+              </article>
+            )}
+
+            <article className="item-card locked-item">
+              <div className="item-symbol">?</div>
+
+              <span className="file-label">ОБЪЕКТ #03</span>
+
+              <h3>НЕИЗВЕСТНЫЙ НОСИТЕЛЬ</h3>
+
+              <p>
+                Контур фиксирует присутствие ещё одного объекта. Доступа к
+                данным пока нет.
+              </p>
+
+              <small>СТАТУС: СИГНАЛ НЕ РАСПОЗНАН</small>
+            </article>
+          </div>
+
+          <button
+            className="back-button"
+            onClick={() => setScreen('terminal')}
+          >
+            ← ВЕРНУТЬСЯ В КОНТУР
+          </button>
         </section>
       )}
 
