@@ -1,14 +1,42 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 
 type Screen = 'briefing' | 'terminal' | 'archive'
 
 function App() {
-  const [screen, setScreen] = useState<Screen>('briefing')
-  const [accepted, setAccepted] = useState(false)
-  const [echo, setEcho] = useState(0)
+  const [screen, setScreen] = useState<Screen>(() => {
+    const saved = localStorage.getItem('chimera-screen')
+    return saved === 'terminal' || saved === 'archive' ? saved : 'briefing'
+  })
+
+  const [accepted, setAccepted] = useState(() => {
+    return localStorage.getItem('chimera-accepted') === 'true'
+  })
+
+  const [echo, setEcho] = useState(() => {
+    return Number(localStorage.getItem('chimera-echo') ?? 0)
+  })
+
   const [answer, setAnswer] = useState('')
-  const [solved, setSolved] = useState(false)
+  const [solved, setSolved] = useState(() => {
+    return localStorage.getItem('chimera-first-puzzle-solved') === 'true'
+  })
+
+  useEffect(() => {
+    localStorage.setItem('chimera-screen', screen)
+  }, [screen])
+
+  useEffect(() => {
+    localStorage.setItem('chimera-accepted', String(accepted))
+  }, [accepted])
+
+  useEffect(() => {
+    localStorage.setItem('chimera-echo', String(echo))
+  }, [echo])
+
+  useEffect(() => {
+    localStorage.setItem('chimera-first-puzzle-solved', String(solved))
+  }, [solved])
 
   function activateProtocol() {
     setAccepted(true)
@@ -189,9 +217,23 @@ function App() {
         <button
           className="exit-button"
           onClick={() => {
-            setAccepted(false)
-            setScreen('briefing')
-          }}
+  const confirmed = window.confirm(
+    'Остановить игровую сессию? Прогресс этой локальной версии будет удалён.'
+  )
+
+  if (confirmed) {
+    localStorage.removeItem('chimera-screen')
+    localStorage.removeItem('chimera-accepted')
+    localStorage.removeItem('chimera-echo')
+    localStorage.removeItem('chimera-first-puzzle-solved')
+
+    setAccepted(false)
+    setEcho(0)
+    setSolved(false)
+    setAnswer('')
+    setScreen('briefing')
+  }
+}}
         >
           ОСТАНОВИТЬ СЕССИЮ
         </button>
