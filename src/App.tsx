@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { activeSegment } from './data/activeSegment'
-import { getGameBootstrap } from './api/gameApi'
+import { getGameBootstrap, updateRootBalance } from './api/gameApi'
 
 type Screen = 'briefing' | 'terminal' | 'archive' | 'inventory' | 'scanner'
 
@@ -81,6 +81,38 @@ function App() {
       isMounted = false
     }
   }, [])
+    function setRootBalance(nextRootBalance: number) {
+    const safeRootBalance = Math.max(0, nextRootBalance)
+
+    setEcho(safeRootBalance)
+
+    updateRootBalance(safeRootBalance)
+      .then((response) => {
+        setEcho(response.rootBalance)
+        setApiStatus('online')
+      })
+      .catch(() => {
+        setApiStatus('offline')
+      })
+  }
+
+  function awardRoot(minimumRootBalance: number) {
+    setEcho((currentEcho) => {
+      const nextRootBalance = Math.max(currentEcho, minimumRootBalance)
+
+      updateRootBalance(nextRootBalance)
+        .then((response) => {
+          setEcho(response.rootBalance)
+          setApiStatus('online')
+        })
+        .catch(() => {
+          setApiStatus('offline')
+        })
+
+      return nextRootBalance
+    })
+  }
+
 
 
   useEffect(() => {
@@ -114,17 +146,17 @@ function App() {
     setScreen('terminal')
   }
 
-  function checkAnswer() {
+    function checkAnswer() {
     if (answer.trim().toLowerCase() === 'сигнал') {
       setSolved(true)
-      setEcho((currentEcho) => Math.max(currentEcho, 3))
+      awardRoot(3)
     }
   }
 
-  function checkSecondAnswer() {
+    function checkSecondAnswer() {
     if (secondAnswer.trim().toLowerCase() === 'архив') {
       setSecondSolved(true)
-      setEcho((currentEcho) => Math.max(currentEcho, 7))
+      awardRoot(7)
     }
   }
 
@@ -270,11 +302,9 @@ function App() {
       return
     }
 
-    setIsSegmentMissionComplete(true)
+        setIsSegmentMissionComplete(true)
     setRepairError('')
-    setEcho((currentEcho) =>
-      Math.max(currentEcho, activeSegment.reward.root),
-    )
+    awardRoot(activeSegment.reward.root)
   }
 
     /*
@@ -303,7 +333,7 @@ function App() {
     localStorage.removeItem('chimera-segment-archive-017-complete')
 
     setAccepted(false)
-    setEcho(0)
+    setRootBalance(0)
     setSolved(false)
     setSecondSolved(false)
     setAnswer('')
