@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
@@ -20,7 +21,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Временное серверное состояние для одного демо-игрока.
+# После перезапуска backend значение снова станет 0.
+demo_player_root_balance = 0
 
+
+class RootBalanceUpdate(BaseModel):
+    rootBalance: int
 
 @app.get("/health")
 def health_check():
@@ -40,11 +47,29 @@ def get_game_bootstrap():
     и зависеть от авторизованного игрока.
     """
     return {
-        "player": {
+                "player": {
             "id": "demo-player",
-            "rootBalance": 0,
+            "rootBalance": demo_player_root_balance,
         },
         "activeMission": None,
         "inventory": [],
         "storyNodes": [],
+    }
+@app.get("/api/v1/game/root-balance")
+def get_root_balance():
+    return {
+        "playerId": "demo-player",
+        "rootBalance": demo_player_root_balance,
+    }
+
+
+@app.put("/api/v1/game/root-balance")
+def update_root_balance(update: RootBalanceUpdate):
+    global demo_player_root_balance
+
+    demo_player_root_balance = max(0, update.rootBalance)
+
+    return {
+        "playerId": "demo-player",
+        "rootBalance": demo_player_root_balance,
     }
