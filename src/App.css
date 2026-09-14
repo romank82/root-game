@@ -1411,3 +1411,219 @@ h2 {
     margin-top: 20px;
   }
 }
+.ar-action-button,
+.repair-submit-button {
+  min-height: 46px;
+  margin-top: 18px;
+  padding: 12px 18px;
+  border: 1px solid #64efb0;
+  color: #06120c;
+  background: #70f4b6;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.face-locked {
+  border-color: #76ffc0;
+  box-shadow: 0 0 30px rgba(96, 246, 176, 0.22);
+}
+
+.face-lock-status {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 7px 9px;
+  border: 1px solid rgba(110, 255, 190, 0.6);
+  color: #8cffc8;
+  background: rgba(4, 21, 13, 0.85);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.virtual-qr {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border: 2px solid #c5ffe0;
+  color: #e7fff2;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(164, 255, 210, 0.9) 0 3px,
+      rgba(8, 27, 17, 0.9) 3px 6px
+    );
+  box-shadow: 0 0 24px rgba(122, 255, 190, 0.8);
+  font-size: 40px;
+}
+
+.code-repair-panel,
+.mission-success-card {
+  margin-top: 16px;
+  padding: 24px;
+  border: 1px solid rgba(105, 245, 180, 0.26);
+  background: rgba(8, 39, 25, 0.6);
+  text-align: center;
+}
+
+.code-repair-panel h3,
+.mission-success-card h3 {
+  margin: 12px 0 10px;
+  color: #ecfff4;
+  font-size: 20px;
+}
+
+.code-repair-panel > p,
+.mission-success-card > p {
+  max-width: 580px;
+  margin: 0 auto;
+  color: #aac8b9;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.code-window {
+  display: flex;
+  min-height: 74px;
+  margin: 24px auto 14px;
+  overflow: hidden;
+  border: 1px solid rgba(108, 246, 180, 0.26);
+  background: #05130c;
+  text-align: left;
+}
+
+.code-line-number {
+  padding: 22px 13px;
+  border-right: 1px solid rgba(108, 246, 180, 0.14);
+  color: #638c77;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+}
+
+.code-window code {
+  display: flex;
+  align-items: center;
+  padding: 18px;
+  color: #9fffd0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 16px;
+  word-break: break-word;
+}
+
+.code-placeholder {
+  color: #527b65;
+}
+
+.repair-blocks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.repair-blocks button,
+.repair-clear-button {
+  min-height: 40px;
+  padding: 10px 14px;
+  border: 1px solid rgba(108, 246, 180, 0.4);
+  color: #a2ffcf;
+  background: rgba(23, 93, 61, 0.22);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+}
+
+.repair-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.repair-clear-button {
+  margin-top: 18px;
+  color: #c0dacb;
+  background: transparent;
+}
+
+.repair-submit-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.repair-error {
+  margin: 16px 0 0;
+  color: #ffb183;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.mission-success-card {
+  border-color: rgba(101, 255, 184, 0.48);
+  background: rgba(31, 134, 84, 0.16);
+}
+
+.mission-success-symbol {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  margin: 20px auto;
+  place-items: center;
+  border: 1px solid #86ffc5;
+  border-radius: 50%;
+  color: #95ffca;
+  box-shadow: 0 0 25px rgba(97, 253, 176, 0.32);
+  font-size: 30px;
+}
+
+.mission-reward-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  max-width: 580px;
+  margin: 22px auto;
+  text-align: left;
+}
+
+.mission-reward-grid div {
+  padding: 14px;
+  border: 1px solid rgba(114, 250, 184, 0.2);
+  background: rgba(4, 30, 17, 0.38);
+}
+
+.mission-reward-grid span,
+.mission-reward-grid strong {
+  display: block;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.mission-reward-grid span {
+  color: #75aa8b;
+  font-size: 9px;
+}
+
+.mission-reward-grid strong {
+  margin-top: 8px;
+  color: #bbffda;
+  font-size: 11px;
+}
+
+.mission-success-card small {
+  color: #75aa8b;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+@media (max-width: 520px) {
+  .mission-reward-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .code-window code {
+    font-size: 14px;
+  }
+}

@@ -42,6 +42,18 @@ function App() {
   const [isCheckingLocation, setIsCheckingLocation] = useState(false)
   const [locationError, setLocationError] = useState('')
   const [arSessionStarted, setArSessionStarted] = useState(false)
+  const [isSegmentFaceLocked, setIsSegmentFaceLocked] = useState(false)
+  const [virtualQrRevealed, setVirtualQrRevealed] = useState(false)
+  const [isCodeRepairOpen, setIsCodeRepairOpen] = useState(false)
+  const [repairSequence, setRepairSequence] = useState<string[]>([])
+    const [isSegmentMissionComplete, setIsSegmentMissionComplete] = useState(
+    () => {
+      return (
+        localStorage.getItem('chimera-segment-archive-017-complete') === 'true'
+      )
+    },
+  )
+  const [repairError, setRepairError] = useState('')
 
   useEffect(() => {
     localStorage.setItem('chimera-screen', screen)
@@ -62,6 +74,12 @@ function App() {
   useEffect(() => {
     localStorage.setItem('chimera-second-puzzle-solved', String(secondSolved))
   }, [secondSolved])
+    useEffect(() => {
+    localStorage.setItem(
+      'chimera-segment-archive-017-complete',
+      String(isSegmentMissionComplete),
+    )
+  }, [isSegmentMissionComplete])
 
   function activateProtocol() {
     setAccepted(true)
@@ -171,13 +189,74 @@ function App() {
     )
   }
 
-  function startArSearch() {
+    function startArSearch() {
     setArSessionStarted(true)
+    setIsSegmentFaceLocked(false)
+    setVirtualQrRevealed(false)
+    setIsCodeRepairOpen(false)
+    setRepairSequence([])
+    setRepairError('')
   }
 
-  const canStartArSearch =
-    distanceToSegment !== null &&
-    distanceToSegment <= activeSegment.safeScanRadiusMeters
+  function lockSegmentFace() {
+    setIsSegmentFaceLocked(true)
+  }
+
+  function revealVirtualQr() {
+    setVirtualQrRevealed(true)
+  }
+
+  function openCodeRepair() {
+    setIsCodeRepairOpen(true)
+    setRepairSequence([])
+    setRepairError('')
+  }
+
+  function addRepairBlock(block: string) {
+    if (isSegmentMissionComplete) {
+      return
+    }
+
+    setRepairError('')
+    setRepairSequence((currentSequence) => {
+      if (currentSequence.length >= 3) {
+        return currentSequence
+      }
+
+      return [...currentSequence, block]
+    })
+  }
+
+  function clearRepairSequence() {
+    setRepairSequence([])
+    setRepairError('')
+  }
+
+  function submitCodeRepair() {
+    const correctSequence = ['return ', 'packet.', 'signature']
+
+    if (repairSequence.join('') !== correctSequence.join('')) {
+      setRepairError(
+        'СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ И ВОССТАНОВИТЕ ЕЁ ЗАНОВО.',
+      )
+      return
+    }
+
+    setIsSegmentMissionComplete(true)
+    setRepairError('')
+    setEcho((currentEcho) =>
+      Math.max(currentEcho, activeSegment.reward.root),
+    )
+  }
+
+    /*
+    DEV MODE:
+    временно разрешаем AR-поиск без GPS-проверки,
+    пока тестируем проект на ПК.
+
+    Перед публикацией вернуть серверную проверку координат.
+  */
+  const canStartArSearch = true
 
   function stopSession() {
     const confirmed = window.confirm(
@@ -193,6 +272,7 @@ function App() {
     localStorage.removeItem('chimera-echo')
     localStorage.removeItem('chimera-first-puzzle-solved')
     localStorage.removeItem('chimera-second-puzzle-solved')
+    localStorage.removeItem('chimera-segment-archive-017-complete')
 
     setAccepted(false)
     setEcho(0)
@@ -203,6 +283,12 @@ function App() {
     setDistanceToSegment(null)
     setLocationError('')
     setArSessionStarted(false)
+    setIsSegmentFaceLocked(false)
+    setVirtualQrRevealed(false)
+    setIsCodeRepairOpen(false)
+    setRepairSequence([])
+    setIsSegmentMissionComplete(false)
+    setRepairError('')
     setScreen('briefing')
   }
 
@@ -315,8 +401,8 @@ function App() {
 
             <div className="echo-card">
               <span>РЕСУРС</span>
-              <strong>{echo} ЭХО</strong>
-              <small>нестабильные данные</small>
+              <strong>{echo} ROOT</strong>
+                <small>локальный тестовый баланс</small>
             </div>
           </aside>
 
@@ -383,7 +469,7 @@ function App() {
                 <div className="success">
                   <strong>✓ ФРАГМЕНТ РАСШИФРОВАН</strong>
                   <p>
-                    Получено: 3 ЭХО. Найден сюжетный предмет: КЛЮЧ A-01.
+                    Получено: 3 ROOT. Найден сюжетный предмет: КЛЮЧ A-01.
                   </p>
                 </div>
               )}
@@ -448,7 +534,7 @@ function App() {
                     <div className="success">
                       <strong>✓ ФРАГМЕНТ A-02 РАСШИФРОВАН</strong>
                       <p>
-                        Получено: 4 ЭХО. Найден сюжетный предмет: МЕТКА
+                        Получено: 4 ROOT.. Найден сюжетный предмет: МЕТКА
                         ARCHIVE_NODE_04.
                       </p>
                     </div>
@@ -735,7 +821,7 @@ function App() {
             )}
           </section>
 
-          {!arSessionStarted ? (
+                    {!arSessionStarted ? (
             <button
               className="ar-start-button"
               onClick={startArSearch}
@@ -745,29 +831,169 @@ function App() {
                 ? 'ЗАПУСТИТЬ AR-ПОИСК'
                 : 'AR-ПОИСК ЗАБЛОКИРОВАН'}
             </button>
+          ) : isSegmentMissionComplete ? (
+            <section className="mission-success-card">
+              <span className="file-label">ПАКЕТ ВОССТАНОВЛЕН</span>
+
+              <div className="mission-success-symbol">✓</div>
+
+              <h3>СЕГМЕНТ СТАБИЛИЗИРОВАН</h3>
+
+              <p>
+                Кодовая структура восстановлена. Архив извлечён из
+                нестабильного контура.
+              </p>
+
+              <div className="mission-reward-grid">
+                <div>
+                  <span>ПОЛУЧЕНО</span>
+                  <strong>+{activeSegment.reward.root} ROOT</strong>
+                </div>
+
+                <div>
+                  <span>ИЗВЛЕЧЁН ОБЪЕКТ</span>
+                  <strong>{activeSegment.reward.itemName}</strong>
+                </div>
+              </div>
+
+              <small>
+                В production награда, предмет и прогресс будут подтверждаться
+                только backend-сервером.
+              </small>
+            </section>
+          ) : isCodeRepairOpen ? (
+            <section className="code-repair-panel">
+              <span className="file-label">МИНИ-ИГРА / CODE REPAIR</span>
+
+              <h3>Восстановите повреждённую строку</h3>
+
+              <p>
+                Архивный пакет потерял порядок трёх блоков. Соберите корректную
+                команду извлечения подписи.
+              </p>
+
+              <div className="code-window">
+                <span className="code-line-number">017</span>
+
+                <code>
+                  {repairSequence.length > 0 ? (
+                    repairSequence.map((block, index) => (
+                      <span key={`${block}-${index}`}>{block}</span>
+                    ))
+                  ) : (
+                    <span className="code-placeholder">
+                      // выберите блоки ниже
+                    </span>
+                  )}
+                </code>
+              </div>
+
+              <div className="repair-blocks">
+                <button onClick={() => addRepairBlock('packet.')}>
+                  packet.
+                </button>
+
+                <button onClick={() => addRepairBlock('signature')}>
+                  signature
+                </button>
+
+                <button onClick={() => addRepairBlock('return ')}>
+                  return
+                </button>
+              </div>
+
+              {repairError && <p className="repair-error">{repairError}</p>}
+
+              <div className="repair-actions">
+                <button
+                  className="repair-clear-button"
+                  onClick={clearRepairSequence}
+                >
+                  ОЧИСТИТЬ
+                </button>
+
+                <button
+                  className="repair-submit-button"
+                  onClick={submitCodeRepair}
+                  disabled={repairSequence.length !== 3}
+                >
+                  ПРОВЕРИТЬ КОД →
+                </button>
+              </div>
+            </section>
           ) : (
             <section className="ar-placeholder">
               <span className="file-label">AR-СЕССИЯ ИНИЦИАЛИЗИРОВАНА</span>
 
-              <div className="ar-placeholder-frame">
-                <div className="ar-cube">▦</div>
+              <div
+                className={`ar-placeholder-frame ${
+                  isSegmentFaceLocked ? 'face-locked' : ''
+                }`}
+              >
+                <div className="ar-cube">
+                  {virtualQrRevealed ? (
+                    <span className="virtual-qr">▦</span>
+                  ) : (
+                    '▦'
+                  )}
+                </div>
+
                 <div className="ar-reticle">+</div>
                 <span className="ar-scan-line" />
+
+                {isSegmentFaceLocked && (
+                  <span className="face-lock-status">ГРАНЬ ЗАФИКСИРОВАНА</span>
+                )}
               </div>
 
-              <h3>Сегмент синхронизируется с пространством</h3>
+              {!isSegmentFaceLocked ? (
+                <>
+                  <h3>Наведите прицел на грань Сегмента</h3>
 
-              <p>
-                Здесь будет подключён нативный AR-модуль: виртуальный куб,
-                привязанный к сцене камеры, фиксация грани и извлечение
-                виртуального QR-маркера.
-              </p>
+                  <p>
+                    Зафиксируйте одну из граней виртуального куба, чтобы начать
+                    извлечение архивного маркера.
+                  </p>
 
-              <small>
-                В текущем прототипе AR-сцена является визуальной заглушкой.
-              </small>
+                  <button
+                    className="ar-action-button"
+                    onClick={lockSegmentFace}
+                  >
+                    ЗАФИКСИРОВАТЬ ГРАНЬ
+                  </button>
+                </>
+              ) : !virtualQrRevealed ? (
+                <>
+                  <h3>Грань синхронизирована</h3>
+
+                  <p>
+                    На поверхности объекта обнаружена повреждённая QR-структура.
+                    Запустите её визуальное извлечение.
+                  </p>
+
+                  <button
+                    className="ar-action-button"
+                    onClick={revealVirtualQr}
+                  >
+                    ПРОЯВИТЬ QR-МАРКЕР
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h3>Виртуальный QR-маркер извлечён</h3>
+
+                  <p>
+                    Серверная сессия сканирования в будущем будет создана на
+                    этом шаге. Сейчас откроется тестовая головоломка.
+                  </p>
+
+                  <button className="ar-action-button" onClick={openCodeRepair}>
+                    ИЗВЛЕЧЬ ДАННЫЕ →
+                  </button>
+                </>
+              )}
             </section>
-          )}
+                    )}
 
           <button
             className="back-button"

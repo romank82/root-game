@@ -1,69 +1,28 @@
-export type SegmentType =
-  | 'DATA_SEGMENT'
-  | 'DAMAGED_SEGMENT'
-  | 'ARCHIVE_SEGMENT'
-  | 'KEY_SEGMENT'
-  | 'BLACK_SEGMENT'
-  | 'GHOST_SEGMENT'
+import { segments, type Segment } from './gameContent'
 
-export type ActiveSegment = {
-  id: string
-  code: string
-  type: SegmentType
-  title: string
-  description: string
-  searchRadiusMeters: number
-  safeScanRadiusMeters: number
-  safeScanPoint: {
-    latitude: number
-    longitude: number
-  }
+/*
+  Временный адаптер для уже готового экрана Сегмента в App.tsx.
+
+  Когда App.tsx начнёт получать активную миссию через API,
+  этот файл будет больше не нужен.
+*/
+export type ActiveSegment = Segment & {
   reward: {
     root: number
     itemName?: string
   }
-  arScene: {
-    scenePreset: string
-    scanHoldDurationMs: number
-  }
 }
 
-/*
-  ВРЕМЕННЫЕ ДАННЫЕ ПРОТОТИПА.
+const segment = segments[0]
 
-  Позже этот объект заменится ответом backend API.
-  Администратор будет создавать и редактировать Сегменты
-  через админ-панель, а клиент будет получать только
-  доступные конкретному игроку задания.
-*/
+if (!segment) {
+  throw new Error('Не найден тестовый Сегмент.')
+}
+
 export const activeSegment: ActiveSegment = {
-  id: 'segment-archive-017',
-  code: 'ARCHIVE_NODE_017',
-  type: 'ARCHIVE_SEGMENT',
-  title: 'ПОТЕРЯННЫЙ КОНТУР',
-  description:
-    'В городском пространстве зафиксирован нестабильный архивный след. Найдите безопасную точку сканирования и запустите AR-поиск Сегмента.',
-
-  searchRadiusMeters: 250,
-  safeScanRadiusMeters: 15,
-
-  /*
-    ТЕСТОВЫЕ КООРДИНАТЫ.
-    Поменяйте их на координаты рядом с вами, чтобы проверить
-    разблокировку AR-поиска на реальном телефоне.
-  */
-  safeScanPoint: {
-    latitude: 55.7558,
-    longitude: 37.6173,
-  },
-
+  ...segment,
   reward: {
     root: 10,
     itemName: 'АРХИВНЫЙ СЕГМЕНТ A-17',
-  },
-
-  arScene: {
-    scenePreset: 'archive_cube_damaged_v1',
-    scanHoldDurationMs: 1800,
   },
 }
