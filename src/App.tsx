@@ -63,10 +63,13 @@ function App() {
     let isMounted = true
 
     getGameBootstrap()
-      .then(() => {
-        if (isMounted) {
-          setApiStatus('online')
+      .then((bootstrap) => {
+        if (!isMounted) {
+          return
         }
+
+        setEcho(bootstrap.player.rootBalance)
+        setApiStatus('online')
       })
       .catch(() => {
         if (isMounted) {
