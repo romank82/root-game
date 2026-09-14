@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { activeSegment } from './data/activeSegment'
-import { getGameBootstrap, updateRootBalance } from './api/gameApi'
+import {
+  claimReward,
+  getGameBootstrap,
+  resetDemoProgress,
+  type RewardAction,
+} from './api/gameApi'
 
 type Screen = 'briefing' | 'terminal' | 'archive' | 'inventory' | 'scanner'
 
@@ -68,7 +73,12 @@ function App() {
           return
         }
 
-        setEcho(bootstrap.player.rootBalance)
+                setEcho(bootstrap.player.rootBalance)
+        setSolved(bootstrap.completedRewards.includes('puzzle-a-01'))
+        setSecondSolved(bootstrap.completedRewards.includes('puzzle-a-02'))
+        setIsSegmentMissionComplete(
+          bootstrap.completedRewards.includes('segment-archive-017'),
+        )
         setApiStatus('online')
       })
       .catch(() => {
@@ -81,36 +91,19 @@ function App() {
       isMounted = false
     }
   }, [])
-    function setRootBalance(nextRootBalance: number) {
-    const safeRootBalance = Math.max(0, nextRootBalance)
+     async function claimRootReward(action: RewardAction) {
+    try {
+      const response = await claimReward(action)
 
-    setEcho(safeRootBalance)
+      setEcho(response.rootBalance)
+      setApiStatus('online')
 
-    updateRootBalance(safeRootBalance)
-      .then((response) => {
-        setEcho(response.rootBalance)
-        setApiStatus('online')
-      })
-      .catch(() => {
-        setApiStatus('offline')
-      })
-  }
+      return true
+    } catch {
+      setApiStatus('offline')
 
-  function awardRoot(minimumRootBalance: number) {
-    setEcho((currentEcho) => {
-      const nextRootBalance = Math.max(currentEcho, minimumRootBalance)
-
-      updateRootBalance(nextRootBalance)
-        .then((response) => {
-          setEcho(response.rootBalance)
-          setApiStatus('online')
-        })
-        .catch(() => {
-          setApiStatus('offline')
-        })
-
-      return nextRootBalance
-    })
+      return false
+    }
   }
 
 
@@ -146,17 +139,27 @@ function App() {
     setScreen('terminal')
   }
 
-    function checkAnswer() {
-    if (answer.trim().toLowerCase() === 'сигнал') {
+      async function checkAnswer() {
+    if (answer.trim().toLowerCase() !== 'сигнал') {
+      return
+    }
+
+    const rewardClaimed = await claimRootReward('puzzle-a-01')
+
+    if (rewardClaimed) {
       setSolved(true)
-      awardRoot(3)
     }
   }
 
-    function checkSecondAnswer() {
-    if (secondAnswer.trim().toLowerCase() === 'архив') {
+    async function checkSecondAnswer() {
+    if (secondAnswer.trim().toLowerCase() !== 'архив') {
+      return
+    }
+
+    const rewardClaimed = await claimRootReward('puzzle-a-02')
+
+    if (rewardClaimed) {
       setSecondSolved(true)
-      awardRoot(7)
     }
   }
 
@@ -292,7 +295,7 @@ function App() {
     setRepairError('')
   }
 
-  function submitCodeRepair() {
+    async function submitCodeRepair() {
     const correctSequence = ['return ', 'packet.', 'signature']
 
     if (repairSequence.join('') !== correctSequence.join('')) {
@@ -302,9 +305,12 @@ function App() {
       return
     }
 
-        setIsSegmentMissionComplete(true)
-    setRepairError('')
-    awardRoot(activeSegment.reward.root)
+    const rewardClaimed = await claimRootReward('segment-archive-017')
+
+    if (rewardClaimed) {
+      setIsSegmentMissionComplete(true)
+      setRepairError('')
+    }
   }
 
     /*
@@ -332,8 +338,17 @@ function App() {
     localStorage.removeItem('chimera-second-puzzle-solved')
     localStorage.removeItem('chimera-segment-archive-017-complete')
 
+        resetDemoProgress()
+      .then((response) => {
+        setEcho(response.rootBalance)
+        setApiStatus('online')
+      })
+      .catch(() => {
+        setApiStatus('offline')
+      })
+
     setAccepted(false)
-    setRootBalance(0)
+    setEcho(0)
     setSolved(false)
     setSecondSolved(false)
     setAnswer('')
