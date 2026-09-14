@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { activeSegment } from './data/activeSegment'
+import { getGameBootstrap } from './api/gameApi'
 
 type Screen = 'briefing' | 'terminal' | 'archive' | 'inventory' | 'scanner'
 
@@ -23,6 +24,10 @@ function App() {
   const [echo, setEcho] = useState(() => {
     return Number(localStorage.getItem('chimera-echo') ?? 0)
   })
+    const [apiStatus, setApiStatus] = useState<
+    'checking' | 'online' | 'offline'
+  >('checking')
+
 
   const [answer, setAnswer] = useState('')
 
@@ -54,6 +59,26 @@ function App() {
     },
   )
   const [repairError, setRepairError] = useState('')
+    useEffect(() => {
+    let isMounted = true
+
+    getGameBootstrap()
+      .then(() => {
+        if (isMounted) {
+          setApiStatus('online')
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setApiStatus('offline')
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
 
   useEffect(() => {
     localStorage.setItem('chimera-screen', screen)
@@ -399,10 +424,14 @@ function App() {
 
             <button onClick={() => setScreen('scanner')}>◌ Сканер</button>
 
-            <div className="echo-card">
+                        <div className="echo-card">
               <span>РЕСУРС</span>
               <strong>{echo} ROOT</strong>
-                <small>локальный тестовый баланс</small>
+              <small>
+                {apiStatus === 'checking' && 'синхронизация...'}
+                {apiStatus === 'online' && 'синхронизация: online'}
+                {apiStatus === 'offline' && 'локальный тестовый режим'}
+              </small>
             </div>
           </aside>
 
