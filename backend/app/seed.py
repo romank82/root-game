@@ -159,7 +159,6 @@ def seed_content() -> None:
                     "segmentId": "segment-archive-017",
                     "puzzleId": "puzzle-code-repair-a17",
                 },
-                # Не передавать это поле в API игрока, когда подключим endpoints.
                 validation_config={},
                 status="published",
                 sort_order=3,
