@@ -1,9 +1,12 @@
+import sqlite3
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="CHIMERA Protocol API",
-    version="0.2.0",
+    version="0.3.0",
     description="Backend API for the CHIMERA game.",
 )
 
@@ -20,16 +23,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ----------------------------------------------------------------
-# Временное серверное состояние одного demo-игрока.
-# После перезапуска backend оно сбрасывается.
-#
-# Позднее эти данные будут храниться в PostgreSQL и привязываться
-# к авторизованному игроку.
-# ----------------------------------------------------------------
-
-demo_player_root_balance = 0
-demo_completed_rewards: set[str] = set()
+# База создаётся рядом с папкой app:
+# root-game/backend/chimera.db
+DATABASE_PATH = Path(__file__).resolve().parent.parent / "chimera.db"
+DEMO_PLAYER_ID = "demo-player"
 
 REWARD_ACTIONS = {
     "puzzle-a-01": {
@@ -105,55 +102,151 @@ ACTIVE_MISSION = {
 }
 
 
-def get_player_inventory():
+def get_connection() -> sqlite3.Connection:
+    connection = sqlite3.connect(DATABASE_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def initialize_database() -> None:
+    with get_connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS players (
+                id TEXT PRIMARY KEY,
+                root_balance INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS completed_rewards (
+                player_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                PRIMARY KEY (player_id, action),
+                FOREIGN KEY (player_id) REFERENCES players(id)
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO players (id, root_balance)
+            VALUES (?, 0)
+            """,
+            (DEMO_PLAYER_ID,),
+        )
+
+
+def get_completed_rewards(connection: sqlite3.Connection) -> set[str]:
+    rows = connection.execute(
+        """
+        SELECT action
+        FROM completed_rewards
+        WHERE player_id = ?
+        """,
+        (DEMO_PLAYER_ID,),
+    ).fetchall()
+
+    return {row["action"] for row in rows}
+
+
+def get_player_inventory(completed_rewards: set[str]) -> list[dict]:
     item_ids = [
         reward["inventoryItemId"]
         for action, reward in REWARD_ACTIONS.items()
-        if action in demo_completed_rewards
+        if action in completed_rewards
         and reward["inventoryItemId"] is not None
     ]
 
     return [INVENTORY_ITEMS[item_id] for item_id in item_ids]
 
 
-def get_unlocked_story_nodes():
+def get_unlocked_story_nodes(completed_rewards: set[str]) -> list[dict]:
     node_ids = [
         reward["unlocksStoryNodeId"]
         for action, reward in REWARD_ACTIONS.items()
-        if action in demo_completed_rewards
+        if action in completed_rewards
         and reward["unlocksStoryNodeId"] is not None
     ]
 
     return [STORY_NODES[node_id] for node_id in node_ids]
 
 
-def get_active_mission():
-    if "segment-archive-017" in demo_completed_rewards:
+def get_active_mission(completed_rewards: set[str]) -> dict | None:
+    if "segment-archive-017" in completed_rewards:
         return None
 
     return ACTIVE_MISSION
 
 
-def claim_reward(action: str):
-    global demo_player_root_balance
+def get_game_state(connection: sqlite3.Connection) -> dict:
+    player = connection.execute(
+        """
+        SELECT id, root_balance
+        FROM players
+        WHERE id = ?
+        """,
+        (DEMO_PLAYER_ID,),
+    ).fetchone()
 
-    reward = REWARD_ACTIONS[action]
-    already_completed = action in demo_completed_rewards
-
-    if not already_completed:
-        demo_completed_rewards.add(action)
-        demo_player_root_balance += reward["root"]
+    completed_rewards = get_completed_rewards(connection)
 
     return {
-        "playerId": "demo-player",
-        "action": action,
-        "awarded": 0 if already_completed else reward["root"],
-        "alreadyCompleted": already_completed,
-        "rootBalance": demo_player_root_balance,
-        "inventory": get_player_inventory(),
-        "storyNodes": get_unlocked_story_nodes(),
-        "activeMission": get_active_mission(),
+        "player": {
+            "id": player["id"],
+            "rootBalance": player["root_balance"],
+        },
+        "activeMission": get_active_mission(completed_rewards),
+        "inventory": get_player_inventory(completed_rewards),
+        "storyNodes": get_unlocked_story_nodes(completed_rewards),
+        "completedRewards": sorted(completed_rewards),
     }
+
+
+def claim_reward(action: str) -> dict:
+    reward = REWARD_ACTIONS[action]
+
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+
+        result = connection.execute(
+            """
+            INSERT OR IGNORE INTO completed_rewards (player_id, action)
+            VALUES (?, ?)
+            """,
+            (DEMO_PLAYER_ID, action),
+        )
+
+        already_completed = result.rowcount == 0
+        awarded = 0 if already_completed else reward["root"]
+
+        if awarded > 0:
+            connection.execute(
+                """
+                UPDATE players
+                SET root_balance = root_balance + ?
+                WHERE id = ?
+                """,
+                (awarded, DEMO_PLAYER_ID),
+            )
+
+        game_state = get_game_state(connection)
+
+    return {
+        "playerId": DEMO_PLAYER_ID,
+        "action": action,
+        "awarded": awarded,
+        "alreadyCompleted": already_completed,
+        "rootBalance": game_state["player"]["rootBalance"],
+        "inventory": game_state["inventory"],
+        "storyNodes": game_state["storyNodes"],
+        "activeMission": game_state["activeMission"],
+    }
+
+
+initialize_database()
 
 
 @app.get("/health")
@@ -161,46 +254,64 @@ def health_check():
     return {
         "status": "ok",
         "service": "chimera-api",
-        "version": "0.2.0",
+        "version": "0.3.0",
+        "storage": "sqlite",
     }
 
 
 @app.get("/api/v1/game/bootstrap")
 def get_game_bootstrap():
-    return {
-        "player": {
-            "id": "demo-player",
-            "rootBalance": demo_player_root_balance,
-        },
-        "activeMission": get_active_mission(),
-        "inventory": get_player_inventory(),
-        "storyNodes": get_unlocked_story_nodes(),
-        "completedRewards": sorted(demo_completed_rewards),
-    }
+    with get_connection() as connection:
+        return get_game_state(connection)
 
 
 @app.get("/api/v1/game/root-balance")
 def get_root_balance():
+    with get_connection() as connection:
+        player = connection.execute(
+            """
+            SELECT root_balance
+            FROM players
+            WHERE id = ?
+            """,
+            (DEMO_PLAYER_ID,),
+        ).fetchone()
+
     return {
-        "playerId": "demo-player",
-        "rootBalance": demo_player_root_balance,
+        "playerId": DEMO_PLAYER_ID,
+        "rootBalance": player["root_balance"],
     }
 
 
 @app.post("/api/v1/game/reset-demo-progress")
 def reset_demo_progress():
-    global demo_player_root_balance
+    with get_connection() as connection:
+        connection.execute(
+            """
+            UPDATE players
+            SET root_balance = 0
+            WHERE id = ?
+            """,
+            (DEMO_PLAYER_ID,),
+        )
 
-    demo_player_root_balance = 0
-    demo_completed_rewards.clear()
+        connection.execute(
+            """
+            DELETE FROM completed_rewards
+            WHERE player_id = ?
+            """,
+            (DEMO_PLAYER_ID,),
+        )
+
+        game_state = get_game_state(connection)
 
     return {
-        "playerId": "demo-player",
-        "rootBalance": demo_player_root_balance,
-        "completedRewards": [],
-        "inventory": [],
-        "storyNodes": [],
-        "activeMission": get_active_mission(),
+        "playerId": DEMO_PLAYER_ID,
+        "rootBalance": game_state["player"]["rootBalance"],
+        "completedRewards": game_state["completedRewards"],
+        "inventory": game_state["inventory"],
+        "storyNodes": game_state["storyNodes"],
+        "activeMission": game_state["activeMission"],
     }
 
 
