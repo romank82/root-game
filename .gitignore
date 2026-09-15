@@ -33,3 +33,6 @@ __pycache__/
 !.env.example
 # Local SQLite game state
 backend/chimera.db
+
+# Local VS Code settings
+.vscode/
