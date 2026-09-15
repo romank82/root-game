@@ -1,0 +1,296 @@
+from app.db import SessionLocal
+from app.models import (
+    Chapter,
+    GamePlayer,
+    Item,
+    Mission,
+    MissionRequirement,
+    MissionReward,
+    Season,
+    StoryNode,
+    Wallet,
+)
+
+
+def seed_content() -> None:
+    """Создать начальный контент CHIMERA. Безопасно для повторного запуска."""
+
+    with SessionLocal.begin() as session:
+        session.merge(
+            Season(
+                id="season-protocol-01",
+                slug="protocol-01",
+                title="CHIMERA: PROTOCOL 01",
+                description=(
+                    "Первый цикл восстановления повреждённого "
+                    "архивного контура CHIMERA."
+                ),
+                status="published",
+                sort_order=1,
+            )
+        )
+
+        session.merge(
+            Chapter(
+                id="chapter-archive-recovery",
+                season_id="season-protocol-01",
+                slug="archive-recovery",
+                title="ВОССТАНОВЛЕНИЕ АРХИВА",
+                description=(
+                    "Оператор получает доступ к повреждённым сегментам "
+                    "и восстанавливает связь с архивным контуром."
+                ),
+                status="published",
+                sort_order=1,
+            )
+        )
+
+        session.merge(
+            Item(
+                id="item-key-a01",
+                slug="key-a01",
+                code="KEY_A01",
+                title="КЛЮЧ A-01",
+                description=(
+                    "Повреждённый ключ доступа, извлечённый из первого "
+                    "архивного пакета."
+                ),
+                symbol="⌘",
+                category="KEY",
+                rarity="common",
+                is_unique=True,
+                content={},
+                status="published",
+            )
+        )
+
+        session.merge(
+            Item(
+                id="item-archive-a17",
+                slug="archive-a17",
+                code="ARCHIVE_A17",
+                title="АРХИВНЫЙ СЕГМЕНТ A-17",
+                description=(
+                    "Связанный с исчезнувшей записью фрагмент. Его данные "
+                    "повреждены, но структура указывает на внешний архивный контур."
+                ),
+                symbol="◈",
+                category="ARCHIVE",
+                rarity="rare",
+                is_unique=True,
+                content={},
+                status="published",
+            )
+        )
+
+        session.merge(
+            StoryNode(
+                id="story-node-a17",
+                chapter_id="chapter-archive-recovery",
+                slug="fragment-a17",
+                title="ФРАГМЕНТ A-17",
+                body=(
+                    "Архивный контур откликнулся. В извлечённых данных найдено "
+                    "упоминание Оператора и координат следующего Сегмента."
+                ),
+                presentation_type="archive",
+                content={},
+                status="published",
+                sort_order=1,
+            )
+        )
+
+        session.merge(
+            Mission(
+                id="mission-puzzle-a-01",
+                chapter_id="chapter-archive-recovery",
+                story_node_id=None,
+                slug="puzzle-a-01",
+                mission_type="puzzle",
+                title="АРХИВНЫЙ ПАКЕТ A-01",
+                description=(
+                    "Восстановите первый повреждённый пакет и извлеките "
+                    "ключ доступа."
+                ),
+                content={
+                    "segmentId": "puzzle-a-01",
+                    "puzzleId": "puzzle-a-01",
+                },
+                validation_config={},
+                status="published",
+                sort_order=1,
+            )
+        )
+
+        session.merge(
+            Mission(
+                id="mission-puzzle-a-02",
+                chapter_id="chapter-archive-recovery",
+                story_node_id=None,
+                slug="puzzle-a-02",
+                mission_type="puzzle",
+                title="АРХИВНЫЙ ПАКЕТ A-02",
+                description=(
+                    "Обработайте второй повреждённый пакет архивного контура."
+                ),
+                content={
+                    "segmentId": "puzzle-a-02",
+                    "puzzleId": "puzzle-a-02",
+                },
+                validation_config={},
+                status="published",
+                sort_order=2,
+            )
+        )
+
+        session.merge(
+            Mission(
+                id="mission-archive-017",
+                chapter_id="chapter-archive-recovery",
+                story_node_id="story-node-a17",
+                slug="segment-archive-017",
+                mission_type="code_repair",
+                title="ИЗВЛЕЧЕНИЕ ARCHIVE_NODE_017",
+                description=(
+                    "Зафиксируйте грань AR-куба, извлеките виртуальный QR-маркер "
+                    "и восстановите повреждённый пакет."
+                ),
+                content={
+                    "segmentId": "segment-archive-017",
+                    "puzzleId": "puzzle-code-repair-a17",
+                },
+                # Не передавать это поле в API игрока, когда подключим endpoints.
+                validation_config={},
+                status="published",
+                sort_order=3,
+            )
+        )
+
+        session.merge(
+            MissionRequirement(
+                id="requirement-a02-after-a01",
+                mission_id="mission-puzzle-a-02",
+                requirement_type="mission_completed",
+                requirement_value={"missionId": "mission-puzzle-a-01"},
+                sort_order=1,
+            )
+        )
+
+        session.merge(
+            MissionRequirement(
+                id="requirement-a17-after-a02",
+                mission_id="mission-archive-017",
+                requirement_type="mission_completed",
+                requirement_value={"missionId": "mission-puzzle-a-02"},
+                sort_order=1,
+            )
+        )
+
+        session.merge(
+            MissionReward(
+                id="reward-a01-root",
+                mission_id="mission-puzzle-a-01",
+                reward_type="currency",
+                amount=3,
+                item_id=None,
+                story_node_id=None,
+                reward_value={"currency": "ROOT"},
+                sort_order=1,
+            )
+        )
+
+        session.merge(
+            MissionReward(
+                id="reward-a01-key",
+                mission_id="mission-puzzle-a-01",
+                reward_type="item",
+                amount=1,
+                item_id="item-key-a01",
+                story_node_id=None,
+                reward_value={},
+                sort_order=2,
+            )
+        )
+
+        session.merge(
+            MissionReward(
+                id="reward-a02-root",
+                mission_id="mission-puzzle-a-02",
+                reward_type="currency",
+                amount=4,
+                item_id=None,
+                story_node_id=None,
+                reward_value={"currency": "ROOT"},
+                sort_order=1,
+            )
+        )
+
+        session.merge(
+            MissionReward(
+                id="reward-a17-root",
+                mission_id="mission-archive-017",
+                reward_type="currency",
+                amount=10,
+                item_id=None,
+                story_node_id=None,
+                reward_value={"currency": "ROOT"},
+                sort_order=1,
+            )
+        )
+
+        session.merge(
+            MissionReward(
+                id="reward-a17-item",
+                mission_id="mission-archive-017",
+                reward_type="item",
+                amount=1,
+                item_id="item-archive-a17",
+                story_node_id=None,
+                reward_value={},
+                sort_order=2,
+            )
+        )
+
+        session.merge(
+            MissionReward(
+                id="reward-a17-story",
+                mission_id="mission-archive-017",
+                reward_type="story_node",
+                amount=None,
+                item_id=None,
+                story_node_id="story-node-a17",
+                reward_value={},
+                sort_order=3,
+            )
+        )
+
+        # Новый player-слой пока не связан с legacy-таблицей players.
+        session.merge(
+            GamePlayer(
+                id="demo-player",
+                display_name="Demo Operator",
+                auth_provider="demo",
+                external_id="demo-player",
+                status="active",
+            )
+        )
+
+        session.merge(
+            Wallet(
+                id="wallet-demo-player-root",
+                player_id="demo-player",
+                currency="ROOT",
+                available_balance=0,
+                locked_balance=0,
+            )
+        )
+
+    print("✓ Seed completed successfully.")
+    print("  Season: protocol-01")
+    print("  Chapter: archive-recovery")
+    print("  Missions: puzzle-a-01, puzzle-a-02, segment-archive-017")
+    print("  Items: KEY_A01, ARCHIVE_A17")
+
+
+if __name__ == "__main__":
+    seed_content()
