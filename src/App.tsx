@@ -44,15 +44,11 @@ function App() {
 
   const [answer, setAnswer] = useState('')
 
-  const [solved, setSolved] = useState(() => {
-    return localStorage.getItem('chimera-first-puzzle-solved') === 'true'
-  })
+  const [solved, setSolved] = useState(false)
 
   const [secondAnswer, setSecondAnswer] = useState('')
 
-  const [secondSolved, setSecondSolved] = useState(() => {
-    return localStorage.getItem('chimera-second-puzzle-solved') === 'true'
-  })
+  const [secondSolved, setSecondSolved] = useState(false)
 
   const [distanceToSegment, setDistanceToSegment] = useState<number | null>(
     null,
@@ -64,13 +60,8 @@ function App() {
   const [virtualQrRevealed, setVirtualQrRevealed] = useState(false)
   const [isCodeRepairOpen, setIsCodeRepairOpen] = useState(false)
   const [repairSequence, setRepairSequence] = useState<string[]>([])
-    const [isSegmentMissionComplete, setIsSegmentMissionComplete] = useState(
-    () => {
-      return (
-        localStorage.getItem('chimera-segment-archive-017-complete') === 'true'
-      )
-    },
-  )
+    const [isSegmentMissionComplete, setIsSegmentMissionComplete] =
+    useState(false)
   const [repairError, setRepairError] = useState('')
     useEffect(() => {
     let isMounted = true
@@ -110,6 +101,19 @@ function App() {
       setInventory(response.inventory)
       setStoryNodes(response.storyNodes)
       setActiveMission(response.activeMission)
+
+      if (action === 'puzzle-a-01') {
+        setSolved(true)
+      }
+
+      if (action === 'puzzle-a-02') {
+        setSecondSolved(true)
+      }
+
+      if (action === 'segment-archive-017') {
+        setIsSegmentMissionComplete(true)
+      }
+
       setApiStatus('online')
 
       return true
@@ -134,19 +138,6 @@ function App() {
     localStorage.setItem('chimera-echo', String(echo))
   }, [echo])
 
-  useEffect(() => {
-    localStorage.setItem('chimera-first-puzzle-solved', String(solved))
-  }, [solved])
-
-  useEffect(() => {
-    localStorage.setItem('chimera-second-puzzle-solved', String(secondSolved))
-  }, [secondSolved])
-    useEffect(() => {
-    localStorage.setItem(
-      'chimera-segment-archive-017-complete',
-      String(isSegmentMissionComplete),
-    )
-  }, [isSegmentMissionComplete])
 
   function activateProtocol() {
     setAccepted(true)
@@ -160,8 +151,8 @@ function App() {
 
     const rewardClaimed = await claimRootReward('puzzle-a-01')
 
-    if (rewardClaimed) {
-      setSolved(true)
+    if (!rewardClaimed) {
+      return
     }
   }
 
@@ -172,8 +163,8 @@ function App() {
 
     const rewardClaimed = await claimRootReward('puzzle-a-02')
 
-    if (rewardClaimed) {
-      setSecondSolved(true)
+    if (!rewardClaimed) {
+      return
     }
   }
 
@@ -322,7 +313,6 @@ function App() {
     const rewardClaimed = await claimRootReward('segment-archive-017')
 
     if (rewardClaimed) {
-      setIsSegmentMissionComplete(true)
       setRepairError('')
     }
   }
@@ -348,9 +338,6 @@ function App() {
     localStorage.removeItem('chimera-screen')
     localStorage.removeItem('chimera-accepted')
     localStorage.removeItem('chimera-echo')
-    localStorage.removeItem('chimera-first-puzzle-solved')
-    localStorage.removeItem('chimera-second-puzzle-solved')
-    localStorage.removeItem('chimera-segment-archive-017-complete')
 
         resetDemoProgress()
       .then((response) => {
