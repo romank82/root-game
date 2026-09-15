@@ -36,3 +36,6 @@ backend/chimera.db
 
 # Local VS Code settings
 .vscode/
+
+# Manual SQLite backups created before migrations
+backend/chimera.pre-*.db
