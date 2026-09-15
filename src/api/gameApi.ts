@@ -1,11 +1,41 @@
+export type InventoryItem = {
+  id: string
+  code: string
+  title: string
+  description: string
+  symbol: string
+  category: 'ARCHIVE' | 'KEY' | 'COSMETIC' | 'QUEST'
+  isUnique: boolean
+}
+
+export type StoryNode = {
+  id: string
+  title: string
+  body: string
+  requiredMissionIds: string[]
+}
+
+export type ActiveMission = {
+  id: string
+  segmentId: string
+  title: string
+  description: string
+  puzzleId: string
+  reward: {
+    root: number
+    inventoryItemId: string | null
+    unlocksStoryNodeId: string | null
+  }
+}
+
 export type GameBootstrap = {
   player: {
     id: string
     rootBalance: number
   }
-  activeMission: unknown | null
-  inventory: unknown[]
-  storyNodes: unknown[]
+  activeMission: ActiveMission | null
+  inventory: InventoryItem[]
+  storyNodes: StoryNode[]
   completedRewards: string[]
 }
 
@@ -20,12 +50,18 @@ export type RewardClaimResponse = {
   awarded: number
   alreadyCompleted: boolean
   rootBalance: number
+  inventory: InventoryItem[]
+  storyNodes: StoryNode[]
+  activeMission: ActiveMission | null
 }
 
 export type ResetDemoProgressResponse = {
   playerId: string
   rootBalance: number
   completedRewards: string[]
+  inventory: InventoryItem[]
+  storyNodes: StoryNode[]
+  activeMission: ActiveMission | null
 }
 
 const API_BASE_URL = 'http://127.0.0.1:8000'

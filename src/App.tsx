@@ -5,7 +5,10 @@ import {
   claimReward,
   getGameBootstrap,
   resetDemoProgress,
+  type ActiveMission,
+  type InventoryItem,
   type RewardAction,
+  type StoryNode,
 } from './api/gameApi'
 
 type Screen = 'briefing' | 'terminal' | 'archive' | 'inventory' | 'scanner'
@@ -29,6 +32,11 @@ function App() {
   const [echo, setEcho] = useState(() => {
     return Number(localStorage.getItem('chimera-echo') ?? 0)
   })
+    const [inventory, setInventory] = useState<InventoryItem[]>([])
+      const [storyNodes, setStoryNodes] = useState<StoryNode[]>([])
+  const [activeMission, setActiveMission] = useState<ActiveMission | null>(
+    null,
+  )
     const [apiStatus, setApiStatus] = useState<
     'checking' | 'online' | 'offline'
   >('checking')
@@ -73,7 +81,10 @@ function App() {
           return
         }
 
-                setEcho(bootstrap.player.rootBalance)
+        setEcho(bootstrap.player.rootBalance)
+        setInventory(bootstrap.inventory)
+        setStoryNodes(bootstrap.storyNodes)
+        setActiveMission(bootstrap.activeMission)
         setSolved(bootstrap.completedRewards.includes('puzzle-a-01'))
         setSecondSolved(bootstrap.completedRewards.includes('puzzle-a-02'))
         setIsSegmentMissionComplete(
@@ -93,9 +104,12 @@ function App() {
   }, [])
      async function claimRootReward(action: RewardAction) {
     try {
-      const response = await claimReward(action)
+            const response = await claimReward(action)
 
       setEcho(response.rootBalance)
+      setInventory(response.inventory)
+      setStoryNodes(response.storyNodes)
+      setActiveMission(response.activeMission)
       setApiStatus('online')
 
       return true
@@ -341,6 +355,9 @@ function App() {
         resetDemoProgress()
       .then((response) => {
         setEcho(response.rootBalance)
+        setInventory(response.inventory)
+        setStoryNodes(response.storyNodes)
+        setActiveMission(response.activeMission)
         setApiStatus('online')
       })
       .catch(() => {
@@ -364,6 +381,14 @@ function App() {
     setRepairError('')
     setScreen('briefing')
   }
+    const keyA01 = inventory.find((item) => item.id === 'item-key-a01')
+
+  const archiveA17 = inventory.find(
+    (item) => item.id === 'item-archive-a17',
+  )
+  const storyNodeA17 = storyNodes.find(
+    (storyNode) => storyNode.id === 'story-node-a17',
+  )
 
   return (
     <main className="app-shell">
@@ -643,7 +668,7 @@ function App() {
             <b>ОТКРЫТЬ →</b>
           </button>
 
-          {secondSolved ? (
+                    {secondSolved ? (
             <button
               className="archive-file"
               onClick={() => setScreen('terminal')}
@@ -667,6 +692,15 @@ function App() {
               </div>
             </div>
           )}
+
+          {storyNodeA17 && (
+            <article className="message-card archive-story-node">
+              <span className="file-label">СЕРВЕРНЫЙ СЮЖЕТНЫЙ ФРАГМЕНТ</span>
+              <h3>{storyNodeA17.title}</h3>
+              <p>{storyNodeA17.body}</p>
+              <small>СТАТУС: РАЗБЛОКИРОВАН BACKEND-СЕРВЕРОМ</small>
+            </article>
+          )}
         </section>
       )}
 
@@ -685,22 +719,17 @@ function App() {
 
             <div className="inventory-count">
               <span>ОБЪЕКТОВ</span>
-              <strong>
-                {secondSolved ? '02 / 03' : solved ? '01 / 03' : '00 / 03'}
-              </strong>
+              <strong>{String(inventory.length).padStart(2, '0')} / 03</strong>
             </div>
           </div>
 
           <div className="item-grid">
-            {solved ? (
+            {keyA01 ? (
               <article className="item-card">
-                <div className="item-symbol">⌘</div>
+                <div className="item-symbol">{keyA01.symbol}</div>
                 <span className="file-label">ОБЪЕКТ #01</span>
-                <h3>КЛЮЧ A-01</h3>
-                <p>
-                  Повреждённый ключ доступа, извлечённый из первого архивного
-                  пакета. Его происхождение пока не установлено.
-                </p>
+                <h3>{keyA01.title}</h3>
+                <p>{keyA01.description}</p>
                 <small>СТАТУС: СТАБИЛЬНЫЙ</small>
               </article>
             ) : (
@@ -713,15 +742,12 @@ function App() {
               </article>
             )}
 
-            {secondSolved ? (
+            {archiveA17 ? (
               <article className="item-card">
-                <div className="item-symbol">◉</div>
+                <div className="item-symbol">{archiveA17.symbol}</div>
                 <span className="file-label">ОБЪЕКТ #02</span>
-                <h3>МЕТКА NODE_04</h3>
-                <p>
-                  Адрес архивного узла, оставленный неизвестным источником.
-                  Может открыть доступ к следующему уровню расследования.
-                </p>
+                <h3>{archiveA17.title}</h3>
+                <p>{archiveA17.description}</p>
                 <small>СТАТУС: ТРЕБУЕТ АНАЛИЗА</small>
               </article>
             ) : (
@@ -729,7 +755,9 @@ function App() {
                 <div className="item-symbol">?</div>
                 <span className="file-label">ОБЪЕКТ #02</span>
                 <h3>НЕ ОБНАРУЖЕН</h3>
-                <p>Расшифруйте журнал A-02, чтобы получить метку узла.</p>
+                <p>
+                  Восстановите Сегмент ARCHIVE-017, чтобы извлечь объект.
+                </p>
                 <small>СТАТУС: ЗАБЛОКИРОВАН</small>
               </article>
             )}
@@ -757,13 +785,17 @@ function App() {
 
       {screen === 'scanner' && (
         <section className="segment-screen">
-          <p className="eyebrow">АКТИВНЫЙ СЕГМЕНТ / ОБНАРУЖЕН</p>
+          <p className="eyebrow">
+            {activeMission
+              ? `АКТИВНАЯ МИССИЯ / ${activeMission.id.toUpperCase()}`
+              : 'АРХИВНЫЙ СЕГМЕНТ / ВОССТАНОВЛЕН'}
+          </p>
 
           <div className="segment-heading">
             <div>
               <span className="segment-type">{activeSegment.type}</span>
-              <h2>{activeSegment.title}</h2>
-              <p>{activeSegment.description}</p>
+              <h2>{activeMission?.title ?? activeSegment.title}</h2>
+              <p>{activeMission?.description ?? activeSegment.description}</p>
             </div>
 
             <div className="segment-code">
