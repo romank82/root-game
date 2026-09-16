@@ -20,7 +20,11 @@ engine_options: dict = {
 
 # SQLite требует эту опцию для работы через FastAPI в нескольких потоках.
 if DATABASE_URL.startswith("sqlite"):
-    engine_options["connect_args"] = {"check_same_thread": False}
+    engine_options["connect_args"] = {
+        "check_same_thread": False,
+        # Ждём освобождения write-lock вместо немедленного SQLITE_BUSY.
+        "timeout": 10,
+    }
 
 engine = create_engine(DATABASE_URL, **engine_options)
 

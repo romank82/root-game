@@ -2,16 +2,38 @@ import { useEffect, useState } from 'react'
 import './App.css'
 import { activeSegment } from './data/activeSegment'
 import {
-  claimReward,
-  getGameBootstrap,
-  resetDemoProgress,
-  type ActiveMission,
-  type InventoryItem,
-  type RewardAction,
-  type StoryNode,
-} from './api/gameApi'
+  getEngineBootstrap,
+  resetEngineDemoProgress,
+  submitEngineMission,
+  type EngineBootstrap,
+  type EngineInventoryItem,
+  type EngineMission,
+  type EngineStoryNode,
+} from './api/engineApi'
 
 type Screen = 'briefing' | 'terminal' | 'archive' | 'inventory' | 'scanner'
+
+function missionText(
+  mission: EngineMission | undefined,
+  field: string,
+  fallback: string,
+): string {
+  const value = mission?.content[field]
+
+  return typeof value === 'string' ? value : fallback
+}
+
+function missionBlocks(
+  mission: EngineMission | undefined,
+  fallback: string[],
+): string[] {
+  const blocks = mission?.content.blocks
+
+  return Array.isArray(blocks) &&
+    blocks.every((block) => typeof block === 'string')
+    ? blocks
+    : fallback
+}
 
 function App() {
   const [screen, setScreen] = useState<Screen>(() => {
@@ -32,15 +54,12 @@ function App() {
   const [echo, setEcho] = useState(() => {
     return Number(localStorage.getItem('chimera-echo') ?? 0)
   })
-    const [inventory, setInventory] = useState<InventoryItem[]>([])
-      const [storyNodes, setStoryNodes] = useState<StoryNode[]>([])
-  const [activeMission, setActiveMission] = useState<ActiveMission | null>(
-    null,
-  )
-    const [apiStatus, setApiStatus] = useState<
+  const [inventory, setInventory] = useState<EngineInventoryItem[]>([])
+  const [storyNodes, setStoryNodes] = useState<EngineStoryNode[]>([])
+  const [missions, setMissions] = useState<EngineMission[]>([])
+  const [apiStatus, setApiStatus] = useState<
     'checking' | 'online' | 'offline'
   >('checking')
-
 
   const [answer, setAnswer] = useState('')
 
@@ -63,25 +82,45 @@ function App() {
     const [isSegmentMissionComplete, setIsSegmentMissionComplete] =
     useState(false)
   const [repairError, setRepairError] = useState('')
-    useEffect(() => {
+  function applyEngineBootstrap(bootstrap: EngineBootstrap) {
+    setEcho(bootstrap.wallet.availableBalance)
+    setInventory(bootstrap.inventory)
+    setStoryNodes(bootstrap.storyNodes)
+    setMissions(bootstrap.missions)
+
+    setSolved(
+      bootstrap.missions.some(
+        (mission) =>
+          mission.id === 'mission-puzzle-a-01' &&
+          mission.status === 'completed',
+      ),
+    )
+    setSecondSolved(
+      bootstrap.missions.some(
+        (mission) =>
+          mission.id === 'mission-puzzle-a-02' &&
+          mission.status === 'completed',
+      ),
+    )
+    setIsSegmentMissionComplete(
+      bootstrap.missions.some(
+        (mission) =>
+          mission.id === 'mission-archive-017' &&
+          mission.status === 'completed',
+      ),
+    )
+
+    setApiStatus('online')
+  }
+
+  useEffect(() => {
     let isMounted = true
 
-    getGameBootstrap()
+    getEngineBootstrap()
       .then((bootstrap) => {
-        if (!isMounted) {
-          return
+        if (isMounted) {
+          applyEngineBootstrap(bootstrap)
         }
-
-        setEcho(bootstrap.player.rootBalance)
-        setInventory(bootstrap.inventory)
-        setStoryNodes(bootstrap.storyNodes)
-        setActiveMission(bootstrap.activeMission)
-        setSolved(bootstrap.completedRewards.includes('puzzle-a-01'))
-        setSecondSolved(bootstrap.completedRewards.includes('puzzle-a-02'))
-        setIsSegmentMissionComplete(
-          bootstrap.completedRewards.includes('segment-archive-017'),
-        )
-        setApiStatus('online')
       })
       .catch(() => {
         if (isMounted) {
@@ -93,38 +132,20 @@ function App() {
       isMounted = false
     }
   }, [])
-     async function claimRootReward(action: RewardAction) {
+
+  async function submitMission(
+    missionId: string,
+    payload: { answer?: string; sequence?: string[] },
+  ) {
     try {
-            const response = await claimReward(action)
-
-      setEcho(response.rootBalance)
-      setInventory(response.inventory)
-      setStoryNodes(response.storyNodes)
-      setActiveMission(response.activeMission)
-
-      if (action === 'puzzle-a-01') {
-        setSolved(true)
-      }
-
-      if (action === 'puzzle-a-02') {
-        setSecondSolved(true)
-      }
-
-      if (action === 'segment-archive-017') {
-        setIsSegmentMissionComplete(true)
-      }
-
-      setApiStatus('online')
-
-      return true
+      const response = await submitEngineMission(missionId, payload)
+      applyEngineBootstrap(response.bootstrap)
+      return response
     } catch {
       setApiStatus('offline')
-
-      return false
+      return null
     }
   }
-
-
 
   useEffect(() => {
     localStorage.setItem('chimera-screen', screen)
@@ -144,27 +165,23 @@ function App() {
     setScreen('terminal')
   }
 
-      async function checkAnswer() {
-    if (answer.trim().toLowerCase() !== 'сигнал') {
-      return
-    }
+  async function checkAnswer() {
+    const response = await submitMission('mission-puzzle-a-01', {
+      answer,
+    })
 
-    const rewardClaimed = await claimRootReward('puzzle-a-01')
-
-    if (!rewardClaimed) {
-      return
+    if (response?.accepted) {
+      setAnswer('')
     }
   }
 
-    async function checkSecondAnswer() {
-    if (secondAnswer.trim().toLowerCase() !== 'архив') {
-      return
-    }
+  async function checkSecondAnswer() {
+    const response = await submitMission('mission-puzzle-a-02', {
+      answer: secondAnswer,
+    })
 
-    const rewardClaimed = await claimRootReward('puzzle-a-02')
-
-    if (!rewardClaimed) {
-      return
+    if (response?.accepted) {
+      setSecondAnswer('')
     }
   }
 
@@ -300,21 +317,25 @@ function App() {
     setRepairError('')
   }
 
-    async function submitCodeRepair() {
-    const correctSequence = ['return ', 'packet.', 'signature']
+  async function submitCodeRepair() {
+    const response = await submitMission('mission-archive-017', {
+      sequence: repairSequence,
+    })
 
-    if (repairSequence.join('') !== correctSequence.join('')) {
+    if (!response) {
+      setRepairError('СЕРВЕР НЕДОСТУПЕН. ПРОВЕРЬТЕ ПОДКЛЮЧЕНИЕ.')
+      return
+    }
+
+    if (!response.accepted) {
       setRepairError(
-        'СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ И ВОССТАНОВИТЕ ЕЁ ЗАНОВО.',
+        response.message ??
+          'СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ И ВОССТАНОВИТЕ ЕЁ ЗАНОВО.',
       )
       return
     }
 
-    const rewardClaimed = await claimRootReward('segment-archive-017')
-
-    if (rewardClaimed) {
-      setRepairError('')
-    }
+    setRepairError('')
   }
 
     /*
@@ -339,13 +360,9 @@ function App() {
     localStorage.removeItem('chimera-accepted')
     localStorage.removeItem('chimera-echo')
 
-        resetDemoProgress()
-      .then((response) => {
-        setEcho(response.rootBalance)
-        setInventory(response.inventory)
-        setStoryNodes(response.storyNodes)
-        setActiveMission(response.activeMission)
-        setApiStatus('online')
+    resetEngineDemoProgress()
+      .then((bootstrap) => {
+        applyEngineBootstrap(bootstrap)
       })
       .catch(() => {
         setApiStatus('offline')
@@ -376,6 +393,33 @@ function App() {
   const storyNodeA17 = storyNodes.find(
     (storyNode) => storyNode.id === 'story-node-a17',
   )
+
+
+  const activeMission =
+    missions.find(
+      (mission) =>
+        mission.id === 'mission-archive-017' &&
+        mission.status !== 'completed',
+    ) ??
+    missions.find((mission) => mission.id === 'mission-archive-017') ??
+    null
+
+
+  const missionA01 = missions.find(
+    (mission) => mission.id === 'mission-puzzle-a-01',
+  )
+  const missionA02 = missions.find(
+    (mission) => mission.id === 'mission-puzzle-a-02',
+  )
+  const missionA17 = missions.find(
+    (mission) => mission.id === 'mission-archive-017',
+  )
+
+  const repairBlocks = missionBlocks(missionA17, [
+    'packet.',
+    'signature',
+    'return ',
+  ])
 
   return (
     <main className="app-shell">
@@ -535,9 +579,17 @@ function App() {
             </article>
 
             <div className="puzzle">
-              <span className="file-label">ПЕРВАЯ ПРОВЕРКА</span>
+              <span className="file-label">
+                {missionText(missionA01, 'label', 'ПЕРВАЯ ПРОВЕРКА')}
+              </span>
 
-              <h3>Что остаётся, когда исчезает шум?</h3>
+              <h3>
+                {missionText(
+                  missionA01,
+                  'question',
+                  'Что остаётся, когда исчезает шум?',
+                )}
+              </h3>
 
               {!solved ? (
                 <div className="answer-row">
@@ -549,16 +601,30 @@ function App() {
                         checkAnswer()
                       }
                     }}
-                    placeholder="Введите ответ..."
+                    placeholder={missionText(
+                      missionA01,
+                      'inputPlaceholder',
+                      'Введите ответ...',
+                    )}
                   />
 
                   <button onClick={checkAnswer}>ПРОВЕРИТЬ</button>
                 </div>
               ) : (
                 <div className="success">
-                  <strong>✓ ФРАГМЕНТ РАСШИФРОВАН</strong>
+                  <strong>
+                    {missionText(
+                      missionA01,
+                      'successTitle',
+                      '✓ ФРАГМЕНТ РАСШИФРОВАН',
+                    )}
+                  </strong>
                   <p>
-                    Получено: 3 ROOT. Найден сюжетный предмет: КЛЮЧ A-01.
+                    {missionText(
+                      missionA01,
+                      'successText',
+                      'Получено: 3 ROOT. Найден сюжетный предмет: КЛЮЧ A-01.',
+                    )}
                   </p>
                 </div>
               )}
@@ -598,9 +664,17 @@ function App() {
                 </article>
 
                 <div className="puzzle">
-                  <span className="file-label">ВТОРАЯ ПРОВЕРКА</span>
+                  <span className="file-label">
+                    {missionText(missionA02, 'label', 'ВТОРАЯ ПРОВЕРКА')}
+                  </span>
 
-                  <h3>Где сохраняются следы исчезнувших записей?</h3>
+                  <h3>
+                    {missionText(
+                      missionA02,
+                      'question',
+                      'Где сохраняются следы исчезнувших записей?',
+                    )}
+                  </h3>
 
                   {!secondSolved ? (
                     <div className="answer-row">
@@ -614,17 +688,30 @@ function App() {
                             checkSecondAnswer()
                           }
                         }}
-                        placeholder="Введите ответ..."
+                        placeholder={missionText(
+                          missionA02,
+                          'inputPlaceholder',
+                          'Введите ответ...',
+                        )}
                       />
 
                       <button onClick={checkSecondAnswer}>ПРОВЕРИТЬ</button>
                     </div>
                   ) : (
                     <div className="success">
-                      <strong>✓ ФРАГМЕНТ A-02 РАСШИФРОВАН</strong>
+                      <strong>
+                        {missionText(
+                          missionA02,
+                          'successTitle',
+                          '✓ ФРАГМЕНТ A-02 РАСШИФРОВАН',
+                        )}
+                      </strong>
                       <p>
-                        Получено: 4 ROOT.. Найден сюжетный предмет: МЕТКА
-                        ARCHIVE_NODE_04.
+                        {missionText(
+                          missionA02,
+                          'successText',
+                          'Получено: 4 ROOT. Найден доступ к архивному узлу.',
+                        )}
                       </p>
                     </div>
                   )}
@@ -959,17 +1046,24 @@ function App() {
             </section>
           ) : isCodeRepairOpen ? (
             <section className="code-repair-panel">
-              <span className="file-label">МИНИ-ИГРА / CODE REPAIR</span>
+              <span className="file-label">
+                {missionText(missionA17, 'label', 'МИНИ-ИГРА / CODE REPAIR')}
+              </span>
 
               <h3>Восстановите повреждённую строку</h3>
 
               <p>
-                Архивный пакет потерял порядок трёх блоков. Соберите корректную
-                команду извлечения подписи.
+                {missionText(
+                  missionA17,
+                  'instruction',
+                  'Архивный пакет потерял порядок трёх блоков. Соберите корректную команду извлечения подписи.',
+                )}
               </p>
 
               <div className="code-window">
-                <span className="code-line-number">017</span>
+                <span className="code-line-number">
+                  {missionText(missionA17, 'lineNumber', '017')}
+                </span>
 
                 <code>
                   {repairSequence.length > 0 ? (
@@ -978,24 +1072,22 @@ function App() {
                     ))
                   ) : (
                     <span className="code-placeholder">
-                      // выберите блоки ниже
+                      {missionText(
+                        missionA17,
+                        'placeholder',
+                        '// выберите блоки ниже',
+                      )}
                     </span>
                   )}
                 </code>
               </div>
 
               <div className="repair-blocks">
-                <button onClick={() => addRepairBlock('packet.')}>
-                  packet.
-                </button>
-
-                <button onClick={() => addRepairBlock('signature')}>
-                  signature
-                </button>
-
-                <button onClick={() => addRepairBlock('return ')}>
-                  return
-                </button>
+                {repairBlocks.map((block) => (
+                  <button key={block} onClick={() => addRepairBlock(block)}>
+                    {block}
+                  </button>
+                ))}
               </div>
 
               {repairError && <p className="repair-error">{repairError}</p>}

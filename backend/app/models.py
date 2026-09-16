@@ -317,3 +317,12 @@ class WalletTransaction(TimestampMixin, Base):
     reference_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reference_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "wallet_id",
+            "reference_type",
+            "reference_id",
+            name="uq_wallet_transactions_wallet_reference",
+        ),
+    )
