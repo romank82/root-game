@@ -106,7 +106,7 @@ def seed_content() -> None:
                 chapter_id="chapter-archive-recovery",
                 story_node_id=None,
                 slug="puzzle-a-01",
-                mission_type="puzzle",
+                mission_type="text_answer",
                 title="АРХИВНЫЙ ПАКЕТ A-01",
                 description=(
                     "Восстановите первый повреждённый пакет и извлеките "
@@ -115,8 +115,18 @@ def seed_content() -> None:
                 content={
                     "segmentId": "puzzle-a-01",
                     "puzzleId": "puzzle-a-01",
+                    "label": "ПЕРВАЯ ПРОВЕРКА",
+                    "question": "Что остаётся, когда исчезает шум?",
+                    "inputPlaceholder": "Введите ответ...",
+                    "successTitle": "✓ ФРАГМЕНТ РАСШИФРОВАН",
+                    "successText": (
+                        "Получено: 3 ROOT. Найден сюжетный предмет: КЛЮЧ A-01."
+                    ),
                 },
-                validation_config={},
+                validation_config={
+                    "validator": "normalized_text_match",
+                    "acceptedAnswers": ["сигнал"],
+                },
                 status="published",
                 sort_order=1,
             )
@@ -128,7 +138,7 @@ def seed_content() -> None:
                 chapter_id="chapter-archive-recovery",
                 story_node_id=None,
                 slug="puzzle-a-02",
-                mission_type="puzzle",
+                mission_type="text_answer",
                 title="АРХИВНЫЙ ПАКЕТ A-02",
                 description=(
                     "Обработайте второй повреждённый пакет архивного контура."
@@ -136,8 +146,18 @@ def seed_content() -> None:
                 content={
                     "segmentId": "puzzle-a-02",
                     "puzzleId": "puzzle-a-02",
+                    "label": "ВТОРАЯ ПРОВЕРКА",
+                    "question": "Где сохраняются следы исчезнувших записей?",
+                    "inputPlaceholder": "Введите ответ...",
+                    "successTitle": "✓ ФРАГМЕНТ A-02 РАСШИФРОВАН",
+                    "successText": (
+                        "Получено: 4 ROOT. Найден доступ к архивному узлу."
+                    ),
                 },
-                validation_config={},
+                validation_config={
+                    "validator": "normalized_text_match",
+                    "acceptedAnswers": ["архив"],
+                },
                 status="published",
                 sort_order=2,
             )
@@ -158,8 +178,31 @@ def seed_content() -> None:
                 content={
                     "segmentId": "segment-archive-017",
                     "puzzleId": "puzzle-code-repair-a17",
+                    "label": "МИНИ-ИГРА / CODE REPAIR",
+                    "instruction": (
+                        "Архивный пакет потерял порядок трёх блоков. "
+                        "Соберите корректную команду извлечения подписи."
+                    ),
+                    "blocks": ["packet.", "signature", "return "],
+                    "maxBlocks": 3,
+                    "lineNumber": "017",
+                    "placeholder": "// выберите блоки ниже",
+                    "wrongAnswerText": (
+                        "СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ "
+                        "И ВОССТАНОВИТЕ ЕЁ ЗАНОВО."
+                    ),
+                    "segment": {
+                        "code": "ARCHIVE_NODE_017",
+                        "type": "ARCHIVE_SEGMENT",
+                        "searchRadiusMeters": 250,
+                        "safeScanRadiusMeters": 15,
+                        "arScenePreset": "archive_cube_damaged_v1",
+                    },
                 },
-                validation_config={},
+                validation_config={
+                    "validator": "ordered_blocks_match",
+                    "correctSequence": ["return ", "packet.", "signature"],
+                },
                 status="published",
                 sort_order=3,
             )
