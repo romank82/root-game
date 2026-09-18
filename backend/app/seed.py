@@ -30,6 +30,9 @@ def seed_content() -> None:
             )
         )
 
+        # Season must exist before its child chapters (required by PostgreSQL FK).
+        session.flush()
+
         session.merge(
             Chapter(
                 id="chapter-archive-recovery",
@@ -44,6 +47,9 @@ def seed_content() -> None:
                 sort_order=1,
             )
         )
+
+        # Chapter must exist before content attached to it.
+        session.flush()
 
         session.merge(
             Item(
@@ -83,6 +89,9 @@ def seed_content() -> None:
             )
         )
 
+        # Items are referenced later by mission rewards.
+        session.flush()
+
         session.merge(
             StoryNode(
                 id="story-node-a17",
@@ -99,6 +108,9 @@ def seed_content() -> None:
                 sort_order=1,
             )
         )
+
+        # Story nodes reference chapters and may be referenced by missions/rewards.
+        session.flush()
 
         session.merge(
             Mission(
@@ -208,6 +220,9 @@ def seed_content() -> None:
             )
         )
 
+        # Missions must exist before requirements and rewards can reference them.
+        session.flush()
+
         session.merge(
             MissionRequirement(
                 id="requirement-a02-after-a01",
@@ -227,6 +242,9 @@ def seed_content() -> None:
                 sort_order=1,
             )
         )
+
+        # Requirements are now persisted; rewards reference missions/items/story nodes.
+        session.flush()
 
         session.merge(
             MissionReward(
@@ -306,26 +324,42 @@ def seed_content() -> None:
             )
         )
 
-        # Новый player-слой пока не связан с legacy-таблицей players.
-        session.merge(
-            GamePlayer(
+        # Persist all mission rewards before creating player-owned state.
+        session.flush()
+
+        # Development demo state is create-only. Never use merge() here:
+        # seed runs on every container start, and merge would overwrite real
+        # player fields or reset a wallet balance to zero.
+        demo_player = session.get(GamePlayer, "demo-player")
+        if demo_player is None:
+            demo_player = GamePlayer(
                 id="demo-player",
                 display_name="Demo Operator",
                 auth_provider="demo",
                 external_id="demo-player",
                 status="active",
             )
-        )
+            session.add(demo_player)
+            session.flush()
 
-        session.merge(
-            Wallet(
-                id="wallet-demo-player-root",
-                player_id="demo-player",
-                currency="ROOT",
-                available_balance=0,
-                locked_balance=0,
+        demo_wallet = (
+            session.query(Wallet)
+            .filter(
+                Wallet.player_id == "demo-player",
+                Wallet.currency == "ROOT",
             )
+            .first()
         )
+        if demo_wallet is None:
+            session.add(
+                Wallet(
+                    id="wallet-demo-player-root",
+                    player_id="demo-player",
+                    currency="ROOT",
+                    available_balance=0,
+                    locked_balance=0,
+                )
+            )
 
     print("✓ Seed completed successfully.")
     print("  Season: protocol-01")

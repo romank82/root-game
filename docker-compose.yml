@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-chimera}
+      POSTGRES_USER: ${POSTGRES_USER:-chimera}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chimera}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chimera}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-HimeraProtocolBot}
+      TELEGRAM_INITDATA_MAX_AGE_SECONDS: ${TELEGRAM_INITDATA_MAX_AGE_SECONDS:-3600}
+      GAME_SESSION_SECRET: ${GAME_SESSION_SECRET:?Set GAME_SESSION_SECRET in .env}
+      GAME_SESSION_LIFETIME_SECONDS: ${GAME_SESSION_LIFETIME_SECONDS:-86400}
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8001"
+
+  frontend:
+    build:
+      context: .
+      args:
+        VITE_API_BASE_URL: ""
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${APP_PORT:-8080}:80"
+
+volumes:
+  postgres_data:

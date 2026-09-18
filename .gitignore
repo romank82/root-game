@@ -39,3 +39,9 @@ backend/chimera.db
 
 # Manual SQLite backups created before migrations
 backend/chimera.pre-*.db
+
+# Local PostgreSQL migration backups
+backend/backups/
+
+# Local database backups
+backups/

@@ -1,30 +1,41 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from __future__ import annotations
 
+from uuid import uuid4
+
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+
+from app.config import settings
+from app.db import SessionLocal
 from app.mission_engine import (
     MissionEngineError,
     get_bootstrap as get_engine_bootstrap,
     reset_demo_engine_progress,
     submit_mission,
 )
+from app.models import GamePlayer
+from app.telegram_auth import (
+    TelegramAuthError,
+    create_session_token,
+    normalize_telegram_username,
+    verify_init_data,
+    verify_session_token,
+)
 
-DEMO_PLAYER_ID = "demo-player"
+SESSION_COOKIE_NAME = "chimera_session"
 
 app = FastAPI(
     title="CHIMERA Protocol API",
-    version="0.4.0",
+    version="0.6.0",
     description="Backend API for the CHIMERA game.",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,20 +47,213 @@ class MissionSubmitPayload(BaseModel):
     sequence: list[str] | None = None
 
 
+class TelegramAuthPayload(BaseModel):
+    init_data: str = Field(
+        min_length=1,
+        max_length=8192,
+        description="Original Telegram.WebApp.initData string.",
+    )
+
+
+def _new_player_id() -> str:
+    return f"player-{uuid4().hex}"
+
+
+def _upsert_telegram_player(
+    telegram_id: str,
+    first_name: str,
+    last_name: str | None,
+    username: str | None,
+    photo_url: str | None,
+) -> GamePlayer:
+    """Find or create a profile by immutable Telegram user.id."""
+    normalized_username = normalize_telegram_username(username)
+
+    with SessionLocal.begin() as session:
+        player = session.scalar(
+            select(GamePlayer).where(
+                GamePlayer.auth_provider == "telegram",
+                GamePlayer.external_id == telegram_id,
+            )
+        )
+
+        if player is None:
+            if normalized_username:
+                username_owner = session.scalar(
+                    select(GamePlayer).where(
+                        GamePlayer.telegram_username_normalized
+                        == normalized_username
+                    )
+                )
+                if username_owner is not None:
+                    username_owner.telegram_username = None
+                    username_owner.telegram_username_normalized = None
+
+            player = GamePlayer(
+                id=_new_player_id(),
+                display_name=first_name,
+                auth_provider="telegram",
+                external_id=telegram_id,
+                telegram_username=normalized_username,
+                telegram_username_normalized=normalized_username,
+                telegram_first_name=first_name,
+                telegram_last_name=last_name,
+                telegram_photo_url=photo_url,
+                status="active",
+            )
+            session.add(player)
+            session.flush()
+        else:
+            if (
+                normalized_username
+                and normalized_username != player.telegram_username_normalized
+            ):
+                username_owner = session.scalar(
+                    select(GamePlayer).where(
+                        GamePlayer.telegram_username_normalized
+                        == normalized_username,
+                        GamePlayer.id != player.id,
+                    )
+                )
+                if username_owner is not None:
+                    username_owner.telegram_username = None
+                    username_owner.telegram_username_normalized = None
+
+            player.display_name = first_name
+            player.telegram_username = normalized_username
+            player.telegram_username_normalized = normalized_username
+            player.telegram_first_name = first_name
+            player.telegram_last_name = last_name
+            player.telegram_photo_url = photo_url
+
+        if player.status != "active":
+            raise HTTPException(
+                status_code=403,
+                detail="Игровой профиль неактивен.",
+            )
+
+        return player
+
+
+def get_current_player_id(request: Request) -> str:
+    """FastAPI dependency: resolve player identity from signed HttpOnly cookie."""
+    try:
+        player_id = verify_session_token(
+            session_token=request.cookies.get(SESSION_COOKIE_NAME, ""),
+            session_secret=settings.game_session_secret,
+        )
+    except TelegramAuthError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+    with SessionLocal() as session:
+        player = session.get(GamePlayer, player_id)
+
+        if player is None:
+            raise HTTPException(status_code=401, detail="Игрок не найден.")
+
+        if player.status != "active":
+            raise HTTPException(
+                status_code=403,
+                detail="Игровой профиль неактивен.",
+            )
+
+    return player_id
+
+
 @app.get("/health")
 def health_check():
     return {
         "status": "ok",
         "service": "chimera-api",
-        "version": "0.4.0",
+        "version": "0.6.0",
         "storage": "sqlalchemy",
+        "environment": settings.app_env,
     }
 
 
-@app.get("/api/v1/engine/bootstrap")
-def get_engine_bootstrap_route():
+@app.post("/api/v1/auth/telegram")
+def authenticate_telegram(
+    payload: TelegramAuthPayload,
+    response: Response,
+):
+    """
+    Verify original Telegram.WebApp.initData and issue a signed HttpOnly cookie.
+    Never accept a standalone user ID or initDataUnsafe from the browser.
+    """
     try:
-        return get_engine_bootstrap(DEMO_PLAYER_ID)
+        telegram_user = verify_init_data(
+            init_data=payload.init_data,
+            bot_token=settings.telegram_bot_token,
+            max_age_seconds=settings.telegram_initdata_max_age_seconds,
+        )
+        player = _upsert_telegram_player(
+            telegram_id=telegram_user.telegram_id,
+            first_name=telegram_user.first_name,
+            last_name=telegram_user.last_name,
+            username=telegram_user.username,
+            photo_url=telegram_user.photo_url,
+        )
+    except TelegramAuthError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    except IntegrityError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Не удалось синхронизировать Telegram-профиль. "
+                "Повторите попытку."
+            ),
+        ) from error
+
+    session_token = create_session_token(
+        player_id=player.id,
+        session_secret=settings.game_session_secret,
+        lifetime_seconds=settings.game_session_lifetime_seconds,
+    )
+
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_token,
+        max_age=settings.game_session_lifetime_seconds,
+        httponly=True,
+        secure=settings.app_env == "production",
+        samesite="lax",
+        path="/",
+    )
+
+    return {
+        "authenticated": True,
+        "player": {
+            "id": player.id,
+            "displayName": player.display_name,
+            "telegramUsername": player.telegram_username,
+        },
+    }
+
+
+@app.post("/api/v1/auth/logout")
+def logout(response: Response):
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path="/",
+        secure=settings.app_env == "production",
+        httponly=True,
+        samesite="lax",
+    )
+    return {"authenticated": False}
+
+
+@app.get("/api/v1/engine/bootstrap")
+def get_engine_bootstrap_route(
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return get_engine_bootstrap(player_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,
@@ -61,10 +265,11 @@ def get_engine_bootstrap_route():
 def submit_engine_mission(
     mission_id: str,
     payload: MissionSubmitPayload,
+    player_id: str = Depends(get_current_player_id),
 ):
     try:
         return submit_mission(
-            player_id=DEMO_PLAYER_ID,
+            player_id=player_id,
             mission_id=mission_id,
             answer=payload.answer,
             sequence=payload.sequence,
@@ -77,9 +282,20 @@ def submit_engine_mission(
 
 
 @app.post("/api/v1/engine/reset-demo-progress")
-def reset_engine_demo_progress():
+def reset_engine_demo_progress_route(
+    player_id: str = Depends(get_current_player_id),
+):
+    """
+    Development-only test endpoint.
+
+    Production intentionally does not expose a route capable of wiping a
+    player's game state.
+    """
+    if settings.app_env == "production":
+        raise HTTPException(status_code=404, detail="Not found.")
+
     try:
-        return reset_demo_engine_progress(DEMO_PLAYER_ID)
+        return reset_demo_engine_progress(player_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

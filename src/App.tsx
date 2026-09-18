@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import './App.css'
 import { activeSegment } from './data/activeSegment'
 import {
+  authenticateTelegram,
   getEngineBootstrap,
   resetEngineDemoProgress,
   submitEngineMission,
@@ -60,6 +61,10 @@ function App() {
   const [apiStatus, setApiStatus] = useState<
     'checking' | 'online' | 'offline'
   >('checking')
+  const [authStatus, setAuthStatus] = useState<
+    'checking' | 'authenticated' | 'unavailable' | 'error'
+  >('checking')
+  const [authError, setAuthError] = useState('')
 
   const [answer, setAnswer] = useState('')
 
@@ -115,17 +120,44 @@ function App() {
 
   useEffect(() => {
     let isMounted = true
+    const webApp = window.Telegram?.WebApp
+    const initData = webApp?.initData?.trim()
 
-    getEngineBootstrap()
+    webApp?.ready()
+    webApp?.expand()
+
+    if (!initData) {
+      setAuthStatus('unavailable')
+      setAuthError(
+        'Откройте CHIMERA Protocol через Telegram-бота, чтобы начать игровую сессию.',
+      )
+      return () => {
+        isMounted = false
+      }
+    }
+
+    authenticateTelegram(initData)
+      .then(() => getEngineBootstrap())
       .then((bootstrap) => {
-        if (isMounted) {
-          applyEngineBootstrap(bootstrap)
+        if (!isMounted) {
+          return
         }
+
+        applyEngineBootstrap(bootstrap)
+        setAuthStatus('authenticated')
       })
-      .catch(() => {
-        if (isMounted) {
-          setApiStatus('offline')
+      .catch((error: unknown) => {
+        if (!isMounted) {
+          return
         }
+
+        setApiStatus('offline')
+        setAuthStatus('error')
+        setAuthError(
+          error instanceof Error
+            ? error.message
+            : 'Не удалось подтвердить Telegram-сессию.',
+        )
       })
 
     return () => {
@@ -420,6 +452,33 @@ function App() {
     'signature',
     'return ',
   ])
+
+  if (authStatus !== 'authenticated') {
+    return (
+      <main className="app-shell">
+        <div className="noise" />
+        <section className="briefing">
+          <div className="packet-icon">◈</div>
+          <p className="eyebrow">CHIMERA PROTOCOL / ACCESS GATE</p>
+          <h1>
+            {authStatus === 'checking'
+              ? 'Проверяем\nсессию'
+              : 'Требуется\nTelegram'}
+          </h1>
+          <p className="intro">
+            {authStatus === 'checking'
+              ? 'Проверяем подтверждённую игровую сессию…'
+              : authError}
+          </p>
+          {authStatus !== 'checking' && (
+            <p className="safe-note">
+              ОТКРОЙТЕ ИГРУ КНОПКОЙ В ЧАТЕ С @HIMERAPROTOCOLBOT
+            </p>
+          )}
+        </section>
+      </main>
+    )
+  }
 
   return (
     <main className="app-shell">

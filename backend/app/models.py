@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     JSON,
     String,
+    Index,
     Text,
     UniqueConstraint,
     func,
@@ -198,6 +199,30 @@ class GamePlayer(TimestampMixin, Base):
         default="demo",
     )
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Telegram user.id is stored in external_id for auth_provider="telegram".
+    # Username is a mutable convenience address for UI/search, never identity.
+    telegram_username: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+    telegram_username_normalized: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+    telegram_first_name: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    telegram_last_name: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    telegram_photo_url: Mapped[str | None] = mapped_column(
+        String(2048),
+        nullable=True,
+    )
+
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -319,10 +344,13 @@ class WalletTransaction(TimestampMixin, Base):
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
     __table_args__ = (
-        UniqueConstraint(
+        # Это именно unique index, чтобы соответствовать Alembic revision
+        # 68c404c6ace4 и одинаково работать в SQLite/PostgreSQL.
+        Index(
+            "uq_wallet_transactions_wallet_reference",
             "wallet_id",
             "reference_type",
             "reference_id",
-            name="uq_wallet_transactions_wallet_reference",
+            unique=True,
         ),
     )

@@ -196,16 +196,26 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
         .order_by(Item.code)
     ).all()
 
-    story_nodes = session.scalars(
-        select(StoryNode)
-        .join(MissionReward, MissionReward.story_node_id == StoryNode.id)
-        .join(PlayerMission, PlayerMission.mission_id == MissionReward.mission_id)
+    unlocked_story_node_exists = (
+        select(MissionReward.id)
+        .join(
+            PlayerMission,
+            PlayerMission.mission_id == MissionReward.mission_id,
+        )
         .where(
+            MissionReward.story_node_id == StoryNode.id,
+            MissionReward.reward_type == "story_node",
             PlayerMission.player_id == player_id,
             PlayerMission.status == "completed",
-            MissionReward.reward_type == "story_node",
         )
-        .distinct()
+        .exists()
+    )
+
+    # Avoid SELECT DISTINCT over StoryNode.content (JSON): PostgreSQL JSON
+    # has no equality operator. EXISTS also naturally prevents duplicates.
+    story_nodes = session.scalars(
+        select(StoryNode)
+        .where(unlocked_story_node_exists)
         .order_by(StoryNode.sort_order, StoryNode.id)
     ).all()
 
