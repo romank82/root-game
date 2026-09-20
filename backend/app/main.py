@@ -27,6 +27,12 @@ from app.telegram_auth import (
     verify_init_data,
     verify_session_token,
 )
+from app.admin_auth import (
+    ADMIN_SESSION_COOKIE_NAME,
+    authenticate_admin,
+    revoke_admin_session,
+)
+from app.admin_missions import router as admin_missions_router
 
 SESSION_COOKIE_NAME = "chimera_session"
 
@@ -49,11 +55,9 @@ app.add_middleware(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-
 class MissionSubmitPayload(BaseModel):
     answer: str | None = None
     sequence: list[str] | None = None
-
 
 class TelegramAuthPayload(BaseModel):
     init_data: str = Field(
@@ -62,10 +66,12 @@ class TelegramAuthPayload(BaseModel):
         description="Original Telegram.WebApp.initData string.",
     )
 
+class AdminAuthPayload(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=12)
 
 def _new_player_id() -> str:
     return f"player-{uuid4().hex}"
-
 
 def _upsert_telegram_player(
     telegram_id: str,
@@ -142,7 +148,6 @@ def _upsert_telegram_player(
 
         return player
 
-
 def get_current_player_id(request: Request) -> str:
     """FastAPI dependency: resolve player identity from signed HttpOnly cookie."""
     try:
@@ -170,8 +175,14 @@ def get_current_player_id(request: Request) -> str:
 
     return player_id
 
+@app.get("/")
+def root():
+    return {
+        "service": "chimera-api",
+        "version": "0.6.0",
+        "docs": "/docs",
+    }
 
-@limiter.limit("5/minute")
 @app.get("/health")
 def health_check(request: Request):
     return {
@@ -181,7 +192,6 @@ def health_check(request: Request):
         "storage": "sqlalchemy",
         "environment": settings.app_env,
     }
-
 
 @limiter.limit("5/minute")
 @app.post("/api/v1/auth/telegram")
@@ -246,7 +256,6 @@ def authenticate_telegram(
         },
     }
 
-
 @limiter.limit("10/minute")
 @app.post("/api/v1/auth/logout")
 def logout(request: Request, response: Response):
@@ -258,7 +267,6 @@ def logout(request: Request, response: Response):
         samesite="lax",
     )
     return {"authenticated": False}
-
 
 @limiter.limit("10/minute")
 @app.get("/api/v1/engine/bootstrap")
@@ -273,7 +281,6 @@ def get_engine_bootstrap_route(
             status_code=error.status_code,
             detail=error.detail,
         ) from error
-
 
 @limiter.limit("10/minute")
 @app.post("/api/v1/engine/missions/{mission_id}/submit")
@@ -295,7 +302,6 @@ def submit_engine_mission(
             status_code=error.status_code,
             detail=error.detail,
         ) from error
-
 
 @limiter.limit("5/minute")
 @app.post("/api/v1/engine/reset-demo-progress")
@@ -319,3 +325,61 @@ def reset_engine_demo_progress_route(
             status_code=error.status_code,
             detail=error.detail,
         ) from error
+
+
+# ============================================================================
+# Admin Panel Routes
+# ============================================================================
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/admin/auth/login")
+def admin_login(
+    request: Request,
+    response: Response,
+    payload: AdminAuthPayload,
+):
+    """Authenticate admin and issue HttpOnly session cookie."""
+    try:
+        raw_token = authenticate_admin(
+            username=payload.username,
+            password=payload.password,
+            ip_address=request.client.host if request.client else None,
+        )
+    except Exception as error:
+        raise HTTPException(
+            status_code=getattr(error, "status_code", 401),
+            detail=getattr(error, "detail", "Ошибка аутентификации."),
+        ) from error
+
+    response.set_cookie(
+        key=ADMIN_SESSION_COOKIE_NAME,
+        value=raw_token,
+        max_age=settings.admin_session_lifetime_seconds,
+        httponly=True,
+        secure=settings.app_env == "production",
+        samesite="lax",
+        path="/",
+    )
+
+    return {"authenticated": True}
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/admin/auth/logout")
+def admin_logout(request: Request, response: Response):
+    """Revoke admin session."""
+    raw_token = request.cookies.get(ADMIN_SESSION_COOKIE_NAME, "")
+    revoke_admin_session(
+        raw_token=raw_token,
+        ip_address=request.client.host if request.client else None,
+    )
+    response.delete_cookie(
+        key=ADMIN_SESSION_COOKIE_NAME,
+        path="/",
+        secure=settings.app_env == "production",
+        httponly=True,
+        samesite="lax",
+    )
+    return {"authenticated": False}
+
+# Include admin missions router
+app.include_router(admin_missions_router)

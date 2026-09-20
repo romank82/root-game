@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BACKEND_DIR / ".env")
 
-
 def _csv_env(name: str, default: str) -> list[str]:
     raw_value = os.getenv(name, default)
     return [
@@ -16,7 +15,6 @@ def _csv_env(name: str, default: str) -> list[str]:
         for value in raw_value.split(",")
         if value.strip()
     ]
-
 
 @dataclass(frozen=True)
 class Settings:
@@ -28,7 +26,7 @@ class Settings:
     telegram_initdata_max_age_seconds: int
     game_session_secret: str
     game_session_lifetime_seconds: int
-
+    admin_session_lifetime_seconds: int
 
 DEFAULT_SQLITE_PATH = BACKEND_DIR / "chimera.db"
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_SQLITE_PATH}"
@@ -53,5 +51,8 @@ settings = Settings(
     game_session_secret=os.getenv("GAME_SESSION_SECRET", ""),
     game_session_lifetime_seconds=int(
         os.getenv("GAME_SESSION_LIFETIME_SECONDS", "86400")
+    ),
+    admin_session_lifetime_seconds=int(
+        os.getenv("ADMIN_SESSION_LIFETIME_SECONDS", "86400")
     ),
 )
