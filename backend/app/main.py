@@ -17,6 +17,9 @@ from app.mission_engine import (
     submit_mission,
 )
 from app.models import GamePlayer
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from app.telegram_auth import (
     TelegramAuthError,
     create_session_token,
@@ -26,6 +29,9 @@ from app.telegram_auth import (
 )
 
 SESSION_COOKIE_NAME = "chimera_session"
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 app = FastAPI(
     title="CHIMERA Protocol API",
@@ -40,6 +46,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 class MissionSubmitPayload(BaseModel):
@@ -163,8 +171,9 @@ def get_current_player_id(request: Request) -> str:
     return player_id
 
 
+@limiter.limit("5/minute")
 @app.get("/health")
-def health_check():
+def health_check(request: Request):
     return {
         "status": "ok",
         "service": "chimera-api",
@@ -174,8 +183,10 @@ def health_check():
     }
 
 
+@limiter.limit("5/minute")
 @app.post("/api/v1/auth/telegram")
 def authenticate_telegram(
+    request: Request,
     payload: TelegramAuthPayload,
     response: Response,
 ):
@@ -236,8 +247,9 @@ def authenticate_telegram(
     }
 
 
+@limiter.limit("10/minute")
 @app.post("/api/v1/auth/logout")
-def logout(response: Response):
+def logout(request: Request, response: Response):
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         path="/",
@@ -248,8 +260,10 @@ def logout(response: Response):
     return {"authenticated": False}
 
 
+@limiter.limit("10/minute")
 @app.get("/api/v1/engine/bootstrap")
 def get_engine_bootstrap_route(
+    request: Request,
     player_id: str = Depends(get_current_player_id),
 ):
     try:
@@ -261,8 +275,10 @@ def get_engine_bootstrap_route(
         ) from error
 
 
+@limiter.limit("10/minute")
 @app.post("/api/v1/engine/missions/{mission_id}/submit")
 def submit_engine_mission(
+    request: Request,
     mission_id: str,
     payload: MissionSubmitPayload,
     player_id: str = Depends(get_current_player_id),
@@ -281,8 +297,10 @@ def submit_engine_mission(
         ) from error
 
 
+@limiter.limit("5/minute")
 @app.post("/api/v1/engine/reset-demo-progress")
 def reset_engine_demo_progress_route(
+    request: Request,
     player_id: str = Depends(get_current_player_id),
 ):
     """

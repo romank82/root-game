@@ -45,3 +45,4 @@ backend/backups/
 
 # Local database backups
 backups/
+*.bak
