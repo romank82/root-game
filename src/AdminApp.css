@@ -1,0 +1,412 @@
+.admin-shell {
+  min-height: 100vh;
+  padding: 32px;
+  color: #dff8eb;
+  background:
+    radial-gradient(circle at 85% 5%, rgba(65, 255, 169, 0.1), transparent 24rem),
+    #07100f;
+  font-family: "Manrope", sans-serif;
+  text-align: left;
+}
+
+.admin-shell * {
+  box-sizing: border-box;
+}
+
+.admin-shell button,
+.admin-shell input,
+.admin-shell textarea,
+.admin-shell select {
+  font: inherit;
+}
+
+.admin-header,
+.admin-layout,
+.admin-editor-title,
+.admin-section-heading,
+.admin-actions,
+.admin-user {
+  display: flex;
+}
+
+.admin-header {
+  max-width: 1440px;
+  margin: 0 auto 26px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid rgba(190, 255, 226, 0.16);
+  padding-bottom: 24px;
+}
+
+.admin-header h1,
+.admin-editor h2,
+.admin-editor h3 {
+  margin: 0;
+  color: #f2fff8;
+}
+
+.admin-header h1 {
+  font-size: clamp(34px, 5vw, 58px);
+  letter-spacing: -0.06em;
+}
+
+.admin-editor h2 {
+  font-size: 28px;
+}
+
+.admin-editor h3 {
+  font-size: 18px;
+}
+
+.admin-kicker {
+  margin: 0 0 7px;
+  color: #72b99a;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.13em;
+}
+
+.admin-user {
+  align-items: center;
+  gap: 14px;
+  color: #9fc7b3;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+}
+
+.admin-layout {
+  max-width: 1440px;
+  min-height: 720px;
+  margin: 0 auto;
+  align-items: stretch;
+  gap: 24px;
+}
+
+.admin-sidebar {
+  width: 310px;
+  flex: 0 0 310px;
+}
+
+.admin-editor {
+  min-width: 0;
+  flex: 1;
+  padding: 28px;
+  border: 1px solid rgba(190, 255, 226, 0.16);
+  background: rgba(9, 27, 21, 0.78);
+}
+
+.admin-editor-title,
+.admin-section-heading {
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 25px;
+}
+
+.admin-mission-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.admin-mission-row {
+  display: grid;
+  width: 100%;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid rgba(190, 255, 226, 0.12);
+  color: #dff8eb;
+  background: rgba(21, 65, 47, 0.16);
+  text-align: left;
+}
+
+.admin-mission-row:hover,
+.admin-mission-row.is-active {
+  border-color: rgba(89, 238, 173, 0.7);
+  background: rgba(48, 157, 107, 0.19);
+}
+
+.admin-mission-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.admin-mission-row small,
+.admin-muted,
+.admin-readonly {
+  color: #8aac9d;
+  font-size: 12px;
+}
+
+.admin-status {
+  width: fit-content;
+  padding: 3px 7px;
+  border: 1px solid;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.admin-status-draft {
+  border-color: #e9ba5c;
+  color: #ffd36b;
+}
+
+.admin-status-published {
+  border-color: #59eead;
+  color: #87fac0;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-span-2 {
+  grid-column: span 2;
+}
+
+.admin-editor label {
+  display: grid;
+  gap: 7px;
+  color: #afcebe;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+}
+
+.admin-editor input,
+.admin-editor textarea,
+.admin-editor select,
+.admin-login-form input {
+  width: 100%;
+  border: 1px solid rgba(190, 255, 226, 0.2);
+  border-radius: 0;
+  outline: none;
+  color: #eafff3;
+  background: #0b2019;
+  padding: 11px 12px;
+}
+
+.admin-editor textarea {
+  min-height: 100px;
+  resize: vertical;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-editor input:focus,
+.admin-editor textarea:focus,
+.admin-editor select:focus,
+.admin-login-form input:focus {
+  border-color: #59eead;
+  box-shadow: 0 0 0 3px rgba(89, 238, 173, 0.12);
+}
+
+.admin-editor :disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.admin-json-field {
+  margin-top: 18px;
+}
+
+.admin-rewards {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(190, 255, 226, 0.16);
+}
+
+.admin-reward-card {
+  display: grid;
+  grid-template-columns: 130px 90px minmax(140px, 1fr) minmax(140px, 1fr) 75px;
+  gap: 11px;
+  margin-bottom: 12px;
+  padding: 15px;
+  border: 1px solid rgba(190, 255, 226, 0.12);
+  background: rgba(20, 69, 49, 0.14);
+}
+
+.admin-reward-json {
+  grid-column: span 4;
+}
+
+.admin-danger {
+  align-self: end;
+  border: 1px solid #b96060;
+  color: #ffc1c1;
+  background: transparent;
+  padding: 10px;
+  font-size: 11px;
+}
+
+.admin-actions {
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.admin-primary,
+.admin-secondary,
+.admin-publish,
+.admin-refresh {
+  border: 1px solid;
+  padding: 11px 15px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.admin-primary,
+.admin-publish {
+  border-color: #59eead;
+  color: #03100a;
+  background: #59eead;
+}
+
+.admin-secondary,
+.admin-refresh {
+  border-color: rgba(190, 255, 226, 0.32);
+  color: #dff8eb;
+  background: transparent;
+}
+
+.admin-refresh {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.admin-primary:hover:not(:disabled),
+.admin-publish:hover:not(:disabled) {
+  background: #a4ffcf;
+}
+
+.admin-secondary:hover:not(:disabled),
+.admin-refresh:hover:not(:disabled) {
+  border-color: #59eead;
+}
+
+.admin-primary:disabled,
+.admin-secondary:disabled,
+.admin-publish:disabled,
+.admin-refresh:disabled,
+.admin-danger:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.admin-alert {
+  max-width: 1440px;
+  margin: 0 auto 18px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+.admin-error {
+  border: 1px solid rgba(255, 114, 114, 0.65);
+  color: #ffb8b8;
+  background: rgba(157, 37, 37, 0.18);
+}
+
+.admin-notice {
+  border: 1px solid rgba(89, 238, 173, 0.45);
+  color: #b7ffdb;
+  background: rgba(45, 146, 94, 0.16);
+}
+
+.admin-login-page {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.admin-login-card {
+  width: min(440px, 100%);
+  padding: 34px;
+  border: 1px solid rgba(190, 255, 226, 0.2);
+  background: rgba(9, 27, 21, 0.9);
+}
+
+.admin-login-card h1 {
+  margin: 0 0 10px;
+  color: #f2fff8;
+  font-size: 42px;
+}
+
+.admin-login-form {
+  display: grid;
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.admin-login-form label {
+  display: grid;
+  gap: 7px;
+  color: #afcebe;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+}
+
+.admin-back-link {
+  display: inline-block;
+  margin-top: 24px;
+  color: #86caaa;
+  font-size: 13px;
+}
+
+@media (max-width: 920px) {
+  .admin-shell {
+    padding: 20px;
+  }
+
+  .admin-header,
+  .admin-layout {
+    display: grid;
+  }
+
+  .admin-sidebar {
+    width: auto;
+  }
+
+  .admin-mission-list {
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  }
+
+  .admin-reward-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-reward-json {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 580px) {
+  .admin-shell {
+    padding: 14px;
+  }
+
+  .admin-editor {
+    padding: 18px;
+  }
+
+  .admin-grid,
+  .admin-reward-card {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-span-2,
+  .admin-reward-json {
+    grid-column: span 1;
+  }
+
+  .admin-user {
+    justify-content: space-between;
+  }
+}
