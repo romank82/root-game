@@ -47,3 +47,6 @@ backend/backups/
 backups/
 *.bak
 package-lock.json
+
+# Local assistant-created source backups
+.local-backups/
