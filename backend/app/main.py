@@ -32,6 +32,7 @@ from app.admin_auth import (
     authenticate_admin,
     revoke_admin_session,
 )
+from app.admin_management import router as admin_management_router
 from app.admin_missions import router as admin_missions_router
 
 SESSION_COOKIE_NAME = "chimera_session"
@@ -381,5 +382,6 @@ def admin_logout(request: Request, response: Response):
     )
     return {"authenticated": False}
 
-# Include admin missions router
+# Include administrative routers
+app.include_router(admin_management_router)
 app.include_router(admin_missions_router)
