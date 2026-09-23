@@ -9,11 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.admin_auth import (
-    ADMIN_SESSION_COOKIE_NAME,
-    AdminAuthError,
-    get_current_admin,
-)
+from app.admin_access import require_permission
 from app.db import SessionLocal
 from app.models import (
     AdminAuditLog,
@@ -28,8 +24,8 @@ from app.models import (
 
 router = APIRouter(prefix="/api/v1/admin/missions", tags=["admin-missions"])
 
-READ_ROLES = {"owner", "editor", "viewer"}
-WRITE_ROLES = {"owner", "editor"}
+MISSION_READ_PERMISSION = "missions.read"
+MISSION_MANAGE_PERMISSION = "missions.manage"
 VALID_MISSION_STATUSES = {"draft", "published"}
 VALID_REWARD_TYPES = {"currency", "item", "story_node"}
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[a-z0-9-]{0,126}[a-z0-9])?$")
@@ -77,32 +73,6 @@ def _new_id(prefix: str) -> str:
 def _client_ip_address(request: Request) -> str | None:
     """Use the direct peer address; do not trust arbitrary forwarded headers."""
     return request.client.host if request.client else None
-
-
-def get_admin_user(request: Request) -> AdminUser:
-    try:
-        return get_current_admin(
-            request.cookies.get(ADMIN_SESSION_COOKIE_NAME, "")
-        )
-    except AdminAuthError as error:
-        raise HTTPException(
-            status_code=error.status_code,
-            detail=error.detail,
-        ) from error
-
-
-def require_role(*allowed_roles: str):
-    def dependency(
-        admin: AdminUser = Depends(get_admin_user),
-    ) -> AdminUser:
-        if admin.role not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Недостаточно прав для выполнения этого действия.",
-            )
-        return admin
-
-    return dependency
 
 
 def _serialize_reward(reward: MissionReward) -> dict[str, Any]:
@@ -370,7 +340,7 @@ def _replace_rewards(
 
 @router.get("")
 def list_admin_missions(
-    _admin: AdminUser = Depends(require_role(*READ_ROLES)),
+    _admin: AdminUser = Depends(require_permission(MISSION_READ_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
         missions = session.scalars(
@@ -388,7 +358,7 @@ def list_admin_missions(
 @router.get("/{mission_id}")
 def get_admin_mission(
     mission_id: str,
-    _admin: AdminUser = Depends(require_role(*READ_ROLES)),
+    _admin: AdminUser = Depends(require_permission(MISSION_READ_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
         mission = session.get(Mission, mission_id)
@@ -403,7 +373,7 @@ def get_admin_mission(
 def create_admin_mission(
     payload: AdminMissionCreatePayload,
     request: Request,
-    admin: AdminUser = Depends(require_role(*WRITE_ROLES)),
+    admin: AdminUser = Depends(require_permission(MISSION_MANAGE_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
         slug = _normalize_slug(payload.slug)
@@ -465,7 +435,7 @@ def update_admin_mission(
     mission_id: str,
     payload: AdminMissionUpdatePayload,
     request: Request,
-    admin: AdminUser = Depends(require_role(*WRITE_ROLES)),
+    admin: AdminUser = Depends(require_permission(MISSION_MANAGE_PERMISSION)),
 ):
     updates = payload.model_dump(exclude_unset=True)
 
@@ -573,7 +543,7 @@ def update_admin_mission(
 def publish_admin_mission(
     mission_id: str,
     request: Request,
-    admin: AdminUser = Depends(require_role(*WRITE_ROLES)),
+    admin: AdminUser = Depends(require_permission(MISSION_MANAGE_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
         mission = session.get(Mission, mission_id)
@@ -604,7 +574,7 @@ def publish_admin_mission(
 def unpublish_admin_mission(
     mission_id: str,
     request: Request,
-    admin: AdminUser = Depends(require_role(*WRITE_ROLES)),
+    admin: AdminUser = Depends(require_permission(MISSION_MANAGE_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
         mission = session.get(Mission, mission_id)

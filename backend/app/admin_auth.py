@@ -210,6 +210,7 @@ def get_current_admin(raw_token: str) -> AdminUser:
                 AdminSession.token_hash == token_hash,
                 AdminSession.expires_at > now,
                 AdminUser.is_active.is_(True),
+                AdminUser.is_deleted.is_(False),
             )
         ).one_or_none()
 
