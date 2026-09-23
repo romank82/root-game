@@ -361,11 +361,142 @@ class AdminUser(TimestampMixin, Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
+
+    # role is retained temporarily for compatibility with existing endpoints.
+    # New administrative authorization uses is_super_admin + AdminUserPermission.
     role: Mapped[str] = mapped_column(String(32), nullable=False)
+    is_super_admin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, index=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, index=True
+    )
+    created_by_admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    deactivated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deactivation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class AdminPermission(TimestampMixin, Base):
+    __tablename__ = "admin_permissions"
+
+    code: Mapped[str] = mapped_column(String(128), primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(64), nullable=False, default="general")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class AdminUserPermission(TimestampMixin, Base):
+    __tablename__ = "admin_user_permissions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    admin_user_id: Mapped[str] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    permission_code: Mapped[str] = mapped_column(
+        ForeignKey("admin_permissions.code", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    execution_mode: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="direct"
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    granted_by_admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    revoked_by_admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "admin_user_id",
+            "permission_code",
+            name="uq_admin_user_permissions_user_permission",
+        ),
+    )
+
+
+class AdminApprovalRequest(TimestampMixin, Base):
+    __tablename__ = "admin_approval_requests"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", index=True
+    )
+    requested_by_admin_id: Mapped[str] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    required_permission_code: Mapped[str] = mapped_column(
+        ForeignKey("admin_permissions.code", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    action_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    target_entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payload_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    request_ip_address: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    approved_by_admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    approval_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rejected_by_admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rejection_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    execution_result: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    execution_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
 
 class AdminSession(Base):
     __tablename__ = "admin_sessions"
@@ -392,6 +523,7 @@ class AdminSession(Base):
         nullable=False,
     )
 
+
 class AdminAuditLog(Base):
     __tablename__ = "admin_audit_log"
 
@@ -404,6 +536,15 @@ class AdminAuditLog(Base):
     action: Mapped[str] = mapped_column(String(128), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
     entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    permission_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    approval_request_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    before_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    after_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False, default="success")
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
