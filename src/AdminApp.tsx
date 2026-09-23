@@ -147,7 +147,10 @@ function AdminApp() {
     [missions, selectedId],
   )
 
-  const canWrite = admin?.role === 'owner' || admin?.role === 'editor'
+  const canWrite =
+    admin?.isSuperAdmin === true ||
+    admin?.role === 'owner' ||
+    admin?.role === 'editor'
 
   async function refreshMissions() {
     setLoadingMissions(true)

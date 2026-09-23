@@ -1,10 +1,12 @@
-export type AdminRole = 'owner' | 'editor' | 'viewer'
+export type AdminRole = 'super_admin' | 'owner' | 'editor' | 'viewer' | 'admin'
 export type AdminMissionStatus = 'draft' | 'published'
 
 export type AdminUser = {
   id: string
   username: string
+  // Legacy display value. Do not use it as the source of authorization.
   role: AdminRole
+  isSuperAdmin: boolean
 }
 
 export type AdminReward = {

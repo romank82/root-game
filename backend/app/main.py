@@ -30,6 +30,7 @@ from app.telegram_auth import (
 from app.admin_auth import (
     ADMIN_SESSION_COOKIE_NAME,
     authenticate_admin,
+    get_current_admin,
     revoke_admin_session,
 )
 from app.admin_management import router as admin_management_router
@@ -363,6 +364,32 @@ def admin_login(
     )
 
     return {"authenticated": True}
+
+@limiter.limit("30/minute")
+@app.get("/api/v1/admin/auth/me")
+def admin_me(request: Request):
+    """Return the authenticated admin without exposing credentials or sessions."""
+    try:
+        admin = get_current_admin(
+            request.cookies.get(ADMIN_SESSION_COOKIE_NAME, "")
+        )
+    except Exception as error:
+        raise HTTPException(
+            status_code=getattr(error, "status_code", 401),
+            detail=getattr(error, "detail", "Требуется вход в админ-панель."),
+        ) from error
+
+    return {
+        "authenticated": True,
+        "admin": {
+            "id": admin.id,
+            "username": admin.username,
+            # Legacy display field; authorization must use isSuperAdmin/permissions.
+            "role": admin.role,
+            "isSuperAdmin": admin.is_super_admin,
+        },
+    }
+
 
 @limiter.limit("10/minute")
 @app.post("/api/v1/admin/auth/logout")
