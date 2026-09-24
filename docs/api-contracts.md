@@ -17,6 +17,11 @@
   super-admin видит все заявки.
 - `POST /api/v1/admin/approvals/{id}/approve` — только другой super-admin.
 - `POST /api/v1/admin/approvals/{id}/reject` — только другой super-admin.
+- `POST /api/v1/admin/approvals/{id}/cancel` — только инициатор и только для
+  заявки в состоянии `pending`.
+
+Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
+`executed`, `execution_failed`. Final states cannot be reused for execution.
 - `/api/v1/admin/system-settings` — catalog/list/get/update non-sensitive
   settings; sensitive changes use a dedicated approval workflow.
 

@@ -25,6 +25,11 @@ PENDING = "pending"
 APPROVED = "approved"
 REJECTED = "rejected"
 EXPIRED = "expired"
+CANCELLED = "cancelled"
+EXECUTED = "executed"
+EXECUTION_FAILED = "execution_failed"
+
+SYSTEM_SETTING_CHANGE_ACTION = "system_setting.change"
 
 class CreateApprovalPayload(BaseModel):
     required_permission_code: str = Field(min_length=3, max_length=128)
@@ -38,6 +43,10 @@ class CreateApprovalPayload(BaseModel):
 
 class ReviewApprovalPayload(BaseModel):
     comment: str | None = Field(default=None, max_length=4_000)
+
+
+class CancelApprovalPayload(BaseModel):
+    reason: str = Field(min_length=3, max_length=4_000)
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex}"
@@ -98,6 +107,14 @@ def _serialize(approval: AdminApprovalRequest) -> dict[str, Any]:
             else None
         ),
         "rejectionComment": approval.rejection_comment,
+        "cancelledByAdminId": approval.cancelled_by_admin_id,
+        "cancelledAt": (
+            approval.cancelled_at.isoformat()
+            if approval.cancelled_at is not None
+            else None
+        ),
+        "cancellationReason": approval.cancellation_reason,
+        "executedByAdminId": approval.executed_by_admin_id,
         "executedAt": (
             approval.executed_at.isoformat()
             if approval.executed_at is not None
@@ -147,7 +164,7 @@ def _expire_if_needed(
     approval: AdminApprovalRequest,
     now: datetime,
 ) -> bool:
-    if approval.status == PENDING and _is_expired(approval, now):
+    if approval.status in {PENDING, APPROVED} and _is_expired(approval, now):
         approval.status = EXPIRED
         session.flush()
         return True
@@ -177,6 +194,17 @@ def create_approval(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Супер-администратор выполняет действия напрямую и не создаёт заявку.",
+        )
+
+    # System settings requests must use their dedicated endpoint. This prevents
+    # arbitrary payload snapshots from bypassing catalog/schema validation.
+    if action_type == SYSTEM_SETTING_CHANGE_ACTION:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Для изменения системной настройки используйте "
+                "специализированный endpoint system-settings."
+            ),
         )
 
     execution_mode = get_permission_execution_mode(actor, permission_code)
@@ -438,6 +466,71 @@ def reject_approval(
             session,
             actor=actor,
             action="admin_approval_request.rejected",
+            approval=approval,
+            before=before,
+            after=after,
+            request=request,
+        )
+        return {"approval": after}
+
+@router.post("/{approval_id}/cancel")
+def cancel_approval(
+    approval_id: str,
+    payload: CancelApprovalPayload,
+    request: Request,
+    actor: AdminUser = Depends(get_admin_user),
+):
+    """
+    Cancel only the caller's own pending request.
+
+    An approved request cannot be cancelled: it must either be executed by its
+    dedicated domain executor or become expired. A new desired change requires
+    a new immutable request snapshot.
+    """
+    reason = _normalize_required(payload.reason)
+
+    with SessionLocal.begin() as session:
+        approval = session.scalar(
+            select(AdminApprovalRequest)
+            .where(AdminApprovalRequest.id == approval_id)
+            .with_for_update()
+        )
+        if approval is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Заявка не найдена.",
+            )
+
+        if approval.requested_by_admin_id != actor.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Отменить можно только собственную заявку.",
+            )
+
+        if _expire_if_needed(session, approval, _now()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Срок действия заявки истёк.",
+            )
+
+        if approval.status != PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Отменить можно только заявку в статусе pending.",
+            )
+
+        before = _serialize(approval)
+        approval.status = CANCELLED
+        approval.cancelled_by_admin_id = actor.id
+        approval.cancelled_at = _now()
+        approval.cancellation_reason = reason
+        session.flush()
+
+        after = _serialize(approval)
+        _audit(
+            session,
+            actor=actor,
+            action="admin_approval_request.cancelled",
             approval=approval,
             before=before,
             after=after,
