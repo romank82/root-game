@@ -34,8 +34,17 @@ Settings API never returns or stores secrets.
 - `PUT /api/v1/admin/system-settings/{key}` requires direct
   `system_settings.manage`, validates the full effective catalog and rejects
   archived or sensitive keys;
-- sensitive settings use a dedicated `system_setting.change` approval request
-  and a dedicated executor; there is no generic approval execute endpoint.
+- `POST /api/v1/admin/system-settings/{key}/approval-requests` requires an
+  ordinary admin with `system_settings.manage` in
+  `requires_super_admin_approval` mode. It accepts only active sensitive keys,
+  a catalog-validated value, immutable `requestId`, reason and timezone-aware
+  future `expiresAt`;
+- `POST /api/v1/admin/system-settings/approval-requests/{id}/execute` requires
+  super-admin and accepts only an approved `system_setting.change` request.
+  The executor revalidates and locks the full active catalog atomically;
+- there is no generic approval execute endpoint. A domain validation or catalog
+  conflict transitions the request to final `execution_failed`; retry requires
+  a new immutable request and approval.
 
 ## Approval workflow
 `POST /api/v1/admin/approvals` доступен только обычному admin с активным
