@@ -33,6 +33,7 @@ from app.admin_auth import (
     get_current_admin,
     revoke_admin_session,
 )
+from app.admin_approvals import router as admin_approvals_router
 from app.admin_management import router as admin_management_router
 from app.admin_missions import router as admin_missions_router
 
@@ -411,4 +412,5 @@ def admin_logout(request: Request, response: Response):
 
 # Include administrative routers
 app.include_router(admin_management_router)
+app.include_router(admin_approvals_router)
 app.include_router(admin_missions_router)

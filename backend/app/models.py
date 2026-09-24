@@ -497,6 +497,14 @@ class AdminApprovalRequest(TimestampMixin, Base):
     execution_result: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     execution_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    __table_args__ = (
+        UniqueConstraint(
+            "requested_by_admin_id",
+            "request_id",
+            name="uq_admin_approval_requests_requester_request_id",
+        ),
+    )
+
 
 class AdminSession(Base):
     __tablename__ = "admin_sessions"
