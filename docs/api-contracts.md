@@ -17,6 +17,15 @@
   super-admin видит все заявки.
 - `POST /api/v1/admin/approvals/{id}/approve` — только другой super-admin.
 - `POST /api/v1/admin/approvals/{id}/reject` — только другой super-admin.
+- `/api/v1/admin/system-settings` — catalog/list/get/update non-sensitive
+  settings; sensitive changes use a dedicated approval workflow.
+
+
+## System settings
+Settings API never returns or stores secrets. `PUT /api/v1/admin/system-settings/{key}`
+requires direct `system_settings.manage` and rejects sensitive keys. Sensitive
+settings use a dedicated `system_setting.change` approval request and a dedicated
+executor; there is no generic approval execute endpoint.
 
 ## Approval workflow
 `POST /api/v1/admin/approvals` доступен только обычному admin с активным

@@ -5,7 +5,7 @@
 - Backend: FastAPI 0.116.1, Python 3.13, SQLAlchemy 2.
 - БД: PostgreSQL 17; миграции Alembic.
 - Docker Compose: `frontend`, `backend`, `db`.
-- Текущий Alembic head: `c82e1d5f9a42`.
+- Текущий Alembic head: `d19f7a3e8b62`.
 
 ## Реализовано
 Telegram WebApp auth, игровой content engine, player progress, inventory,
@@ -16,3 +16,4 @@ admin mission API и admin management API.
 PostgreSQL — источник истины. Схема меняется только Alembic-миграциями.
 Секреты не попадают в git, документацию, БД или frontend bundle.
 Связанный с историей контент в целевой модели архивируется, а не удаляется.
+System settings contract: `docs/system-settings.md`.
