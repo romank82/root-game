@@ -399,6 +399,27 @@ class AdminPermission(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
+class SystemSetting(TimestampMixin, Base):
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value_json: Mapped[object] = mapped_column(JSON, nullable=False)
+    value_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_sensitive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="active", index=True
+    )
+    created_by_admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    updated_by_admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+
 class AdminUserPermission(TimestampMixin, Base):
     __tablename__ = "admin_user_permissions"
 
