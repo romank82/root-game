@@ -1,0 +1,408 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+
+
+class RuntimeTimestampMixin:
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class LocationProof(RuntimeTimestampMixin, Base):
+    """
+    Server-side projection of a trusted verifier result.
+
+    Never store raw coordinates, raw location evidence, device identifiers,
+    anti-abuse payloads, or QR material in this table.
+    """
+
+    __tablename__ = "location_proofs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    zone_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    verifier_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('verified', 'rejected', 'expired')",
+            name="ck_location_proofs_status",
+        ),
+    )
+
+
+class TeamSession(RuntimeTimestampMixin, Base):
+    __tablename__ = "team_sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    effective_config_snapshot: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ("
+            "'collecting', 'ready_to_start', 'active', 'succeeded', 'failed', "
+            "'expired', 'cancelled_before_start'"
+            ")",
+            name="ck_team_sessions_status",
+        ),
+    )
+
+
+class MissionRun(RuntimeTimestampMixin, Base):
+    __tablename__ = "mission_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    team_session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("team_sessions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    effective_config_snapshot: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ("
+            "'reserved', 'accepted', 'active', 'succeeded', 'failed', "
+            "'timeout', 'abandoned', 'cancelled_before_start'"
+            ")",
+            name="ck_mission_runs_status",
+        ),
+    )
+
+
+class TeamSessionMember(RuntimeTimestampMixin, Base):
+    __tablename__ = "team_session_members"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    team_session_id: Mapped[str] = mapped_column(
+        ForeignKey("team_sessions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    mission_run_id: Mapped[str] = mapped_column(
+        ForeignKey("mission_runs.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "team_session_id",
+            "player_id",
+            name="uq_team_session_members_session_player",
+        ),
+        UniqueConstraint(
+            "mission_run_id",
+            name="uq_team_session_members_mission_run",
+        ),
+        CheckConstraint(
+            "status IN ('joined', 'ready', 'left', 'removed', 'settled')",
+            name="ck_team_session_members_status",
+        ),
+    )
+
+
+class MissionAttempt(RuntimeTimestampMixin, Base):
+    __tablename__ = "mission_attempts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    mission_run_id: Mapped[str] = mapped_column(
+        ForeignKey("mission_runs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    challenge_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    protected_challenge_snapshot: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deadline_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "mission_run_id",
+            "sequence_number",
+            name="uq_mission_attempts_run_sequence",
+        ),
+        CheckConstraint(
+            "sequence_number >= 1",
+            name="ck_mission_attempts_sequence_positive",
+        ),
+        CheckConstraint(
+            "status IN ('issued', 'submitted', 'succeeded', 'failed', 'timed_out')",
+            name="ck_mission_attempts_status",
+        ),
+    )
+
+
+class WalletReservation(RuntimeTimestampMixin, Base):
+    __tablename__ = "wallet_reservations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    wallet_id: Mapped[str] = mapped_column(
+        ForeignKey("wallets.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    mission_run_id: Mapped[str] = mapped_column(
+        ForeignKey("mission_runs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    reserved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "wallet_id",
+            "mission_run_id",
+            name="uq_wallet_reservations_wallet_run",
+        ),
+        CheckConstraint(
+            "amount >= 0",
+            name="ck_wallet_reservations_amount_nonnegative",
+        ),
+        CheckConstraint(
+            "status IN ('reserved', 'charged', 'released')",
+            name="ck_wallet_reservations_status",
+        ),
+    )
+
+
+class InventoryReservation(RuntimeTimestampMixin, Base):
+    __tablename__ = "inventory_reservations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_item_id: Mapped[str] = mapped_column(
+        ForeignKey("player_items.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    mission_run_id: Mapped[str] = mapped_column(
+        ForeignKey("mission_runs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    reserved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_item_id",
+            "mission_run_id",
+            name="uq_inventory_reservations_item_run",
+        ),
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_inventory_reservations_quantity_positive",
+        ),
+        CheckConstraint(
+            "status IN ('reserved', 'consumed', 'released')",
+            name="ck_inventory_reservations_status",
+        ),
+    )
+
+
+class InventoryEvent(Base):
+    """Immutable inventory ledger event; guarded by DB triggers in its migration."""
+
+    __tablename__ = "inventory_events"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_item_id: Mapped[str] = mapped_column(
+        ForeignKey("player_items.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    mission_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mission_runs.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    quantity_delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    reference_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    reference_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_item_id",
+            "event_type",
+            "reference_type",
+            "reference_id",
+            name="uq_inventory_events_item_event_reference",
+        ),
+        CheckConstraint(
+            "quantity_delta <> 0",
+            name="ck_inventory_events_quantity_delta_nonzero",
+        ),
+        CheckConstraint(
+            "event_type IN ('reserved', 'released', 'consumed', 'credited')",
+            name="ck_inventory_events_type",
+        ),
+    )
+
+
+class MissionSettlement(RuntimeTimestampMixin, Base):
+    __tablename__ = "mission_settlements"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    mission_run_id: Mapped[str] = mapped_column(
+        ForeignKey("mission_runs.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    team_session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("team_sessions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    settlement_snapshot: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "mission_run_id",
+            name="uq_mission_settlements_mission_run",
+        ),
+        CheckConstraint(
+            "outcome IN ('succeeded', 'failed', 'timeout', 'abandoned')",
+            name="ck_mission_settlements_outcome",
+        ),
+    )
+
+
+class PlayerFallbackEntitlement(RuntimeTimestampMixin, Base):
+    __tablename__ = "player_fallback_entitlements"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    offer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    quota_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    consumed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_id",
+            "mission_id",
+            name="uq_player_fallback_entitlements_player_mission",
+        ),
+        CheckConstraint(
+            "quota_limit >= 0",
+            name="ck_player_fallback_entitlements_quota_nonnegative",
+        ),
+        CheckConstraint(
+            "consumed_count >= 0 AND consumed_count <= quota_limit",
+            name="ck_player_fallback_entitlements_consumed_bounds",
+        ),
+        CheckConstraint(
+            "status IN ('available', 'exhausted', 'disabled')",
+            name="ck_player_fallback_entitlements_status",
+        ),
+    )
