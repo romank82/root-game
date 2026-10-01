@@ -7,17 +7,17 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from app.admin_access import (
-    APPROVAL_EXECUTION_MODE,
-    DIRECT_EXECUTION_MODE,
     get_admin_user,
-    get_permission_execution_mode,
     require_super_admin,
 )
+from app.admin_audit import (
+    build_admin_approval_audit_snapshot,
+    write_admin_audit,
+)
 from app.db import SessionLocal
-from app.models import AdminApprovalRequest, AdminAuditLog, AdminUser
+from app.models import AdminApprovalRequest, AdminUser
 
 router = APIRouter(prefix="/api/v1/admin/approvals", tags=["admin-approvals"])
 
@@ -28,18 +28,6 @@ EXPIRED = "expired"
 CANCELLED = "cancelled"
 EXECUTED = "executed"
 EXECUTION_FAILED = "execution_failed"
-
-SYSTEM_SETTING_CHANGE_ACTION = "system_setting.change"
-
-class CreateApprovalPayload(BaseModel):
-    required_permission_code: str = Field(min_length=3, max_length=128)
-    action_type: str = Field(min_length=3, max_length=128)
-    target_entity_type: str = Field(min_length=3, max_length=64)
-    target_entity_id: str | None = Field(default=None, max_length=64)
-    payload_snapshot: dict[str, Any] = Field(default_factory=dict)
-    reason: str = Field(min_length=3, max_length=4_000)
-    request_id: str = Field(min_length=8, max_length=128)
-    expires_at: datetime | None = None
 
 class ReviewApprovalPayload(BaseModel):
     comment: str | None = Field(default=None, max_length=4_000)
@@ -136,27 +124,23 @@ def _audit(
     after: dict[str, Any],
     request: Request,
 ) -> None:
-    session.add(
-        AdminAuditLog(
-            id=_new_id("admin-audit"),
-            admin_user_id=actor.id,
-            action=action,
-            entity_type="admin_approval_request",
-            entity_id=approval.id,
-            permission_code=approval.required_permission_code,
-            approval_request_id=approval.id,
-            request_id=approval.request_id,
-            reason=approval.reason,
-            before_json=before,
-            after_json=after,
-            outcome="success",
-            metadata_json={
-                "actionType": approval.action_type,
-                "targetEntityType": approval.target_entity_type,
-                "targetEntityId": approval.target_entity_id,
-            },
-            ip_address=_client_ip_address(request),
-        )
+    write_admin_audit(
+        session,
+        actor=actor,
+        action=action,
+        entity_type="admin_approval_request",
+        entity_id=approval.id,
+        request=request,
+        permission_code=approval.required_permission_code,
+        approval_request_id=approval.id,
+        request_id=approval.request_id,
+        before=build_admin_approval_audit_snapshot(before),
+        after=build_admin_approval_audit_snapshot(after),
+        metadata={
+            "actionType": approval.action_type,
+            "targetEntityType": approval.target_entity_type,
+            "targetEntityId": approval.target_entity_id,
+        },
     )
 
 def _expire_if_needed(
@@ -170,147 +154,13 @@ def _expire_if_needed(
         return True
     return False
 
-@router.post("", status_code=status.HTTP_201_CREATED)
-def create_approval(
-    payload: CreateApprovalPayload,
-    request: Request,
-    actor: AdminUser = Depends(get_admin_user),
-):
-    """
-    Create an immutable approval request.
+@router.post("", status_code=status.HTTP_410_GONE)
+def create_approval_unavailable() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Generic approval creation is unavailable. Use a domain-specific endpoint.",
+    )
 
-    This route never executes an action. Dedicated future executors must
-    validate action_type, revalidate target state and atomically consume an
-    approved request.
-    """
-    permission_code = _normalize_required(payload.required_permission_code)
-    action_type = _normalize_required(payload.action_type)
-    target_entity_type = _normalize_required(payload.target_entity_type)
-    reason = _normalize_required(payload.reason)
-    request_id = _normalize_required(payload.request_id)
-    target_entity_id = _normalize_optional(payload.target_entity_id)
-
-    if actor.is_super_admin:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Супер-администратор выполняет действия напрямую и не создаёт заявку.",
-        )
-
-    # System settings requests must use their dedicated endpoint. This prevents
-    # arbitrary payload snapshots from bypassing catalog/schema validation.
-    if action_type == SYSTEM_SETTING_CHANGE_ACTION:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Для изменения системной настройки используйте "
-                "специализированный endpoint system-settings."
-            ),
-        )
-
-    execution_mode = get_permission_execution_mode(actor, permission_code)
-    if execution_mode != APPROVAL_EXECUTION_MODE:
-        detail = (
-            "Для создания заявки требуется активный permission "
-            "с режимом requires_super_admin_approval."
-        )
-        if execution_mode == DIRECT_EXECUTION_MODE:
-            detail = "Этот permission имеет прямой режим и не требует заявки."
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail,
-        )
-
-    now = _now()
-    if payload.expires_at is not None:
-        expires_at = payload.expires_at
-        if expires_at.tzinfo is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="expiresAt должен содержать timezone.",
-            )
-        if expires_at <= now:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="expiresAt должен быть в будущем.",
-            )
-    else:
-        expires_at = None
-
-    expected = {
-        "required_permission_code": permission_code,
-        "action_type": action_type,
-        "target_entity_type": target_entity_type,
-        "target_entity_id": target_entity_id,
-        "payload_snapshot": payload.payload_snapshot,
-        "reason": reason,
-        "expires_at": expires_at.isoformat() if expires_at else None,
-    }
-
-    try:
-        with SessionLocal.begin() as session:
-            existing = session.scalar(
-                select(AdminApprovalRequest)
-                .where(
-                    AdminApprovalRequest.requested_by_admin_id == actor.id,
-                    AdminApprovalRequest.request_id == request_id,
-                )
-                .with_for_update()
-            )
-            if existing is not None:
-                current = {
-                    "required_permission_code": existing.required_permission_code,
-                    "action_type": existing.action_type,
-                    "target_entity_type": existing.target_entity_type,
-                    "target_entity_id": existing.target_entity_id,
-                    "payload_snapshot": existing.payload_snapshot,
-                    "reason": existing.reason,
-                    "expires_at": (
-                        existing.expires_at.isoformat()
-                        if existing.expires_at is not None
-                        else None
-                    ),
-                }
-                if current != expected:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="requestId уже использован с другим содержимым заявки.",
-                    )
-                return {"approval": _serialize(existing), "idempotent": True}
-
-            approval = AdminApprovalRequest(
-                id=_new_id("admin-approval"),
-                status=PENDING,
-                requested_by_admin_id=actor.id,
-                required_permission_code=permission_code,
-                action_type=action_type,
-                target_entity_type=target_entity_type,
-                target_entity_id=target_entity_id,
-                payload_snapshot=payload.payload_snapshot,
-                reason=reason,
-                request_ip_address=_client_ip_address(request),
-                request_id=request_id,
-                expires_at=expires_at,
-                execution_result={},
-            )
-            session.add(approval)
-            session.flush()
-
-            serialized = _serialize(approval)
-            _audit(
-                session,
-                actor=actor,
-                action="admin_approval_request.created",
-                approval=approval,
-                before={},
-                after=serialized,
-                request=request,
-            )
-            return {"approval": serialized, "idempotent": False}
-    except IntegrityError as error:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Конфликт идемпотентности заявки. Повторите запрос с новым requestId.",
-        ) from error
 
 @router.get("")
 def list_approvals(

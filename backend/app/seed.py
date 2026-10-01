@@ -7,6 +7,8 @@ from app.models import (
     MissionRequirement,
     MissionReward,
     Season,
+    Segment,
+    SegmentMission,
     StoryNode,
     Wallet,
 )
@@ -125,15 +127,19 @@ def seed_content() -> None:
                     "ключ доступа."
                 ),
                 content={
-                    "segmentId": "puzzle-a-01",
-                    "puzzleId": "puzzle-a-01",
-                    "label": "ПЕРВАЯ ПРОВЕРКА",
-                    "question": "Что остаётся, когда исчезает шум?",
-                    "inputPlaceholder": "Введите ответ...",
-                    "successTitle": "✓ ФРАГМЕНТ РАСШИФРОВАН",
-                    "successText": (
-                        "Получено: 3 ROOT. Найден сюжетный предмет: КЛЮЧ A-01."
-                    ),
+                    "schemaVersion": 1,
+                    "ui": {
+                        "label": "ПЕРВАЯ ПРОВЕРКА",
+                        "question": "Что остаётся, когда исчезает шум?",
+                        "inputPlaceholder": "Введите ответ...",
+                        "successTitle": "✓ ФРАГМЕНТ РАСШИФРОВАН",
+                        "successText": (
+                            "Получено: 3 ROOT. Найден сюжетный предмет: КЛЮЧ A-01."
+                        ),
+                        "rewardPreview": {
+                            "text": "3 ROOT и сюжетный предмет: КЛЮЧ A-01.",
+                        },
+                    },
                 },
                 validation_config={
                     "validator": "normalized_text_match",
@@ -156,15 +162,19 @@ def seed_content() -> None:
                     "Обработайте второй повреждённый пакет архивного контура."
                 ),
                 content={
-                    "segmentId": "puzzle-a-02",
-                    "puzzleId": "puzzle-a-02",
-                    "label": "ВТОРАЯ ПРОВЕРКА",
-                    "question": "Где сохраняются следы исчезнувших записей?",
-                    "inputPlaceholder": "Введите ответ...",
-                    "successTitle": "✓ ФРАГМЕНТ A-02 РАСШИФРОВАН",
-                    "successText": (
-                        "Получено: 4 ROOT. Найден доступ к архивному узлу."
-                    ),
+                    "schemaVersion": 1,
+                    "ui": {
+                        "label": "ВТОРАЯ ПРОВЕРКА",
+                        "question": "Где сохраняются следы исчезнувших записей?",
+                        "inputPlaceholder": "Введите ответ...",
+                        "successTitle": "✓ ФРАГМЕНТ A-02 РАСШИФРОВАН",
+                        "successText": (
+                            "Получено: 4 ROOT. Найден доступ к архивному узлу."
+                        ),
+                        "rewardPreview": {
+                            "text": "4 ROOT и доступ к архивному узлу.",
+                        },
+                    },
                 },
                 validation_config={
                     "validator": "normalized_text_match",
@@ -188,27 +198,24 @@ def seed_content() -> None:
                     "и восстановите повреждённый пакет."
                 ),
                 content={
-                    "segmentId": "segment-archive-017",
-                    "puzzleId": "puzzle-code-repair-a17",
-                    "label": "МИНИ-ИГРА / CODE REPAIR",
-                    "instruction": (
-                        "Архивный пакет потерял порядок трёх блоков. "
-                        "Соберите корректную команду извлечения подписи."
-                    ),
-                    "blocks": ["packet.", "signature", "return "],
-                    "maxBlocks": 3,
-                    "lineNumber": "017",
-                    "placeholder": "// выберите блоки ниже",
-                    "wrongAnswerText": (
-                        "СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ "
-                        "И ВОССТАНОВИТЕ ЕЁ ЗАНОВО."
-                    ),
-                    "segment": {
-                        "code": "ARCHIVE_NODE_017",
-                        "type": "ARCHIVE_SEGMENT",
-                        "searchRadiusMeters": 250,
-                        "safeScanRadiusMeters": 15,
-                        "arScenePreset": "archive_cube_damaged_v1",
+                    "schemaVersion": 1,
+                    "ui": {
+                        "label": "МИНИ-ИГРА / CODE REPAIR",
+                        "instruction": (
+                            "Архивный пакет потерял порядок трёх блоков. "
+                            "Соберите корректную команду извлечения подписи."
+                        ),
+                        "blocks": ["packet.", "signature", "return "],
+                        "maxBlocks": 3,
+                        "lineNumber": "017",
+                        "placeholder": "// выберите блоки ниже",
+                        "wrongAnswerText": (
+                            "СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ "
+                            "И ВОССТАНОВИТЕ ЕЁ ЗАНОВО."
+                        ),
+                        "rewardPreview": {
+                            "text": "10 ROOT и предмет: АРХИВНЫЙ СЕГМЕНТ A-17.",
+                        },
                     },
                 },
                 validation_config={
@@ -222,6 +229,65 @@ def seed_content() -> None:
 
         # Missions must exist before requirements and rewards can reference them.
         session.flush()
+
+        # CMS seed additions are create-only. Existing Segment and SegmentMission
+        # records, including archived link history, are never overwritten or revived.
+        segment = session.get(Segment, "segment-archive-017")
+        if segment is None:
+            segment = Segment(
+                id="segment-archive-017",
+                chapter_id="chapter-archive-recovery",
+                slug="archive-node-017",
+                title="ARCHIVE_NODE_017",
+                description=(
+                    "Повреждённый AR-сегмент архивного контура. "
+                    "Найдите безопасную точку и восстановите пакет."
+                ),
+                content={
+                    "schemaVersion": 1,
+                    "presentation": {
+                        "code": "ARCHIVE_NODE_017",
+                        "type": "ARCHIVE_SEGMENT",
+                    },
+                    "location": {
+                        "searchRadiusMeters": 250,
+                        "safeScanRadiusMeters": 15,
+                        # Illustrative contract coordinates only; not a real game point.
+                        "safeScanPoint": {
+                            "latitude": 54.0,
+                            "longitude": 82.0,
+                        },
+                    },
+                    "arScene": {
+                        "scenePreset": "archive_cube_damaged_v1",
+                        "scanHoldDurationMs": 1800,
+                    },
+                },
+                status="published",
+                sort_order=1,
+            )
+            session.add(segment)
+            session.flush()
+
+        existing_segment_link = (
+            session.query(SegmentMission)
+            .filter(
+                SegmentMission.segment_id == "segment-archive-017",
+                SegmentMission.mission_id == "mission-archive-017",
+            )
+            .first()
+        )
+        if existing_segment_link is None:
+            session.add(
+                SegmentMission(
+                    id="segment-mission-archive-017",
+                    segment_id="segment-archive-017",
+                    mission_id="mission-archive-017",
+                    status="active",
+                    sort_order=1,
+                )
+            )
+            session.flush()
 
         session.merge(
             MissionRequirement(

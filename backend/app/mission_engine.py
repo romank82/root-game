@@ -17,6 +17,7 @@ from app.models import (
     MissionReward,
     PlayerItem,
     PlayerMission,
+    Segment,
     StoryNode,
     Wallet,
     WalletTransaction,
@@ -219,6 +220,13 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
         .order_by(StoryNode.sort_order, StoryNode.id)
     ).all()
 
+    # Get published segments
+    segments = session.scalars(
+        select(Segment)
+        .where(Segment.status == "published")
+        .order_by(Segment.sort_order, Segment.id)
+    ).all()
+
     return {
         "player": {
             "id": player.id,
@@ -252,6 +260,33 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 ),
             }
             for mission in missions
+        ],
+        "segments": [
+            {
+                "id": segment.id,
+                "slug": segment.slug,
+                "title": segment.title,
+                "description": segment.description,
+                "content": segment.content,
+                "status": segment.status,
+                "sortOrder": segment.sort_order,
+                "linkedMissions": [
+                    {
+                        "id": link.mission.id,
+                        "slug": link.mission.slug,
+                        "title": link.mission.title,
+                    }
+                    for link in sorted(
+                        segment.mission_links,
+                        key=lambda current: (current.sort_order, current.mission_id),
+                    )
+                    if (
+                        link.status == "active"
+                        and link.mission.status == "published"
+                    )
+                ],
+            }
+            for segment in segments
         ],
         "inventory": [
             _serialize_item(player_item, item)
@@ -441,6 +476,12 @@ def _submit_mission_once(
         if mission is None:
             raise MissionEngineError(404, "Опубликованная миссия не найдена.")
 
+        if mission.mission_type == "team":
+            raise MissionEngineError(
+                409,
+                "Team Mission требует отдельного geo/team runtime API.",
+            )
+
         progress = _synchronize_player_missions(session, player_id)
         player_mission = progress[mission.id]
 
@@ -551,6 +592,30 @@ def reset_demo_engine_progress(player_id: str) -> dict:
     with SessionLocal.begin() as session:
         _ensure_player(session, player_id)
 
+        wallet = _get_or_create_root_wallet(session, player_id)
+        has_ledger_history = session.scalar(
+            select(WalletTransaction.id)
+            .where(WalletTransaction.wallet_id == wallet.id)
+            .limit(1)
+        )
+        if has_ledger_history is not None:
+            raise MissionEngineError(
+                409,
+                (
+                    "Нельзя сбросить demo-прогресс: у кошелька уже есть "
+                    "неизменяемая финансовая история."
+                ),
+            )
+
+        if wallet.available_balance != 0 or wallet.locked_balance != 0:
+            raise MissionEngineError(
+                409,
+                (
+                    "Нельзя сбросить demo-прогресс: баланс кошелька не "
+                    "соответствует пустой финансовой истории."
+                ),
+            )
+
         session.query(PlayerMission).filter(
             PlayerMission.player_id == player_id
         ).delete(synchronize_session=False)
@@ -558,14 +623,5 @@ def reset_demo_engine_progress(player_id: str) -> dict:
         session.query(PlayerItem).filter(
             PlayerItem.player_id == player_id
         ).delete(synchronize_session=False)
-
-        wallet = _get_or_create_root_wallet(session, player_id)
-
-        session.query(WalletTransaction).filter(
-            WalletTransaction.wallet_id == wallet.id
-        ).delete(synchronize_session=False)
-
-        wallet.available_balance = 0
-        wallet.locked_balance = 0
 
         return _build_bootstrap(session, player_id)

@@ -36,6 +36,7 @@ from app.admin_auth import (
 from app.admin_approvals import router as admin_approvals_router
 from app.admin_management import router as admin_management_router
 from app.admin_missions import router as admin_missions_router
+from app.admin_segments import router as admin_segments_router
 from app.admin_system_settings import router as admin_system_settings_router
 
 SESSION_COOKIE_NAME = "chimera_session"
@@ -58,6 +59,29 @@ app.add_middleware(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    """
+    Create one server-side trace identifier per HTTP request.
+
+    Incoming correlation headers are deliberately ignored: clients must not
+    control an authoritative audit trace identifier.
+    """
+    correlation_id = uuid4().hex
+    request.state.audit_context = {
+        "correlation_id": correlation_id,
+        # Do not trust X-Forwarded-For unless a separately configured trusted
+        # reverse-proxy policy is introduced.
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": (request.headers.get("user-agent") or "")[:512] or None,
+    }
+
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
+
 
 class MissionSubmitPayload(BaseModel):
     answer: str | None = None
@@ -347,7 +371,7 @@ def admin_login(
         raw_token = authenticate_admin(
             username=payload.username,
             password=payload.password,
-            ip_address=request.client.host if request.client else None,
+            request=request,
         )
     except Exception as error:
         raise HTTPException(
@@ -400,7 +424,7 @@ def admin_logout(request: Request, response: Response):
     raw_token = request.cookies.get(ADMIN_SESSION_COOKIE_NAME, "")
     revoke_admin_session(
         raw_token=raw_token,
-        ip_address=request.client.host if request.client else None,
+        request=request,
     )
     response.delete_cookie(
         key=ADMIN_SESSION_COOKIE_NAME,
@@ -415,4 +439,5 @@ def admin_logout(request: Request, response: Response):
 app.include_router(admin_management_router)
 app.include_router(admin_approvals_router)
 app.include_router(admin_missions_router)
+app.include_router(admin_segments_router)
 app.include_router(admin_system_settings_router)

@@ -20,6 +20,10 @@ from app.admin_auth import (
     password_hasher,
     validate_new_password,
 )
+from app.admin_audit import (
+    build_admin_permission_audit_snapshot,
+    write_admin_audit,
+)
 from app.db import SessionLocal
 from app.models import (
     AdminAuditLog,
@@ -135,23 +139,23 @@ def _audit(
     before: dict[str, Any],
     after: dict[str, Any],
     metadata: dict[str, Any],
-    ip_address: str | None,
+    request: Request,
 ) -> None:
-    session.add(
-        AdminAuditLog(
-            id=_new_id("admin-audit"),
-            admin_user_id=actor.id,
-            action=action,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            permission_code=permission_code,
-            reason=reason,
-            before_json=before,
-            after_json=after,
-            outcome="success",
-            metadata_json=metadata,
-            ip_address=ip_address,
-        )
+    write_admin_audit(
+        session,
+        actor=actor,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        request=request,
+        permission_code=permission_code,
+        before=build_admin_permission_audit_snapshot(before)
+        if entity_type == "admin_user_permission"
+        else before,
+        after=build_admin_permission_audit_snapshot(after)
+        if entity_type == "admin_user_permission"
+        else after,
+        metadata={**metadata, "reasonProvided": bool(reason)},
     )
 
 
@@ -241,7 +245,7 @@ def create_admin(
                 "isActive": True,
             },
             metadata={"createdVia": "admin_api"},
-            ip_address=_client_ip_address(request),
+            request=request,
         )
 
         return {"admin": _serialize_admin(session, admin)}
@@ -342,7 +346,7 @@ def grant_or_update_permission(
             before=before,
             after=_serialize_permission(grant),
             metadata={"targetAdminId": target.id},
-            ip_address=_client_ip_address(request),
+            request=request,
         )
 
         return {"admin": _serialize_admin(session, target)}
@@ -399,7 +403,7 @@ def revoke_permission(
             before=before,
             after=_serialize_permission(grant),
             metadata={"targetAdminId": target.id},
-            ip_address=_client_ip_address(request),
+            request=request,
         )
 
         return {"admin": _serialize_admin(session, target)}
@@ -448,7 +452,6 @@ def deactivate_admin(
         before = {
             "isActive": target.is_active,
             "deactivatedAt": None,
-            "deactivationReason": None,
         }
         target.is_active = False
         target.deactivated_at = datetime.now(timezone.utc)
@@ -472,10 +475,9 @@ def deactivate_admin(
             after={
                 "isActive": target.is_active,
                 "deactivatedAt": target.deactivated_at.isoformat(),
-                "deactivationReason": target.deactivation_reason,
             },
             metadata={"revokedSessionCount": revoked_session_count},
-            ip_address=_client_ip_address(request),
+            request=request,
         )
 
         return {"admin": _serialize_admin(session, target)}
@@ -512,7 +514,6 @@ def reactivate_admin(
                 if target.deactivated_at is not None
                 else None
             ),
-            "deactivationReason": target.deactivation_reason,
         }
         target.is_active = True
         target.deactivated_at = None
@@ -531,10 +532,9 @@ def reactivate_admin(
             after={
                 "isActive": target.is_active,
                 "deactivatedAt": None,
-                "deactivationReason": None,
             },
             metadata={},
-            ip_address=_client_ip_address(request),
+            request=request,
         )
 
         return {"admin": _serialize_admin(session, target)}

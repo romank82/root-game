@@ -82,5 +82,6 @@ API:
 ## Audit
 Каждая create/archive/update/request/review/execute операция создаёт audit event.
 В before/after пишутся ключ, type, status и безопасные значения. Секретные
-значения запрещены. Audit содержит permission, reason, request/approval ID,
-actor ID, IP и безопасный outcome/error context.
+значения запрещены. Audit содержит permission, request/approval ID, actor ID,
+IP и безопасный outcome/error context; free-text reason не дублируется и
+фиксируется только безопасным признаком `reasonProvided`.

@@ -9,12 +9,14 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from argon2 import PasswordHasher
+from fastapi import Request
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from sqlalchemy import delete, select
 
 from app.config import settings
+from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
-from app.models import AdminAuditLog, AdminSession, AdminUser
+from app.models import AdminSession, AdminUser
 
 
 ADMIN_SESSION_COOKIE_NAME = "chimera_admin_session"
@@ -110,26 +112,24 @@ def create_admin_user(
         # because these models intentionally do not declare ORM relationships.
         session.flush()
 
-        session.add(
-            AdminAuditLog(
-                id=_new_id("admin-audit"),
-                admin_user_id=admin.id,
-                action="admin_user.created",
-                entity_type="admin_user",
-                entity_id=admin.id,
-                metadata_json={
-                    "username": admin.username,
-                    "role": admin.role,
-                    "created_via": "cli",
-                },
-                ip_address=None,
-            )
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="admin_user.created",
+            entity_type="admin_user",
+            entity_id=admin.id,
+            request=None,
+            metadata={
+                "username": admin.username,
+                "role": admin.role,
+                "createdVia": "cli",
+            },
         )
         session.flush()
         return admin
 
 
-def authenticate_admin(username: str, password: str, ip_address: str | None) -> str:
+def authenticate_admin(username: str, password: str, request: Request) -> str:
     """
     Verify password and create an opaque server-side session.
 
@@ -179,16 +179,14 @@ def authenticate_admin(username: str, password: str, ip_address: str | None) -> 
         # Flush the session first: audit_log.entity_id refers to this new session
         # and the models intentionally do not define ORM relationships.
         session.flush()
-        session.add(
-            AdminAuditLog(
-                id=_new_id("admin-audit"),
-                admin_user_id=admin.id,
-                action="admin_auth.login",
-                entity_type="admin_session",
-                entity_id=admin_session.id,
-                metadata_json={"username": admin.username},
-                ip_address=ip_address,
-            )
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="admin_auth.login",
+            entity_type="admin_session",
+            entity_id=admin_session.id,
+            request=request,
+            metadata={"username": admin.username},
         )
 
         return raw_token
@@ -228,7 +226,7 @@ def get_current_admin(raw_token: str) -> AdminUser:
         return admin
 
 
-def revoke_admin_session(raw_token: str, ip_address: str | None) -> None:
+def revoke_admin_session(raw_token: str, request: Request) -> None:
     """Delete a server-side admin session during logout."""
     if not raw_token:
         return
@@ -243,16 +241,15 @@ def revoke_admin_session(raw_token: str, ip_address: str | None) -> None:
         if admin_session is None:
             return
 
-        session.add(
-            AdminAuditLog(
-                id=_new_id("admin-audit"),
-                admin_user_id=admin_session.admin_user_id,
-                action="admin_auth.logout",
-                entity_type="admin_session",
-                entity_id=admin_session.id,
-                metadata_json={},
-                ip_address=ip_address,
-            )
+        actor = session.get(AdminUser, admin_session.admin_user_id)
+        write_admin_audit(
+            session,
+            actor=actor,
+            action="admin_auth.logout",
+            entity_type="admin_session",
+            entity_id=admin_session.id,
+            request=request,
+            metadata={},
         )
         session.delete(admin_session)
 

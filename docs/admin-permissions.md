@@ -7,7 +7,7 @@ Super-admin имеет все permissions напрямую. Обычный admin
 Текущий каталог:
 `admins.read`, `admins.manage`, `admin_permissions.manage`,
 `admin_approvals.read`, `admin_approvals.review`, `audit.read`,
-`missions.read`, `missions.manage`.
+`missions.read`, `missions.manage`, `segments.read`, `segments.manage`.
 
 ## Защиты
 Нельзя деактивировать себя или последнего active super-admin.

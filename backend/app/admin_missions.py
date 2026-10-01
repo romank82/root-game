@@ -10,7 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.admin_access import require_permission
+from app.admin_audit import write_admin_audit
+from app.content_contract import PublicContentValidationError, validate_mission_content
 from app.db import SessionLocal
+from app.geo_team_contract import (
+    GeoTeamConfigurationError,
+    validate_team_mission_validation_config,
+)
 from app.models import (
     AdminAuditLog,
     AdminUser,
@@ -29,6 +35,28 @@ MISSION_MANAGE_PERMISSION = "missions.manage"
 VALID_MISSION_STATUSES = {"draft", "published"}
 VALID_REWARD_TYPES = {"currency", "item", "story_node"}
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[a-z0-9-]{0,126}[a-z0-9])?$")
+
+
+def _validate_public_mission_content(mission_type: str, content: Any) -> None:
+    """Do not expose submitted content or protected values in validation errors."""
+    try:
+        validate_mission_content(mission_type, content)
+    except PublicContentValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Публичный content Mission не соответствует опубликованному контракту.",
+        ) from exc
+
+
+def _validate_team_mission_config(validation_config: Any) -> None:
+    """Validate protected team CMS data without echoing it in an API error."""
+    try:
+        validate_team_mission_validation_config(validation_config)
+    except GeoTeamConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Защищённая конфигурация team Mission не соответствует контракту.",
+        ) from exc
 
 
 class AdminMissionRewardPayload(BaseModel):
@@ -122,22 +150,20 @@ def _audit(
     action: str,
     mission_id: str,
     metadata: dict[str, Any],
-    ip_address: str | None,
+    request: Request,
 ) -> None:
     """
     validation_config is deliberately excluded from metadata:
     it may contain correct answers or other secret validation material.
     """
-    session.add(
-        AdminAuditLog(
-            id=_new_id("admin-audit"),
-            admin_user_id=admin.id,
-            action=action,
-            entity_type="mission",
-            entity_id=mission_id,
-            metadata_json=metadata,
-            ip_address=ip_address,
-        )
+    write_admin_audit(
+        session,
+        actor=admin,
+        action=action,
+        entity_type="mission",
+        entity_id=mission_id,
+        request=request,
+        metadata=metadata,
     )
 
 
@@ -237,58 +263,62 @@ def _validate_for_publish(
     mission: Mission,
 ) -> None:
     """Reject publishing a mission that the current game engine cannot validate."""
+    _validate_public_mission_content(mission.mission_type, mission.content)
     _validate_references(
         session,
         chapter_id=mission.chapter_id,
         story_node_id=mission.story_node_id,
     )
 
-    validator = mission.validation_config.get("validator")
-
-    if validator == "normalized_text_match":
-        accepted_answers = mission.validation_config.get("acceptedAnswers")
-        if (
-            not isinstance(accepted_answers, list)
-            or not accepted_answers
-            or not all(
-                isinstance(answer, str) and answer.strip()
-                for answer in accepted_answers
-            )
-        ):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Для validator=normalized_text_match требуется непустой "
-                    "список validation_config.acceptedAnswers."
-                ),
-            )
-
-    elif validator == "ordered_blocks_match":
-        correct_sequence = mission.validation_config.get("correctSequence")
-        if (
-            not isinstance(correct_sequence, list)
-            or not correct_sequence
-            or not all(
-                isinstance(block, str) and block.strip()
-                for block in correct_sequence
-            )
-        ):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Для validator=ordered_blocks_match требуется непустой "
-                    "список validation_config.correctSequence."
-                ),
-            )
-
+    if mission.mission_type == "team":
+        _validate_team_mission_config(mission.validation_config)
     else:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Миссию нельзя опубликовать: validation_config.validator "
-                "должен быть normalized_text_match или ordered_blocks_match."
-            ),
-        )
+        validator = mission.validation_config.get("validator")
+
+        if validator == "normalized_text_match":
+            accepted_answers = mission.validation_config.get("acceptedAnswers")
+            if (
+                not isinstance(accepted_answers, list)
+                or not accepted_answers
+                or not all(
+                    isinstance(answer, str) and answer.strip()
+                    for answer in accepted_answers
+                )
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Для validator=normalized_text_match требуется непустой "
+                        "список validation_config.acceptedAnswers."
+                    ),
+                )
+
+        elif validator == "ordered_blocks_match":
+            correct_sequence = mission.validation_config.get("correctSequence")
+            if (
+                not isinstance(correct_sequence, list)
+                or not correct_sequence
+                or not all(
+                    isinstance(block, str) and block.strip()
+                    for block in correct_sequence
+                )
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Для validator=ordered_blocks_match требуется непустой "
+                        "список validation_config.correctSequence."
+                    ),
+                )
+
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Миссию нельзя опубликовать: validation_config.validator "
+                    "должен быть normalized_text_match или ordered_blocks_match."
+                ),
+            )
 
     rewards = session.scalars(
         select(MissionReward).where(MissionReward.mission_id == mission.id)
@@ -424,7 +454,7 @@ def create_admin_mission(
                 "status": mission.status,
                 "rewardCount": len(payload.rewards),
             },
-            ip_address=_client_ip_address(request),
+            request=request,
         )
 
         return {"mission": _serialize_mission(session, mission)}
@@ -516,6 +546,12 @@ def update_admin_mission(
             )
             changed_fields.append("rewards")
 
+        if (
+            mission.status == "published"
+            and {"content", "mission_type", "validation_config"} & set(updates)
+        ):
+            _validate_for_publish(session, mission)
+
         session.flush()
 
         _audit(
@@ -533,7 +569,7 @@ def update_admin_mission(
                     else None
                 ),
             },
-            ip_address=_client_ip_address(request),
+            request=request,
         )
 
         return {"mission": _serialize_mission(session, mission)}
@@ -564,7 +600,7 @@ def publish_admin_mission(
             action="mission.published",
             mission_id=mission.id,
             metadata={"slug": mission.slug, "previousStatus": "draft"},
-            ip_address=_client_ip_address(request),
+            request=request,
         )
 
         return {"mission": _serialize_mission(session, mission)}
@@ -598,7 +634,7 @@ def unpublish_admin_mission(
                 "slug": mission.slug,
                 "previousStatus": previous_status,
             },
-            ip_address=_client_ip_address(request),
+            request=request,
         )
 
         return {"mission": _serialize_mission(session, mission)}

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -13,10 +14,25 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+
+
+from app.geo_team_runtime_models import (  # noqa: F401
+    InventoryEvent,
+    InventoryReservation,
+    LocationProof,
+    MissionAttempt,
+    MissionRun,
+    MissionSettlement,
+    PlayerFallbackEntitlement,
+    TeamSession,
+    TeamSessionMember,
+    WalletReservation,
+)
 
 
 class TimestampMixin:
@@ -94,6 +110,34 @@ class StoryNode(TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class Segment(TimestampMixin, Base):
+    __tablename__ = "segments"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    chapter_id: Mapped[str] = mapped_column(
+        ForeignKey("chapters.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="draft",
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    content: Mapped[dict] = mapped_column(JSON, nullable=True, default=dict)
+
+    mission_links: Mapped[list["SegmentMission"]] = relationship(
+        "SegmentMission",
+        back_populates="segment",
+        cascade="save-update, merge",
+        passive_deletes=False,
+    )
+
+
 class Mission(TimestampMixin, Base):
     __tablename__ = "missions"
 
@@ -127,6 +171,81 @@ class Mission(TimestampMixin, Base):
         default="draft",
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    segment_links: Mapped[list["SegmentMission"]] = relationship(
+        "SegmentMission",
+        back_populates="mission",
+        cascade="save-update, merge",
+        passive_deletes=False,
+    )
+
+
+class SegmentMission(TimestampMixin, Base):
+    __tablename__ = "segments_missions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    segment_id: Mapped[str] = mapped_column(
+        ForeignKey("segments.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="active",
+        index=True,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    archived_by_admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            (
+                "(status = 'active' "
+                "AND archived_at IS NULL "
+                "AND archived_by_admin_id IS NULL) "
+                "OR "
+                "(status = 'archived' AND archived_at IS NOT NULL)"
+            ),
+            name="ck_segments_missions_lifecycle",
+        ),
+        Index(
+            "ix_segments_missions_active_segment_sort",
+            "segment_id",
+            "sort_order",
+            "id",
+        ),
+        Index(
+            "uq_segments_missions_active_pair",
+            "segment_id",
+            "mission_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    segment: Mapped["Segment"] = relationship(
+        "Segment",
+        back_populates="mission_links",
+    )
+    mission: Mapped["Mission"] = relationship(
+        "Mission",
+        back_populates="segment_links",
+    )
 
 
 class MissionRequirement(TimestampMixin, Base):
@@ -234,6 +353,14 @@ class GamePlayer(TimestampMixin, Base):
             "auth_provider",
             "external_id",
             name="uq_game_players_provider_external_id",
+        ),
+        # SQLite already treats NULL values as distinct in unique indexes.
+        # PostgreSQL additionally uses this predicate for the same contract.
+        Index(
+            "uq_game_players_telegram_username_normalized",
+            "telegram_username_normalized",
+            unique=True,
+            postgresql_where=text("telegram_username_normalized IS NOT NULL"),
         ),
     )
 
@@ -387,7 +514,6 @@ class AdminUser(TimestampMixin, Base):
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-
 
 class AdminPermission(TimestampMixin, Base):
     __tablename__ = "admin_permissions"
@@ -584,10 +710,25 @@ class AdminAuditLog(Base):
         String(64), nullable=True, index=True
     )
     request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    correlation_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    admin_username_snapshot: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     before_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     after_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False, default="success")
+    error_context_json: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

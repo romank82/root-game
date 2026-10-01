@@ -25,6 +25,10 @@ from app.admin_approvals import (
     PENDING,
     _serialize as _serialize_approval,
 )
+from app.admin_audit import (
+    build_admin_approval_audit_snapshot,
+    write_admin_audit,
+)
 from app.db import SessionLocal
 from app.models import (
     AdminApprovalRequest,
@@ -110,26 +114,23 @@ def _audit_update(
     reason: str | None,
     request: Request,
 ) -> None:
-    session.add(
-        AdminAuditLog(
-            id=_new_id("admin-audit"),
-            admin_user_id=actor.id,
-            action="system_setting.updated",
-            entity_type="system_setting",
-            entity_id=setting.key,
-            permission_code=SYSTEM_SETTINGS_MANAGE_PERMISSION,
-            reason=reason,
-            before_json=before,
-            after_json=after,
-            outcome="success",
-            metadata_json={
-                "key": setting.key,
-                "valueType": setting.value_type,
-                "category": setting.category,
-                "isSensitive": setting.is_sensitive,
-            },
-            ip_address=_client_ip_address(request),
-        )
+    write_admin_audit(
+        session,
+        actor=actor,
+        action="system_setting.updated",
+        entity_type="system_setting",
+        entity_id=setting.key,
+        request=request,
+        permission_code=SYSTEM_SETTINGS_MANAGE_PERMISSION,
+        before=before,
+        after=after,
+        metadata={
+            "key": setting.key,
+            "valueType": setting.value_type,
+            "category": setting.category,
+            "isSensitive": setting.is_sensitive,
+            "reasonProvided": bool(reason),
+        },
     )
 
 
@@ -181,27 +182,24 @@ def _audit_approval(
     request: Request,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    session.add(
-        AdminAuditLog(
-            id=_new_id("admin-audit"),
-            admin_user_id=actor.id,
-            action=action,
-            entity_type="admin_approval_request",
-            entity_id=approval.id,
-            permission_code=approval.required_permission_code,
-            approval_request_id=approval.id,
-            request_id=approval.request_id,
-            reason=approval.reason,
-            before_json=before,
-            after_json=after,
-            outcome=outcome,
-            metadata_json=metadata or {
-                "actionType": approval.action_type,
-                "targetEntityType": approval.target_entity_type,
-                "targetEntityId": approval.target_entity_id,
-            },
-            ip_address=_client_ip_address(request),
-        )
+    write_admin_audit(
+        session,
+        actor=actor,
+        action=action,
+        entity_type="admin_approval_request",
+        entity_id=approval.id,
+        request=request,
+        permission_code=approval.required_permission_code,
+        approval_request_id=approval.id,
+        request_id=approval.request_id,
+        before=build_admin_approval_audit_snapshot(before),
+        after=build_admin_approval_audit_snapshot(after),
+        outcome=outcome,
+        metadata=metadata or {
+            "actionType": approval.action_type,
+            "targetEntityType": approval.target_entity_type,
+            "targetEntityId": approval.target_entity_id,
+        },
     )
 
 
@@ -215,29 +213,25 @@ def _audit_approval_setting_update(
     after: dict[str, Any],
     request: Request,
 ) -> None:
-    session.add(
-        AdminAuditLog(
-            id=_new_id("admin-audit"),
-            admin_user_id=actor.id,
-            action="system_setting.updated_via_approval",
-            entity_type="system_setting",
-            entity_id=setting.key,
-            permission_code=SYSTEM_SETTINGS_MANAGE_PERMISSION,
-            approval_request_id=approval.id,
-            request_id=approval.request_id,
-            reason=approval.reason,
-            before_json=before,
-            after_json=after,
-            outcome="success",
-            metadata_json={
-                "key": setting.key,
-                "valueType": setting.value_type,
-                "category": setting.category,
-                "isSensitive": setting.is_sensitive,
-                "actionType": approval.action_type,
-            },
-            ip_address=_client_ip_address(request),
-        )
+    write_admin_audit(
+        session,
+        actor=actor,
+        action="system_setting.updated_via_approval",
+        entity_type="system_setting",
+        entity_id=setting.key,
+        request=request,
+        permission_code=SYSTEM_SETTINGS_MANAGE_PERMISSION,
+        approval_request_id=approval.id,
+        request_id=approval.request_id,
+        before=before,
+        after=after,
+        metadata={
+            "key": setting.key,
+            "valueType": setting.value_type,
+            "category": setting.category,
+            "isSensitive": setting.is_sensitive,
+            "actionType": approval.action_type,
+        },
     )
 
 
