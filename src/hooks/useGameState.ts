@@ -1,5 +1,13 @@
-import { useState, useCallback } from 'react'
-import { submitEngineMission, resetEngineDemoProgress, type EngineBootstrap, type EngineInventoryItem, type EngineMission, type EngineStoryNode } from '../api/engineApi'
+import { useCallback, useState } from 'react'
+import {
+  resetEngineDemoProgress,
+  submitEngineMission,
+  type EngineBootstrap,
+  type EngineInventoryItem,
+  type EngineMission,
+  type EngineSegment,
+  type EngineStoryNode,
+} from '../api/engineApi'
 import type { ApiStatus, Screen } from '../types/game'
 
 export function useGameState() {
@@ -17,13 +25,13 @@ export function useGameState() {
     return localStorage.getItem('chimera-accepted') === 'true'
   })
 
-  const [echo, setEcho] = useState(() => {
-    return Number(localStorage.getItem('chimera-echo') ?? 0)
-  })
-
+  // ROOT is a backend-maintained cache over immutable ledger transactions.
+  // The client displays only the latest authenticated bootstrap value.
+  const [echo, setEcho] = useState(0)
   const [inventory, setInventory] = useState<EngineInventoryItem[]>([])
   const [storyNodes, setStoryNodes] = useState<EngineStoryNode[]>([])
   const [missions, setMissions] = useState<EngineMission[]>([])
+  const [segments, setSegments] = useState<EngineSegment[]>([])
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking')
 
   const applyEngineBootstrap = useCallback((bootstrap: EngineBootstrap) => {
@@ -31,6 +39,7 @@ export function useGameState() {
     setInventory(bootstrap.inventory)
     setStoryNodes(bootstrap.storyNodes)
     setMissions(bootstrap.missions)
+    setSegments(bootstrap.segments)
     setApiStatus('online')
   }, [])
 
@@ -56,7 +65,6 @@ export function useGameState() {
       setScreen('briefing')
       localStorage.removeItem('chimera-screen')
       localStorage.removeItem('chimera-accepted')
-      localStorage.removeItem('chimera-echo')
     } catch {
       setApiStatus('offline')
     }
@@ -71,6 +79,7 @@ export function useGameState() {
     inventory,
     storyNodes,
     missions,
+    segments,
     apiStatus,
     setApiStatus,
     applyEngineBootstrap,

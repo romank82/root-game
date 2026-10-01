@@ -1,17 +1,177 @@
 import { useState } from 'react'
-import type { EngineMission } from '../../api/engineApi'
+import type {
+  EngineMission,
+  EngineSegment,
+  MissionSubmission,
+} from '../../api/engineApi'
 import type { Screen } from '../../types/game'
-import { activeSegment } from '../../data/activeSegment'
-import { missionText, missionBlocks } from '../../utils/missionHelpers'
-import { calculateDistanceInMeters, openRouteInNavigator } from '../../utils/geolocation'
+import {
+  calculateDistanceInMeters,
+  openRouteInNavigator,
+} from '../../utils/geolocation'
+
+type SegmentContent = {
+  code: string
+  type: string
+  searchRadiusMeters: number
+  safeScanRadiusMeters: number
+  latitude: number
+  longitude: number
+  scenePreset: string
+}
+
+type CodeRepairContent = {
+  label: string | null
+  instruction: string | null
+  blocks: string[]
+  maxBlocks: number
+  lineNumber: string | null
+  placeholder: string | null
+  wrongAnswerText: string | null
+  rewardPreviewText: string | null
+}
 
 interface ScannerScreenProps {
   missions: EngineMission[]
+  segments: EngineSegment[]
   onScreenChange: (screen: Screen) => void
-  onSubmitMission: (missionId: string, payload: { sequence?: string[] }) => Promise<any>
+  onSubmitMission: (
+    missionId: string,
+    payload: { sequence?: string[] },
+  ) => Promise<MissionSubmission | null>
 }
 
-export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: ScannerScreenProps) {
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  return value as Record<string, unknown>
+}
+
+function asText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function asNumber(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): number | null {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    return null
+  }
+  return value
+}
+
+function parseSegmentContent(
+  content: Record<string, unknown>,
+): SegmentContent | null {
+  const presentation = asRecord(content.presentation)
+  const location = asRecord(content.location)
+  const point = asRecord(location?.safeScanPoint)
+  const arScene = asRecord(content.arScene)
+
+  const code = asText(presentation?.code)
+  const type = asText(presentation?.type)
+  const searchRadiusMeters = asNumber(location?.searchRadiusMeters, 1, 100_000)
+  const safeScanRadiusMeters = asNumber(
+    location?.safeScanRadiusMeters,
+    1,
+    100_000,
+  )
+  const latitude = asNumber(point?.latitude, -90, 90)
+  const longitude = asNumber(point?.longitude, -180, 180)
+  const scenePreset = asText(arScene?.scenePreset)
+
+  if (
+    !code ||
+    !type ||
+    searchRadiusMeters === null ||
+    safeScanRadiusMeters === null ||
+    searchRadiusMeters < safeScanRadiusMeters ||
+    latitude === null ||
+    longitude === null ||
+    !scenePreset
+  ) {
+    return null
+  }
+
+  return {
+    code,
+    type,
+    searchRadiusMeters,
+    safeScanRadiusMeters,
+    latitude,
+    longitude,
+    scenePreset,
+  }
+}
+
+function parseCodeRepairContent(
+  mission: EngineMission,
+): CodeRepairContent | null {
+  const root = asRecord(mission.content)
+  const ui = asRecord(root?.ui)
+
+  if (!ui) {
+    return null
+  }
+
+  const blocks = Array.isArray(ui.blocks) &&
+    ui.blocks.length > 0 &&
+    ui.blocks.every(
+      (block) => typeof block === 'string' && block.trim(),
+    )
+    ? ui.blocks as string[]
+    : null
+
+  const maxBlocks = asNumber(ui.maxBlocks, 1, 100)
+
+  if (!blocks || maxBlocks === null) {
+    return null
+  }
+
+  const rewardPreview = asRecord(ui.rewardPreview)
+
+  return {
+    label: asText(ui.label),
+    instruction: asText(ui.instruction),
+    blocks,
+    maxBlocks,
+    lineNumber: asText(ui.lineNumber),
+    placeholder: asText(ui.placeholder),
+    wrongAnswerText: asText(ui.wrongAnswerText),
+    rewardPreviewText: asText(rewardPreview?.text),
+  }
+}
+
+function formatAwarded(response: MissionSubmission): string {
+  const parts: string[] = []
+
+  if (response.awarded.root > 0) {
+    parts.push(`${response.awarded.root} ROOT`)
+  }
+
+  for (const item of response.awarded.items) {
+    parts.push(`${item.title} ×${item.quantity}`)
+  }
+
+  return parts.length > 0
+    ? parts.join(' · ')
+    : 'Прогресс подтверждён сервером.'
+}
+
+export function ScannerScreen({
+  missions,
+  segments,
+  onScreenChange,
+  onSubmitMission,
+}: ScannerScreenProps) {
   const [distanceToSegment, setDistanceToSegment] = useState<number | null>(null)
   const [isCheckingLocation, setIsCheckingLocation] = useState(false)
   const [locationError, setLocationError] = useState('')
@@ -21,33 +181,61 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
   const [isCodeRepairOpen, setIsCodeRepairOpen] = useState(false)
   const [repairSequence, setRepairSequence] = useState<string[]>([])
   const [repairError, setRepairError] = useState('')
+  const [confirmedAward, setConfirmedAward] = useState<string | null>(null)
 
-  const isSegmentMissionComplete = missions.some(
+  const activeMission = missions.find(
     (mission) =>
-      mission.id === 'mission-archive-017' && mission.status === 'completed',
-  )
+      (mission.status === 'available' || mission.status === 'in_progress') &&
+      parseCodeRepairContent(mission) !== null &&
+      segments.some((segment) =>
+        segment.linkedMissions.some((link) => link.id === mission.id),
+      ),
+  ) ?? null
 
-  const activeMission =
-    missions.find(
-      (mission) =>
-        mission.id === 'mission-archive-017' && mission.status !== 'completed',
-    ) ??
-    missions.find((mission) => mission.id === 'mission-archive-017') ??
-    null
+  const activeSegment = activeMission
+    ? segments.find((segment) =>
+      segment.linkedMissions.some((link) => link.id === activeMission.id),
+    ) ?? null
+    : null
 
-  const missionA17 = missions.find(
-    (mission) => mission.id === 'mission-archive-017',
-  )
+  const segmentContent = activeSegment
+    ? parseSegmentContent(activeSegment.content)
+    : null
 
-  const repairBlocks = missionBlocks(missionA17, [
-    'packet.',
-    'signature',
-    'return ',
-  ])
+  const codeRepairContent = activeMission
+    ? parseCodeRepairContent(activeMission)
+    : null
+
+  if (!activeMission || !activeSegment || !segmentContent || !codeRepairContent) {
+    return (
+      <section className="segment-screen">
+        <p className="eyebrow">СКАНЕР / CMS-СЕГМЕНТ НЕДОСТУПЕН</p>
+        <section className="location-status">
+          <span className="location-status-icon">⌖</span>
+          <div>
+            <strong>НЕТ ДОСТУПНОЙ ТОЧКИ СКАНИРОВАНИЯ</strong>
+            <p>
+              Опубликованный Segment с доступной scanner-миссией ещё не получен
+              из игрового bootstrap либо содержит некорректный public content.
+            </p>
+          </div>
+        </section>
+        <button className="back-button" onClick={() => onScreenChange('terminal')}>
+          ← ВЕРНУТЬСЯ В КОНТУР
+        </button>
+      </section>
+    )
+  }
+
+  // The safe empty-state return above guarantees these CMS values exist here.
+  // Local constants preserve that narrowing inside browser/API callbacks.
+  const mission = activeMission
+  const content = segmentContent
+  const repair = codeRepairContent
 
   const canStartArSearch =
     distanceToSegment !== null &&
-    distanceToSegment <= activeSegment.safeScanRadiusMeters
+    distanceToSegment <= content.safeScanRadiusMeters
 
   function checkPlayerLocation() {
     if (!navigator.geolocation) {
@@ -63,39 +251,29 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
         const distance = calculateDistanceInMeters(
           position.coords.latitude,
           position.coords.longitude,
-          activeSegment.safeScanPoint.latitude,
-          activeSegment.safeScanPoint.longitude,
+          content.latitude,
+          content.longitude,
         )
-
         setDistanceToSegment(distance)
         setIsCheckingLocation(false)
       },
       (error) => {
         setIsCheckingLocation(false)
-
         if (error.code === error.PERMISSION_DENIED) {
           setLocationError(
             'Доступ к геолокации запрещён. Разрешите его в настройках браузера или Telegram.',
           )
-          return
-        }
-
-        if (error.code === error.POSITION_UNAVAILABLE) {
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
           setLocationError(
             'Не удалось определить позицию. Проверьте GPS, интернет и настройки геолокации.',
           )
-          return
+        } else {
+          setLocationError(
+            'Не удалось получить геопозицию. Попробуйте ещё раз через несколько секунд.',
+          )
         }
-
-        setLocationError(
-          'Не удалось получить геопозицию. Попробуйте ещё раз через несколько секунд.',
-        )
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
-      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     )
   }
 
@@ -106,20 +284,20 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
     setIsCodeRepairOpen(false)
     setRepairSequence([])
     setRepairError('')
+    setConfirmedAward(null)
   }
 
   function addRepairBlock(block: string) {
-    if (isSegmentMissionComplete) return
-
     setRepairError('')
-    setRepairSequence((currentSequence) => {
-      if (currentSequence.length >= 3) return currentSequence
-      return [...currentSequence, block]
-    })
+    setRepairSequence((current) =>
+      current.length >= repair.maxBlocks
+        ? current
+        : [...current, block],
+    )
   }
 
   async function submitCodeRepair() {
-    const response = await onSubmitMission('mission-archive-017', {
+    const response = await onSubmitMission(mission.id, {
       sequence: repairSequence,
     })
 
@@ -131,32 +309,31 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
     if (!response.accepted) {
       setRepairError(
         response.message ??
+          repair.wrongAnswerText ??
           'СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ И ВОССТАНОВИТЕ ЕЁ ЗАНОВО.',
       )
       return
     }
 
     setRepairError('')
+    setConfirmedAward(formatAwarded(response))
   }
 
   return (
     <section className="segment-screen">
       <p className="eyebrow">
-        {activeMission
-          ? `АКТИВНАЯ МИССИЯ / ${activeMission.id.toUpperCase()}`
-          : 'АРХИВНЫЙ СЕГМЕНТ / ВОССТАНОВЛЕН'}
+        АКТИВНАЯ МИССИЯ / {mission.id.toUpperCase()}
       </p>
 
       <div className="segment-heading">
         <div>
-          <span className="segment-type">{activeSegment.type}</span>
-          <h2>{activeMission?.title ?? activeSegment.title}</h2>
-          <p>{activeMission?.description ?? activeSegment.description}</p>
+          <span className="segment-type">{content.type}</span>
+          <h2>{mission.title}</h2>
+          <p>{mission.description}</p>
         </div>
-
         <div className="segment-code">
           <span>ИДЕНТИФИКАТОР</span>
-          <strong>{activeSegment.code}</strong>
+          <strong>{content.code}</strong>
         </div>
       </div>
 
@@ -173,29 +350,23 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
 
         <div className="segment-details">
           <span className="file-label">ПАРАМЕТРЫ МИССИИ</span>
-
           <dl className="segment-stats">
             <div>
               <dt>РАДИУС ПОИСКА</dt>
-              <dd>{activeSegment.searchRadiusMeters} м</dd>
+              <dd>{content.searchRadiusMeters} м</dd>
             </div>
             <div>
               <dt>SAFE SCAN POINT</dt>
-              <dd>{activeSegment.safeScanRadiusMeters} м</dd>
-            </div>
-            <div>
-              <dt>НАГРАДА ЗА УСПЕХ</dt>
-              <dd>+{activeSegment.reward.root} ROOT</dd>
+              <dd>{content.safeScanRadiusMeters} м</dd>
             </div>
             <div>
               <dt>ТИП СЦЕНЫ</dt>
-              <dd>{activeSegment.arScene.scenePreset}</dd>
+              <dd>{content.scenePreset}</dd>
             </div>
           </dl>
-
-          {activeSegment.reward.itemName && (
+          {repair.rewardPreviewText && (
             <p className="segment-item-reward">
-              ПРЕДМЕТ: {activeSegment.reward.itemName}
+              ПРЕДПРОСМОТР НАГРАДЫ: {repair.rewardPreviewText}
             </p>
           )}
         </div>
@@ -205,31 +376,28 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
         <div>
           <span className="file-label">НАВИГАЦИЯ И ПРОВЕРКА ПОЗИЦИИ</span>
           <h3>Найдите безопасную точку сканирования</h3>
-          <p>
-            Откройте маршрут в навигаторе телефона. После прибытия
-            вернитесь в игру и подтвердите своё местоположение.
-          </p>
+          <p>Проверьте расстояние на устройстве. Эта навигационная проверка не подтверждает действие на сервере.</p>
         </div>
-
         <div className="location-actions">
           <button
             className="route-button"
             onClick={() =>
               openRouteInNavigator(
-                activeSegment.safeScanPoint.latitude,
-                activeSegment.safeScanPoint.longitude,
+                content.latitude,
+                content.longitude,
               )
             }
           >
             ОТКРЫТЬ МАРШРУТ →
           </button>
-
           <button
             className="location-button"
             onClick={checkPlayerLocation}
             disabled={isCheckingLocation}
           >
-            {isCheckingLocation ? 'ОПРЕДЕЛЯЕМ ПОЗИЦИЮ...' : 'ПРОВЕРИТЬ ПОЗИЦИЮ'}
+            {isCheckingLocation
+              ? 'ОПРЕДЕЛЯЕМ ПОЗИЦИЮ...'
+              : 'ПРОВЕРИТЬ ПОЗИЦИЮ'}
           </button>
         </div>
       </section>
@@ -251,22 +419,16 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
           <>
             <span className="location-status-icon">⌖</span>
             <div>
-              <strong>ПОЗИЦИЯ НЕ ПРОВЕРЕНА</strong>
-              <p>
-                Для запуска AR-поиска подтвердите, что вы находитесь у
-                безопасной точки сканирования.
-              </p>
+              <strong>НАВИГАЦИОННАЯ ПРОВЕРКА НЕ ВЫПОЛНЕНА</strong>
+              <p>Проверьте расстояние до точки на устройстве. Серверная geo-проверка появится в отдельном runtime API.</p>
             </div>
           </>
         ) : canStartArSearch ? (
           <>
             <span className="location-status-icon">✓</span>
             <div>
-              <strong>SAFE SCAN POINT ДОСТУПЕН</strong>
-              <p>
-                Расстояние до безопасной точки: {distanceToSegment} м. Можно
-                запускать AR-поиск.
-              </p>
+              <strong>ТОЧКА ДОСТУПНА ДЛЯ ЛОКАЛЬНОЙ НАВИГАЦИИ</strong>
+              <p>Расстояние на устройстве: {distanceToSegment} м. Оно не является серверным LocationProof.</p>
             </div>
           </>
         ) : (
@@ -275,8 +437,8 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
             <div>
               <strong>ТОЧКА СКАНИРОВАНИЯ СЛИШКОМ ДАЛЕКО</strong>
               <p>
-                Расстояние: {distanceToSegment} м. Для запуска AR-поиска нужно
-                подойти ближе чем на {activeSegment.safeScanRadiusMeters} м.
+                Расстояние: {distanceToSegment} м. Подойдите ближе чем на{' '}
+                {content.safeScanRadiusMeters} м.
               </p>
             </div>
           </>
@@ -291,47 +453,31 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
         >
           {canStartArSearch ? 'ЗАПУСТИТЬ AR-ПОИСК' : 'AR-ПОИСК ЗАБЛОКИРОВАН'}
         </button>
-      ) : isSegmentMissionComplete ? (
+      ) : confirmedAward ? (
         <section className="mission-success-card">
           <span className="file-label">ПАКЕТ ВОССТАНОВЛЕН</span>
           <div className="mission-success-symbol">✓</div>
           <h3>СЕГМЕНТ СТАБИЛИЗИРОВАН</h3>
-          <p>
-            Кодовая структура восстановлена. Архив извлечён из нестабильного
-            контура.
-          </p>
+          <p>Прогресс и награды подтверждены сервером.</p>
           <div className="mission-reward-grid">
             <div>
               <span>ПОЛУЧЕНО</span>
-              <strong>+{activeSegment.reward.root} ROOT</strong>
-            </div>
-            <div>
-              <span>ИЗВЛЕЧЁН ОБЪЕКТ</span>
-              <strong>{activeSegment.reward.itemName}</strong>
+              <strong>{confirmedAward}</strong>
             </div>
           </div>
-          <small>
-            В production награда, предмет и прогресс будут подтверждаться только
-            backend-сервером.
-          </small>
         </section>
       ) : isCodeRepairOpen ? (
         <section className="code-repair-panel">
           <span className="file-label">
-            {missionText(missionA17, 'label', 'МИНИ-ИГРА / CODE REPAIR')}
+            {repair.label ?? 'CODE REPAIR'}
           </span>
           <h3>Восстановите повреждённую строку</h3>
-          <p>
-            {missionText(
-              missionA17,
-              'instruction',
-              'Архивный пакет потерял порядок трёх блоков. Соберите корректную команду извлечения подписи.',
-            )}
-          </p>
-
+          {repair.instruction && (
+            <p>{repair.instruction}</p>
+          )}
           <div className="code-window">
             <span className="code-line-number">
-              {missionText(missionA17, 'lineNumber', '017')}
+              {repair.lineNumber ?? '—'}
             </span>
             <code>
               {repairSequence.length > 0 ? (
@@ -340,26 +486,19 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
                 ))
               ) : (
                 <span className="code-placeholder">
-                  {missionText(
-                    missionA17,
-                    'placeholder',
-                    '// выберите блоки ниже',
-                  )}
+                  {repair.placeholder ?? 'Выберите блоки ниже'}
                 </span>
               )}
             </code>
           </div>
-
           <div className="repair-blocks">
-            {repairBlocks.map((block) => (
+            {repair.blocks.map((block) => (
               <button key={block} onClick={() => addRepairBlock(block)}>
                 {block}
               </button>
             ))}
           </div>
-
           {repairError && <p className="repair-error">{repairError}</p>}
-
           <div className="repair-actions">
             <button
               className="repair-clear-button"
@@ -373,7 +512,9 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
             <button
               className="repair-submit-button"
               onClick={submitCodeRepair}
-              disabled={repairSequence.length !== 3}
+              disabled={
+                repairSequence.length !== repair.maxBlocks
+              }
             >
               ПРОВЕРИТЬ КОД →
             </button>
@@ -396,14 +537,10 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
               <span className="face-lock-status">ГРАНЬ ЗАФИКСИРОВАНА</span>
             )}
           </div>
-
           {!isSegmentFaceLocked ? (
             <>
               <h3>Наведите прицел на грань Сегмента</h3>
-              <p>
-                Зафиксируйте одну из граней виртуального куба, чтобы начать
-                извлечение архивного маркера.
-              </p>
+              <p>Зафиксируйте грань виртуального куба.</p>
               <button
                 className="ar-action-button"
                 onClick={() => setIsSegmentFaceLocked(true)}
@@ -414,10 +551,7 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
           ) : !virtualQrRevealed ? (
             <>
               <h3>Грань синхронизирована</h3>
-              <p>
-                На поверхности объекта обнаружена повреждённая QR-структура.
-                Запустите её визуальное извлечение.
-              </p>
+              <p>Запустите визуальное извлечение QR-маркера.</p>
               <button
                 className="ar-action-button"
                 onClick={() => setVirtualQrRevealed(true)}
@@ -428,10 +562,7 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
           ) : (
             <>
               <h3>Виртуальный QR-маркер извлечён</h3>
-              <p>
-                Серверная сессия сканирования в будущем будет создана на этом
-                шаге. Сейчас откроется тестовая головоломка.
-              </p>
+              <p>Откройте проверку кодовой структуры. Результат и награды подтверждает сервер.</p>
               <button
                 className="ar-action-button"
                 onClick={() => setIsCodeRepairOpen(true)}
@@ -443,7 +574,10 @@ export function ScannerScreen({ missions, onScreenChange, onSubmitMission }: Sca
         </section>
       )}
 
-      <button className="back-button" onClick={() => onScreenChange('terminal')}>
+      <button
+        className="back-button"
+        onClick={() => onScreenChange('terminal')}
+      >
         ← ВЕРНУТЬСЯ В КОНТУР
       </button>
     </section>

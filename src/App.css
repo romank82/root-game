@@ -1627,3 +1627,40 @@ h2 {
     font-size: 14px;
   }
 }
+/* Persistent ROOT balance: visible on every authenticated game screen. */
+.topbar-session {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.topbar-wallet {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid rgba(91, 239, 175, 0.22);
+  color: #7fffc0;
+  background: rgba(42, 129, 88, 0.08);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.topbar-wallet span {
+  color: #6e9d8a;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+.topbar-wallet strong {
+  font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  .topbar-session {
+    margin-left: auto;
+  }
+
+  .topbar-wallet {
+    padding: 6px 8px;
+  }
+}

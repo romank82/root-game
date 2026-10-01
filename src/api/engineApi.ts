@@ -38,6 +38,23 @@ export type EngineStoryNode = {
   content: Record<string, unknown>
 }
 
+export type EngineSegmentLink = {
+  id: string
+  slug: string
+  title: string
+}
+
+export type EngineSegment = {
+  id: string
+  slug: string
+  title: string
+  description: string
+  content: Record<string, unknown>
+  status: string
+  sortOrder: number
+  linkedMissions: EngineSegmentLink[]
+}
+
 export type EngineBootstrap = {
   player: {
     id: string
@@ -50,6 +67,7 @@ export type EngineBootstrap = {
     lockedBalance: number
   }
   missions: EngineMission[]
+  segments: EngineSegment[]
   inventory: EngineInventoryItem[]
   storyNodes: EngineStoryNode[]
 }
@@ -87,7 +105,7 @@ type SubmitPayload = {
   sequence?: string[]
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
 async function readError(response: Response): Promise<string> {
   try {

@@ -1,9 +1,10 @@
 interface TopbarProps {
   accepted: boolean
+  rootBalance: number
   onBrandClick: () => void
 }
 
-export function Topbar({ accepted, onBrandClick }: TopbarProps) {
+export function Topbar({ accepted, rootBalance, onBrandClick }: TopbarProps) {
   return (
     <header className="topbar">
       <button
@@ -22,9 +23,15 @@ export function Topbar({ accepted, onBrandClick }: TopbarProps) {
       </button>
 
       {accepted && (
-        <div className="status">
-          <span className="status-dot" />
-          КОНТУР АКТИВЕН
+        <div className="topbar-session">
+          <div className="status">
+            <span className="status-dot" />
+            КОНТУР АКТИВЕН
+          </div>
+          <div className="topbar-wallet" aria-label={`Баланс ROOT: ${rootBalance}`}>
+            <span>ROOT</span>
+            <strong>{rootBalance}</strong>
+          </div>
         </div>
       )}
     </header>

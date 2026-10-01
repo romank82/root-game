@@ -1,16 +1,34 @@
 import { useState } from 'react'
-import type { EngineMission } from '../../api/engineApi'
-import type { Screen } from '../../types/game'
+import type {
+  EngineMission,
+  MissionSubmission,
+} from '../../api/engineApi'
+import type { ApiStatus, Screen } from '../../types/game'
 import { Sidebar } from '../Sidebar'
 import { missionText } from '../../utils/missionHelpers'
-import type { ApiStatus } from '../../types/game'
 
 interface TerminalScreenProps {
   echo: number
   apiStatus: ApiStatus
   missions: EngineMission[]
   onScreenChange: (screen: Screen) => void
-  onSubmitMission: (missionId: string, payload: { answer?: string }) => Promise<{ accepted?: boolean } | null>
+  onSubmitMission: (
+    missionId: string,
+    payload: { answer?: string },
+  ) => Promise<MissionSubmission | null>
+}
+
+function missionStatusLabel(status: EngineMission['status']): string {
+  if (status === 'completed') {
+    return 'РАСШИФРОВАНО'
+  }
+  if (status === 'locked') {
+    return 'НЕДОСТУПНО'
+  }
+  if (status === 'in_progress') {
+    return 'В ПРОЦЕССЕ'
+  }
+  return 'ДОСТУПНО'
 }
 
 export function TerminalScreen({
@@ -20,40 +38,33 @@ export function TerminalScreen({
   onScreenChange,
   onSubmitMission,
 }: TerminalScreenProps) {
-  const [answer, setAnswer] = useState('')
-  const [secondAnswer, setSecondAnswer] = useState('')
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [submissionError, setSubmissionError] = useState<string | null>(null)
 
-  const solved = missions.some(
-    (mission) =>
-      mission.id === 'mission-puzzle-a-01' && mission.status === 'completed',
+  // Ordering and player-visible status come from authenticated bootstrap.
+  // This screen only renders public text-answer presentation data.
+  const textMissions = missions.filter(
+    (mission) => mission.missionType === 'text_answer',
   )
 
-  const secondSolved = missions.some(
-    (mission) =>
-      mission.id === 'mission-puzzle-a-02' && mission.status === 'completed',
-  )
+  async function submitAnswer(mission: EngineMission) {
+    const answer = answers[mission.id] ?? ''
+    const response = await onSubmitMission(mission.id, { answer })
 
-  const missionA01 = missions.find(
-    (mission) => mission.id === 'mission-puzzle-a-01',
-  )
-  const missionA02 = missions.find(
-    (mission) => mission.id === 'mission-puzzle-a-02',
-  )
-
-  async function checkAnswer() {
-    const response = await onSubmitMission('mission-puzzle-a-01', { answer })
-    if (response?.accepted) {
-      setAnswer('')
+    if (!response) {
+      setSubmissionError('СЕРВЕР НЕДОСТУПЕН. ПРОВЕРЬТЕ ПОДКЛЮЧЕНИЕ.')
+      return
     }
-  }
 
-  async function checkSecondAnswer() {
-    const response = await onSubmitMission('mission-puzzle-a-02', {
-      answer: secondAnswer,
-    })
-    if (response?.accepted) {
-      setSecondAnswer('')
+    if (response.accepted) {
+      setAnswers((current) => ({ ...current, [mission.id]: '' }))
+      setSubmissionError(null)
+      return
     }
+
+    setSubmissionError(
+      response.message ?? 'ОТВЕТ НЕ ПРИНЯТ. ПРОВЕРЬТЕ ДАННЫЕ И ПОВТОРИТЕ.',
+    )
   }
 
   return (
@@ -65,179 +76,108 @@ export function TerminalScreen({
       />
 
       <div className="terminal-content">
-        <p className="eyebrow">СЕССИЯ #A-017 / НАБЛЮДАТЕЛЬ ПОДКЛЮЧЁН</p>
-
-        <h2>Контур инициализирован</h2>
+        <p className="eyebrow">КОНТУР / ПОДКЛЮЧЕНИЕ УСТАНОВЛЕНО</p>
+        <h2>Доступные архивные пакеты</h2>
 
         <div className="log-window">
           <p>
-            <span>[00:00:01]</span> Подключение к архиву...
+            <span>[СИСТЕМА]</span> Контент получен из защищённого игрового
+            bootstrap.
           </p>
           <p>
-            <span>[00:00:03]</span> Проверка целостности пакета.
-          </p>
-          <p className="alert">
-            <span>[00:00:05]</span> Обнаружено повреждение данных.
-          </p>
-          <p>
-            <span>[00:00:08]</span> Найдено сообщение, адресованное
-            наблюдателю.
+            <span>[СИСТЕМА]</span> Результаты проверок и награды подтверждает
+            сервер.
           </p>
         </div>
 
-        <article className="message-card">
-          <span className="file-label">ФРАГМЕНТ A-01.TXT</span>
+        {submissionError && (
+          <p className="repair-error">{submissionError}</p>
+        )}
 
-          <p>
-            Если ты читаешь это — значит, пакет нашёл тебя раньше, чем
-            Оператор успел закрыть контур.
-          </p>
-
-          <p>
-            Не доверяй первому сообщению. Не доверяй второму. Найди то,
-            что повторяется, когда исчезает шум.
-          </p>
-
-          <p className="signature">— неизвестный источник</p>
-        </article>
-
-        <div className="puzzle">
-          <span className="file-label">
-            {missionText(missionA01, 'label', 'ПЕРВАЯ ПРОВЕРКА')}
-          </span>
-
-          <h3>
-            {missionText(
-              missionA01,
-              'question',
-              'Что остаётся, когда исчезает шум?',
-            )}
-          </h3>
-
-          {!solved ? (
-            <div className="answer-row">
-              <input
-                value={answer}
-                onChange={(event) => setAnswer(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    checkAnswer()
-                  }
-                }}
-                placeholder={missionText(
-                  missionA01,
-                  'inputPlaceholder',
-                  'Введите ответ...',
-                )}
-              />
-
-              <button onClick={checkAnswer}>ПРОВЕРИТЬ</button>
-            </div>
-          ) : (
-            <div className="success">
-              <strong>
-                {missionText(
-                  missionA01,
-                  'successTitle',
-                  '✓ ФРАГМЕНТ РАСШИФРОВАН',
-                )}
-              </strong>
+        {textMissions.length === 0 ? (
+          <section className="location-status">
+            <span className="location-status-icon">⌖</span>
+            <div>
+              <strong>НЕТ ДОСТУПНЫХ ТЕКСТОВЫХ ПАКЕТОВ</strong>
               <p>
-                {missionText(
-                  missionA01,
-                  'successText',
-                  'Получено: 3 ROOT. Найден сюжетный предмет: КЛЮЧ A-01.',
-                )}
+                Опубликованные задания этого типа ещё не получены из игрового
+                bootstrap.
               </p>
             </div>
-          )}
-        </div>
+          </section>
+        ) : (
+          textMissions.map((mission) => {
+            const isCompleted = mission.status === 'completed'
+            const isLocked = mission.status === 'locked'
 
-        {solved && (
-          <>
-            <article className="message-card">
-              <span className="file-label">ФРАГМЕНТ A-02.LOG</span>
+            return (
+              <article className="puzzle" key={mission.id}>
+                <span className="file-label">
+                  {missionText(mission, 'label', mission.title)}
+                </span>
+                <small>СТАТУС: {missionStatusLabel(mission.status)}</small>
+                <h3>
+                  {missionText(mission, 'question', mission.description)}
+                </h3>
 
-              <p>
-                Восстановлен скрытый сектор пакета. Файл не должен был
-                сохраниться после первичной очистки.
-              </p>
-
-              <div className="log-window compact-log">
-                <p>
-                  <span>[ОБЪЕКТ]</span> ARCHIVE_NODE_04
-                </p>
-                <p>
-                  <span>[СТАТУС]</span> недоступен
-                </p>
-                <p>
-                  <span>[ПРИЧИНА]</span> наблюдатель ещё не распознал
-                  источник
-                </p>
-                <p className="alert">
-                  <span>[ПРЕДУПРЕЖДЕНИЕ]</span> Оператор удалил часть
-                  записей.
-                </p>
-              </div>
-
-              <p className="signature">
-                «Не ищи дверь. Ищи место, где сохраняются следы тех, кого
-                уже нет».
-              </p>
-            </article>
-
-            <div className="puzzle">
-              <span className="file-label">
-                {missionText(missionA02, 'label', 'ВТОРАЯ ПРОВЕРКА')}
-              </span>
-
-              <h3>
-                {missionText(
-                  missionA02,
-                  'question',
-                  'Где сохраняются следы исчезнувших записей?',
+                {isCompleted ? (
+                  <div className="success">
+                    <strong>
+                      {missionText(
+                        mission,
+                        'successTitle',
+                        '✓ ПАКЕТ ПОДТВЕРЖДЁН',
+                      )}
+                    </strong>
+                    <p>
+                      {missionText(
+                        mission,
+                        'successText',
+                        'Прогресс подтверждён сервером.',
+                      )}
+                    </p>
+                  </div>
+                ) : isLocked ? (
+                  <div className="locked-file">
+                    <span>?</span>
+                    <div>
+                      <strong>ПАКЕТ НЕДОСТУПЕН</strong>
+                      <small>
+                        Сервер откроет задание после выполнения необходимых
+                        условий.
+                      </small>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="answer-row">
+                    <input
+                      value={answers[mission.id] ?? ''}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setAnswers((current) => ({
+                          ...current,
+                          [mission.id]: value,
+                        }))
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          void submitAnswer(mission)
+                        }
+                      }}
+                      placeholder={missionText(
+                        mission,
+                        'inputPlaceholder',
+                        'Введите ответ...',
+                      )}
+                    />
+                    <button onClick={() => void submitAnswer(mission)}>
+                      ПРОВЕРИТЬ
+                    </button>
+                  </div>
                 )}
-              </h3>
-
-              {!secondSolved ? (
-                <div className="answer-row">
-                  <input
-                    value={secondAnswer}
-                    onChange={(event) => setSecondAnswer(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        checkSecondAnswer()
-                      }
-                    }}
-                    placeholder={missionText(
-                      missionA02,
-                      'inputPlaceholder',
-                      'Введите ответ...',
-                    )}
-                  />
-
-                  <button onClick={checkSecondAnswer}>ПРОВЕРИТЬ</button>
-                </div>
-              ) : (
-                <div className="success">
-                  <strong>
-                    {missionText(
-                      missionA02,
-                      'successTitle',
-                      '✓ ФРАГМЕНТ A-02 РАСШИФРОВАН',
-                    )}
-                  </strong>
-                  <p>
-                    {missionText(
-                      missionA02,
-                      'successText',
-                      'Получено: 4 ROOT. Найден доступ к архивному узлу.',
-                    )}
-                  </p>
-                </div>
-              )}
-            </div>
-          </>
+              </article>
+            )
+          })
         )}
       </div>
     </section>

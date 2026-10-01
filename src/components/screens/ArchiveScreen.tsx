@@ -1,76 +1,53 @@
-import type { EngineMission, EngineStoryNode } from '../../api/engineApi'
+import type { EngineStoryNode } from '../../api/engineApi'
 import type { Screen } from '../../types/game'
 
 interface ArchiveScreenProps {
-  missions: EngineMission[]
   storyNodes: EngineStoryNode[]
   onScreenChange: (screen: Screen) => void
 }
 
-export function ArchiveScreen({ missions, storyNodes, onScreenChange }: ArchiveScreenProps) {
-  const secondSolved = missions.some(
-    (mission) =>
-      mission.id === 'mission-puzzle-a-02' &&
-      mission.status === 'completed',
-  )
-
-  const storyNodeA17 = storyNodes.find(
-    (storyNode) => storyNode.id === 'story-node-a17',
-  )
-
+export function ArchiveScreen({
+  storyNodes,
+  onScreenChange,
+}: ArchiveScreenProps) {
   return (
     <section className="archive">
-      <p className="eyebrow">АРХИВ / УРОВЕНЬ ДОСТУПА: 01</p>
-
+      <p className="eyebrow">АРХИВ / ЛИЧНЫЙ ДОСТУП</p>
       <h2>Полученные фрагменты</h2>
 
-      <button
-        className="archive-file"
-        onClick={() => onScreenChange('terminal')}
-      >
-        <span>TXT</span>
-
-        <div>
-          <strong>ФРАГМЕНТ A-01</strong>
-          <small>Получен во время инициализации контура</small>
-        </div>
-
-        <b>ОТКРЫТЬ →</b>
-      </button>
-
-      {secondSolved ? (
-        <button
-          className="archive-file"
-          onClick={() => onScreenChange('terminal')}
-        >
-          <span>LOG</span>
-
-          <div>
-            <strong>ФРАГМЕНТ A-02</strong>
-            <small>Восстановленный журнал архивного узла</small>
-          </div>
-
-          <b>ОТКРЫТЬ →</b>
-        </button>
-      ) : (
+      {storyNodes.length === 0 ? (
         <div className="locked-file">
           <span>?</span>
-
           <div>
-            <strong>НЕИЗВЕСТНЫЙ ФРАГМЕНТ</strong>
-            <small>Требуется расшифровка пакета A-01</small>
+            <strong>АРХИВ ПОКА ПУСТ</strong>
+            <small>
+              Сюжетные фрагменты появятся здесь только после server-confirmed
+              разблокировки.
+            </small>
           </div>
         </div>
+      ) : (
+        storyNodes.map((storyNode) => (
+          <article
+            className="message-card archive-story-node"
+            key={storyNode.id}
+          >
+            <span className="file-label">
+              СЕРВЕРНЫЙ СЮЖЕТНЫЙ ФРАГМЕНТ
+            </span>
+            <h3>{storyNode.title}</h3>
+            <p>{storyNode.body}</p>
+            <small>СТАТУС: РАЗБЛОКИРОВАН BACKEND-СЕРВЕРОМ</small>
+          </article>
+        ))
       )}
 
-      {storyNodeA17 && (
-        <article className="message-card archive-story-node">
-          <span className="file-label">СЕРВЕРНЫЙ СЮЖЕТНЫЙ ФРАГМЕНТ</span>
-          <h3>{storyNodeA17.title}</h3>
-          <p>{storyNodeA17.body}</p>
-          <small>СТАТУС: РАЗБЛОКИРОВАН BACKEND-СЕРВЕРОМ</small>
-        </article>
-      )}
+      <button
+        className="back-button"
+        onClick={() => onScreenChange('terminal')}
+      >
+        ← ВЕРНУТЬСЯ В КОНТУР
+      </button>
     </section>
   )
 }

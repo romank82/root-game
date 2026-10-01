@@ -1,10 +1,44 @@
 import { useEffect, useState } from 'react'
-import { authenticateTelegram, getEngineBootstrap, type EngineBootstrap } from '../api/engineApi'
+import {
+  authenticateTelegram,
+  getEngineBootstrap,
+  type EngineBootstrap,
+} from '../api/engineApi'
 import type { AuthStatus } from '../types/game'
 
+type AuthState = {
+  status: AuthStatus
+  error: string
+}
+
+function initialAuthState(): AuthState {
+  const webApp = window.Telegram?.WebApp
+  const initData = webApp?.initData?.trim()
+
+  if (!webApp) {
+    return {
+      status: 'unavailable',
+      error: (
+        'Telegram WebApp SDK недоступен. '
+        + 'Откройте игру кнопкой Mini App в чате с ботом.'
+      ),
+    }
+  }
+
+  if (!initData) {
+    return {
+      status: 'unavailable',
+      error: (
+        'Telegram WebApp SDK доступен, но данные запуска Mini App не переданы.'
+      ),
+    }
+  }
+
+  return { status: 'checking', error: '' }
+}
+
 export function useAuth(onBootstrap: (bootstrap: EngineBootstrap) => void) {
-  const [authStatus, setAuthStatus] = useState<AuthStatus>('checking')
-  const [authError, setAuthError] = useState('')
+  const [auth, setAuth] = useState<AuthState>(initialAuthState)
 
   useEffect(() => {
     let isMounted = true
@@ -14,11 +48,9 @@ export function useAuth(onBootstrap: (bootstrap: EngineBootstrap) => void) {
     webApp?.ready()
     webApp?.expand()
 
-    if (!initData) {
-      setAuthStatus('unavailable')
-      setAuthError(
-        'Откройте CHIMERA Protocol через Telegram-бота, чтобы начать игровую сессию.',
-      )
+    // The unavailable state is derived during initialization. Do not attempt
+    // authentication without Telegram-controlled Mini App launch data.
+    if (!webApp || !initData) {
       return () => {
         isMounted = false
       }
@@ -29,16 +61,16 @@ export function useAuth(onBootstrap: (bootstrap: EngineBootstrap) => void) {
       .then((bootstrap) => {
         if (!isMounted) return
         onBootstrap(bootstrap)
-        setAuthStatus('authenticated')
+        setAuth({ status: 'authenticated', error: '' })
       })
       .catch((error: unknown) => {
         if (!isMounted) return
-        setAuthStatus('error')
-        setAuthError(
-          error instanceof Error
+        setAuth({
+          status: 'error',
+          error: error instanceof Error
             ? error.message
             : 'Не удалось подтвердить Telegram-сессию.',
-        )
+        })
       })
 
     return () => {
@@ -46,5 +78,5 @@ export function useAuth(onBootstrap: (bootstrap: EngineBootstrap) => void) {
     }
   }, [onBootstrap])
 
-  return { authStatus, authError }
+  return { authStatus: auth.status, authError: auth.error }
 }

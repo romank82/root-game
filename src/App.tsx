@@ -20,6 +20,7 @@ function App() {
     inventory,
     storyNodes,
     missions,
+    segments,
     apiStatus,
     
     applyEngineBootstrap,
@@ -75,7 +76,11 @@ function App() {
     <main className="app-shell">
       <div className="noise" />
 
-      <Topbar accepted={accepted} onBrandClick={() => setScreen('terminal')} />
+      <Topbar
+        accepted={accepted}
+        rootBalance={echo}
+        onBrandClick={() => setScreen('terminal')}
+      />
 
       {screen === 'briefing' && (
         <BriefingScreen
@@ -99,7 +104,6 @@ function App() {
 
       {screen === 'archive' && (
         <ArchiveScreen
-          missions={missions}
           storyNodes={storyNodes}
           onScreenChange={setScreen}
         />
@@ -112,6 +116,7 @@ function App() {
       {screen === 'scanner' && (
         <ScannerScreen
           missions={missions}
+          segments={segments}
           onScreenChange={setScreen}
           onSubmitMission={submitMission}
         />
