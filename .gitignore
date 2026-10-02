@@ -50,3 +50,6 @@ package-lock.json
 
 # Local assistant-created source backups
 .local-backups/
+
+# Local disposable migration test databases
+.local-migration-tests/
