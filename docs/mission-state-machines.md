@@ -37,3 +37,35 @@ session как `failed`. Детали: `docs/geo-team-mission-contract.md`.
 
 Нельзя approve собственную заявку; execution использует snapshot и
 выполняется идемпотентно.
+
+<!-- stage-3-2-runtime-contract-reconciliation -->
+
+## Solo and team runtime clarification
+
+`PlayerMission` is a current-progress projection, not historical runtime
+history. `MissionRun` and `MissionAttempt` are the shared runtime records;
+one terminal `MissionRun` has at most one `MissionSettlement`.
+
+For the first paid solo vertical, start is direct and atomic: validate player,
+published/effective mission policy, prerequisites, active-run limits,
+repeatability, ROOT and item requirements; lock applicable rows; debit ROOT,
+consume required items, snapshot configuration, and create `MissionRun(active)`
+in one transaction. Solo start does not use a reservation phase.
+
+The existing `reserved -> accepted -> active` MissionRun path remains for
+future geo/team pre-start assembly only. It must not be imposed on solo runs.
+
+Target solo attempt lifecycle:
+
+```text
+no attempt -> issued -> submitted -> succeeded | failed
+issued -> timed_out
+```
+
+Attempt sequence numbers are positive and unique within a run. The backend
+decides deadline and outcome. Technical failures without a committed outcome
+do not consume an attempt; committed retries return the previous result for
+the same idempotency key.
+
+Details: `docs/mission-run-contract.md`,
+`docs/inventory-ledger-contract.md`, and `docs/fallback-shop-contract.md`.

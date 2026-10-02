@@ -96,3 +96,26 @@ Existing approval requests (`pending`, `approved`, `rejected`, `expired`,
 `approve`, `reject`, `cancel` endpoints with appropriate permission checks.
 
 Secrets, hashes, raw tokens и validation answers не возвращаются API.
+
+<!-- stage-3-2-runtime-contract-reconciliation -->
+
+## Target solo mission-run API (not implemented)
+
+Every state-changing target route requires authenticated player identity and
+a bounded client-generated idempotency key. The exact transport field and
+response schemas must be finalized before implementation.
+
+- `POST /api/v1/engine/missions/{mission_id}/runs` — direct atomic solo start.
+- `GET /api/v1/engine/mission-runs/{run_id}` — owner-permitted run projection.
+- `POST /api/v1/engine/mission-runs/{run_id}/attempts` — issue next attempt.
+- `POST /api/v1/engine/mission-attempts/{attempt_id}/submit` — resolve attempt.
+- `GET /api/v1/engine/fallback-offers` — permitted personal offer projection.
+- `POST /api/v1/engine/fallback-offers/{offer_id}/purchases` — atomic purchase.
+
+Responses expose only caller-permitted state. They never expose accepted
+answers, correct sequences, protected challenge snapshots, raw location
+proofs, QR material, reservation internals, other players data, audit
+metadata, secrets, hashes, tokens, cookies, or Telegram initData.
+
+Target behavior is defined in `docs/mission-run-contract.md`,
+`docs/inventory-ledger-contract.md`, and `docs/fallback-shop-contract.md`.

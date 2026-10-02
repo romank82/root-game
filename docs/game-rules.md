@@ -44,3 +44,29 @@ archived/несуществующий контент или недействит
 Их окончательное списание происходит атомарно только при server-validated
 старте; отмена до старта освобождает резерв. Детальный geo/team/cipher
 контракт: `docs/geo-team-mission-contract.md`.
+
+<!-- stage-3-2-runtime-contract-reconciliation -->
+
+## Solo run, rewards and fallback clarification
+
+A paid solo MissionRun starts through one atomic direct-start operation:
+validate published content, prerequisites, repeatability, active-run limits,
+feature flags, ROOT and key requirements; lock wallet/inventory rows; debit
+ROOT; consume required keys/items; and create `MissionRun(active)` with its
+immutable effective configuration snapshot.
+
+Solo runs do not reserve entry resources. Reservations apply only to future
+geo/team assembly before shared server-validated activation.
+
+Maximum attempts and non-increasing reward multipliers are validated CMS or
+System Settings data. The current default of three attempts and 100/50/25
+percent multipliers is not hardcoded runtime behavior.
+
+A qualifying consumptive first-attempt outcome may create personal fallback
+eligibility and add one configured unit to a global offer pool exactly once.
+Fallback uses a pre-published CMS product. Purchase atomically debits ROOT,
+decrements pool, credits inventory, and consumes entitlement capacity; it
+never automatically changes an already active run.
+
+Detailed contracts: `docs/mission-run-contract.md`,
+`docs/inventory-ledger-contract.md`, `docs/fallback-shop-contract.md`.

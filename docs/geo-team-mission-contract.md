@@ -83,3 +83,21 @@ At start, fee charge and key consumption occur in the same transaction as activa
 Fallback eligibility and quota are per-player and server-enforced. A purchase is an idempotent atomic ROOT debit plus entitlement creation.
 
 Future geo/AR, team-session, shop, and economy administration require explicit permissions and domain-specific approval flows where policy requires them. Admin audit uses only safe allowlisted metadata and excludes raw coordinates, proofs, QR data, answers, challenge state, private chat content, and secrets. Team chat/moderation/retention requires a separate contract.
+
+<!-- stage-3-2-runtime-contract-reconciliation -->
+
+## Shared-runtime boundary
+
+This contract remains specific to geo/team/cipher behavior. Shared solo and
+team runtime concepts are defined by `docs/mission-run-contract.md`; immutable
+inventory rules are defined by `docs/inventory-ledger-contract.md`; fallback
+eligibility, global pool, and purchase rules are defined by
+`docs/fallback-shop-contract.md`.
+
+The `reserved -> accepted -> active` path and wallet/inventory reservations
+described in this document apply to future geo/team pre-start assembly. The
+first paid solo vertical uses direct atomic start without a reservation phase.
+
+A qualifying first-attempt outcome may use the shared fallback policy, but
+this document does not define a separate team-specific purchase executor or
+duplicate fallback accounting model.

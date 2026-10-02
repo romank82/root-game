@@ -85,3 +85,21 @@ API:
 значения запрещены. Audit содержит permission, request/approval ID, actor ID,
 IP и безопасный outcome/error context; free-text reason не дублируется и
 фиксируется только безопасным признаком `reasonProvided`.
+
+<!-- stage-3-2-runtime-contract-reconciliation -->
+
+## Mission-runtime configuration boundary
+
+The current catalog provides platform defaults, active-run limits, and feature
+flags. Mission-specific entry prices, item requirements, exact attempt policy,
+cipher configuration, reward policy, repeatability, fallback product binding,
+product price, pool policy, and product lifecycle remain validated versioned
+CMS configuration and become part of immutable effective run snapshots.
+
+Future System Settings keys for runtime rollout, fallback/shop feature flags,
+or bounded idempotency retention require a separate catalog, validation,
+permissions, audit, and approval change before use. Runtime code must not use
+an undocumented or hardcoded setting.
+
+Related target contracts: `docs/mission-run-contract.md`,
+`docs/inventory-ledger-contract.md`, and `docs/fallback-shop-contract.md`.
