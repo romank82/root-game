@@ -6,11 +6,13 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -95,6 +97,65 @@ class TeamSession(RuntimeTimestampMixin, Base):
     )
 
 
+class MissionRuntimePolicy(RuntimeTimestampMixin, Base):
+    """Versioned CMS policy used to create immutable solo-run snapshots."""
+
+    __tablename__ = "mission_runtime_policies"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    entry_root_atomic: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt_deadline_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    repeatability_policy: Mapped[str] = mapped_column(String(64), nullable=False)
+    required_items_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    challenge_policy_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    reward_policy_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    fallback_policy_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    feature_flags_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "mission_id",
+            "version",
+            name="uq_mission_runtime_policies_mission_version",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')",
+            name="ck_mission_runtime_policies_status",
+        ),
+        CheckConstraint(
+            "version >= 1",
+            name="ck_mission_runtime_policies_version_positive",
+        ),
+        CheckConstraint(
+            "entry_root_atomic >= 0",
+            name="ck_mission_runtime_policies_entry_root_nonnegative",
+        ),
+        CheckConstraint(
+            "max_attempts >= 1",
+            name="ck_mission_runtime_policies_max_attempts_positive",
+        ),
+        CheckConstraint(
+            "attempt_deadline_seconds >= 1",
+            name="ck_mission_runtime_policies_deadline_positive",
+        ),
+        Index(
+            "uq_mission_runtime_policies_one_published_per_mission",
+            "mission_id",
+            unique=True,
+            postgresql_where=text("status = 'published'"),
+            sqlite_where=text("status = 'published'"),
+        ),
+    )
+
+
 class MissionRun(RuntimeTimestampMixin, Base):
     __tablename__ = "mission_runs"
 
@@ -114,6 +175,20 @@ class MissionRun(RuntimeTimestampMixin, Base):
         nullable=True,
         index=True,
     )
+    runtime_policy_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mission_runtime_policies.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    runtime_policy_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    start_idempotency_key: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    start_request_fingerprint: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     effective_config_snapshot: Mapped[dict] = mapped_column(
         JSON,
@@ -131,6 +206,19 @@ class MissionRun(RuntimeTimestampMixin, Base):
             "'timeout', 'abandoned', 'cancelled_before_start'"
             ")",
             name="ck_mission_runs_status",
+        ),
+        CheckConstraint(
+            "(runtime_policy_id IS NULL AND runtime_policy_version IS NULL) "
+            "OR (runtime_policy_id IS NOT NULL AND runtime_policy_version IS NOT NULL)",
+            name="ck_mission_runs_runtime_policy_pair",
+        ),
+        Index(
+            "uq_mission_runs_player_start_idempotency",
+            "player_id",
+            "start_idempotency_key",
+            unique=True,
+            postgresql_where=text("start_idempotency_key IS NOT NULL"),
+            sqlite_where=text("start_idempotency_key IS NOT NULL"),
         ),
     )
 
@@ -197,6 +285,18 @@ class MissionAttempt(RuntimeTimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    issue_idempotency_key: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    submit_idempotency_key: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    submit_request_fingerprint: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -213,6 +313,21 @@ class MissionAttempt(RuntimeTimestampMixin, Base):
         CheckConstraint(
             "status IN ('issued', 'submitted', 'succeeded', 'failed', 'timed_out')",
             name="ck_mission_attempts_status",
+        ),
+        Index(
+            "uq_mission_attempts_run_issue_idempotency",
+            "mission_run_id",
+            "issue_idempotency_key",
+            unique=True,
+            postgresql_where=text("issue_idempotency_key IS NOT NULL"),
+            sqlite_where=text("issue_idempotency_key IS NOT NULL"),
+        ),
+        Index(
+            "uq_mission_attempts_submit_idempotency",
+            "submit_idempotency_key",
+            unique=True,
+            postgresql_where=text("submit_idempotency_key IS NOT NULL"),
+            sqlite_where=text("submit_idempotency_key IS NOT NULL"),
         ),
     )
 

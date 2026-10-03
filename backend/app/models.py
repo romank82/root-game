@@ -27,6 +27,7 @@ from app.geo_team_runtime_models import (  # noqa: F401
     LocationProof,
     MissionAttempt,
     MissionRun,
+    MissionRuntimePolicy,
     MissionSettlement,
     PlayerFallbackEntitlement,
     TeamSession,
@@ -427,6 +428,10 @@ class PlayerItem(TimestampMixin, Base):
             "player_id",
             "item_id",
             name="uq_player_items_player_item",
+        ),
+        CheckConstraint(
+            "quantity >= 0",
+            name="ck_player_items_quantity_nonnegative",
         ),
     )
 
