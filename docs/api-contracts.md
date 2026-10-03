@@ -119,3 +119,48 @@ metadata, secrets, hashes, tokens, cookies, or Telegram initData.
 
 Target behavior is defined in `docs/mission-run-contract.md`,
 `docs/inventory-ledger-contract.md`, and `docs/fallback-shop-contract.md`.
+
+## Solo runtime API v1
+
+Этот раздел определяет transport contract первой версии одиночных runtime-миссий.
+Детали CMS policy определены в `docs/solo-mission-runtime-policy-contract.md`.
+
+### Аутентификация и доступ
+Все маршруты требуют текущую аутентифицированную player identity через
+существующую server-side Telegram session.
+Игрок получает доступ только к собственным run и attempt.
+
+### Idempotency-Key
+Каждый state-changing route требует HTTP header:
+`Idempotency-Key: <client-generated-key>`.
+Ключ имеет длину от 16 до 128 ASCII символов и может содержать только
+латинские буквы, цифры, дефис и underscore.
+Повтор того же committed request возвращает прежний safe public result.
+Использование того же ключа с другим request fingerprint возвращает HTTP 409
+с безопасным code `idempotency_key_reused_with_different_request`.
+Ошибка до commit не создаёт game effect и допускает retry с тем же key.
+
+### Маршруты
+- `POST /api/v1/engine/missions/{mission_id}/runs`
+  - body: `{}`;
+  - атомарно запускает paid solo run;
+  - проверяет Mission и runtime policy publication, feature policy,
+    prerequisites, repeatability, active-run limits, ROOT и items.
+- `GET /api/v1/engine/mission-runs/{run_id}`
+  - owner-only safe run projection; Idempotency-Key не требуется.
+- `POST /api/v1/engine/mission-runs/{run_id}/attempts`
+  - body: `{}`; выдаёт следующую server-side attempt.
+- `POST /api/v1/engine/mission-attempts/{attempt_id}/submit`
+  - cipher body: `{"selection":["A","C","F","B"]}`;
+  - сервер проверяет ownership, state, deadline и protected snapshot.
+
+### Public response boundary
+Response может содержать ID, status, timestamps, разрешённое visible challenge
+presentation, deadline, номер attempt, safe run state и фактически committed
+награды ROOT/items.
+Response никогда не содержит accepted answers, correct sequence, protected snapshot,
+validation config, policy JSON, raw ledger/inventory metadata, QR/location data,
+other players data, audit metadata, tokens, cookies, secrets или Telegram initData.
+Fallback offers и purchases не входят в API v1.
+Legacy `POST /api/v1/engine/missions/{mission_id}/submit` остаётся отдельным
+маршрутом до отдельной reviewed migration/deprecation задачи.
