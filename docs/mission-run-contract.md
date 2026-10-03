@@ -53,8 +53,8 @@ A dedicated `start_mission_run` domain executor performs the following in one tr
 
 1. authenticate and validate the active player;
 2. lock and validate the Mission and its published/effective policy;
-2. validate prerequisites, active-run limits, repeatability, feature flags, and all CMS-owned entry requirements;
-2. acquire the wallet and applicable inventory rows with the required locking semantics for the database dialect;
+3. validate prerequisites, active-run limits, repeatability, feature flags, and all CMS-owned entry requirements;
+4. acquire the wallet and applicable inventory rows with the required locking semantics for the database dialect;
 5. verify non-negative sufficient ROOT and item quantities;
 6. create immutable ROOT entry-debit and inventory consumption records;
 7. update cached wallet/item projections consistently with their ledgers;
@@ -80,7 +80,8 @@ no attempt
   -> succeeded | failed
 
 issued
-  -> timed_out```
+  -> timed_out
+```
 
 `submitted` is a short processing state. A persisted terminal outcome is exactly one of `succeeded`, `failed`, or `timed_out`. A terminal attempt cannot be submitted, resolved, or rewarded again.
 
