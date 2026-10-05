@@ -34,14 +34,14 @@
 - **Зависит от**: 3.1
 - **Риск**: низкий
 
-### Шаг 3.4: Модель RewardPool
+### ✅ Шаг 3.4: Модель RewardPool
 - **Что**: пул случайных наград.
 - **Файлы**: файл моделей проекта.
 - **Проверка**: создать запись RewardPool.
 - **Зависит от**: —
 - **Риск**: низкий
 
-### Шаг 3.5: Миграция для RewardPool
+### ✅ Шаг 3.5: Миграция для RewardPool
 - **Что**: миграция таблицы пулов.
 - **Файлы**: папка alembic-миграций.
 - **Проверка**: применить миграцию.
@@ -97,6 +97,8 @@
 - **3.2.1** Миграция `481081d0694d_add_key_rules_admin_permissions` (permissions `key_rules.read`, `key_rules.manage`, category=economy).
 - **3.3** Роутер `backend/app/admin_key_rules.py` (4 эндпоинта: GET list, GET one, POST, PATCH).
 - **3.3.4** Тесты `backend/tests/test_admin_key_rules.py` (10 тестов).
+- **3.4** Модели `RewardPool` и `RewardPoolEntry` в `backend/app/models.py`.
+- **3.5** Миграция `8f098e3e0a63_add_reward_pools_tables` (SQLite + PostgreSQL).
 
 Все проверки: 65/65 unit-тестов, эндпоинты зарегистрированы в OpenAPI, миграции применены к SQLite и PostgreSQL.
 

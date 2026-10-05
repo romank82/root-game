@@ -354,6 +354,68 @@ class MissionReward(TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class RewardPool(TimestampMixin, Base):
+    """CMS-пул случайных наград: независимая сущность.
+
+    На шаге 3.4 пул не привязан к Mission/MissionReward — связь появится
+    отдельным шагом. Возможные награды и их веса хранятся в
+    RewardPoolEntry. Все игровые правила читаются из CMS, не из хардкода.
+    """
+
+    __tablename__ = "reward_pools"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="draft",
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class RewardPoolEntry(TimestampMixin, Base):
+    """Одна строка пула случайных наград.
+
+    reward_type/amount/item_id/story_node_id/reward_value повторяют форму
+    MissionReward; weight задаёт относительный шанс entry. Суммы весов
+    валидируются позже, на шаге админ-роутера.
+    """
+
+    __tablename__ = "reward_pool_entries"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    pool_id: Mapped[str] = mapped_column(
+        ForeignKey("reward_pools.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    reward_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    story_node_id: Mapped[str | None] = mapped_column(
+        ForeignKey("story_nodes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reward_value: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        CheckConstraint(
+            "weight > 0",
+            name="ck_reward_pool_entries_weight_positive",
+        ),
+    )
+
+
 class GamePlayer(TimestampMixin, Base):
     __tablename__ = "game_players"
 
