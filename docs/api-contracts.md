@@ -49,6 +49,7 @@ or settlement internals. Exact behavior is defined in
   - publishing requires at least one active linked Mission, and every active
     linked Mission must be `published`;
   - `archived` Segment is final and cannot be published, unpublished, or edited.
+- `/api/v1/admin/reward-pools` — list/get/create/update; entries передаются и заменяются целиком в payload (`entries`); статус меняется через PATCH (draft/published); physical DELETE недоступен.
 - `/api/v1/admin/admins` — list/create/grant/revoke/deactivate/reactivate.
 - `/api/v1/admin/approvals` — список собственных заявок (creation unavailable);
   super-admin видит все заявки.

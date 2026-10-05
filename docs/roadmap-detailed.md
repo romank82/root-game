@@ -48,7 +48,7 @@
 - **Зависит от**: 3.4
 - **Риск**: низкий
 
-### Шаг 3.6: Админ-роутер для RewardPool
+### ✅ Шаг 3.6: Админ-роутер для RewardPool
 - **Что**: CRUD для пулов наград.
 - **Файлы**: файл роутера пулов.
 - **Проверка**: создание пула через API.
@@ -99,6 +99,7 @@
 - **3.3.4** Тесты `backend/tests/test_admin_key_rules.py` (10 тестов).
 - **3.4** Модели `RewardPool` и `RewardPoolEntry` в `backend/app/models.py`.
 - **3.5** Миграция `8f098e3e0a63_add_reward_pools_tables` (SQLite + PostgreSQL).
+- **3.6** Роутер `backend/app/admin_reward_pools.py` (4 эндпоинта: GET list, GET one, POST, PATCH). Permissions `reward_pools.read`, `reward_pools.manage` (category=economy) — миграция `a9d4e2b8c7f1`. Тесты `backend/tests/test_admin_reward_pools.py` (18 тестов).
 
 Все проверки: 65/65 unit-тестов, эндпоинты зарегистрированы в OpenAPI, миграции применены к SQLite и PostgreSQL.
 
