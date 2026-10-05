@@ -37,6 +37,7 @@ from app.admin_approvals import router as admin_approvals_router
 from app.admin_management import router as admin_management_router
 from app.admin_missions import router as admin_missions_router
 from app.admin_segments import router as admin_segments_router
+from app.admin_key_rules import router as admin_key_rules_router
 from app.admin_system_settings import router as admin_system_settings_router
 
 SESSION_COOKIE_NAME = "chimera_session"
@@ -440,4 +441,5 @@ app.include_router(admin_management_router)
 app.include_router(admin_approvals_router)
 app.include_router(admin_missions_router)
 app.include_router(admin_segments_router)
+app.include_router(admin_key_rules_router)
 app.include_router(admin_system_settings_router)

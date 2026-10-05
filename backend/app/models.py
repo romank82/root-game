@@ -283,6 +283,52 @@ class Item(TimestampMixin, Base):
     )
 
 
+class KeyRules(TimestampMixin, Base):
+    """CMS-правила ключа доступа: одна запись на один Item (item_id UNIQUE).
+
+    Ключ — это обычный Item из items, а KeyRules задаёт игровые правила его
+    использования (расход из инвентаря, размер стопки, запрет передачи /
+    продажи / обмена). Механики читают правила из CMS, а не из хардкода.
+    """
+
+    __tablename__ = "key_rules"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    item_id: Mapped[str] = mapped_column(
+        ForeignKey("items.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    is_consumable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    stack_limit: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    transfer_forbidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    sale_forbidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    trade_forbidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "item_id",
+            name="uq_key_rules_item_id",
+        ),
+        CheckConstraint(
+            "stack_limit >= 1",
+            name="ck_key_rules_stack_limit_min",
+        ),
+    )
+
+
 class MissionReward(TimestampMixin, Base):
     __tablename__ = "mission_rewards"
 
