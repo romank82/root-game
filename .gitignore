@@ -53,3 +53,7 @@ package-lock.json
 
 # Local disposable migration test databases
 .local-migration-tests/
+
+# Editor backups
+*.save
+*.bak
