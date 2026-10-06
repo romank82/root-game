@@ -1012,6 +1012,289 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(player_item.quantity, 1)  # не списан
 
+    def test_zz_4_2_1_failed_attempt_keeps_key_consumed(self) -> None:
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import PlayerItem, PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        rejected = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong_answer",
+            sequence=None,
+        )
+        self.assertFalse(rejected["accepted"])
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            # ROOT списан и не восстановлен: 50 - 5 = 45.
+            self.assertEqual(wallet.available_balance, 45)
+
+            # Debit-проводка входа осталась, не отменена и ровно одна.
+            debits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_entry_debit",
+                    WalletTransaction.reference_id == ids["target"],
+                )
+            ).all()
+            self.assertEqual(len(debits), 1)
+            self.assertEqual(debits[0].transaction_type, "debit")
+            self.assertEqual(debits[0].amount, 5)
+            self.assertEqual(debits[0].balance_after, 45)
+
+            # Нет credit-проводки по reference входа.
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.wallet_id == wallet.id,
+                        WalletTransaction.reference_type == "mission_entry_debit",
+                        WalletTransaction.reference_id == ids["target"],
+                        WalletTransaction.transaction_type == "credit",
+                    )
+                ),
+                0,
+            )
+
+            # Ключ списан и не восстановлен: 2 - 1 = 1.
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertEqual(player_item.quantity, 1)
+
+            # Сводка 4.2.3: нет credited/released-событий по reference входа.
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(InventoryEvent.id)).where(
+                        InventoryEvent.reference_type == "mission_entry",
+                        InventoryEvent.reference_id == ids["target"],
+                        InventoryEvent.event_type.in_(["credited", "released"]),
+                    )
+                ),
+                0,
+            )
+
+            # «Провал» = некорректный ответ: статус in_progress, попытка учтена.
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertEqual(player_mission.status, "in_progress")
+            self.assertEqual(player_mission.attempt_count, 1)
+
+    def test_zz_4_2_2_second_failed_attempt_does_not_recharge(self) -> None:
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import PlayerItem, PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        first = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong",
+            sequence=None,
+        )
+        second = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong",
+            sequence=None,
+        )
+        self.assertFalse(first["accepted"])
+        self.assertFalse(second["accepted"])
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            # Вторая провальная попытка не списывает повторно.
+            self.assertEqual(wallet.available_balance, 45)
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.wallet_id == wallet.id,
+                        WalletTransaction.reference_type == "mission_entry_debit",
+                        WalletTransaction.reference_id == ids["target"],
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(InventoryEvent.id)).where(
+                        InventoryEvent.reference_type == "mission_entry",
+                        InventoryEvent.reference_id == ids["target"],
+                    )
+                ),
+                1,
+            )
+
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertEqual(player_item.quantity, 1)
+
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertEqual(player_mission.status, "in_progress")
+            self.assertEqual(player_mission.attempt_count, 2)
+
+    def test_zz_4_2_3_no_release_or_credit_events_for_entry_reference(self) -> None:
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        rejected = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong_answer",
+            sequence=None,
+        )
+        self.assertFalse(rejected["accepted"])
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            # Прямой срез по ledger: для входа нет «возвратных» инвентарных событий.
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(InventoryEvent.id)).where(
+                        InventoryEvent.reference_type == "mission_entry",
+                        InventoryEvent.reference_id == ids["target"],
+                        InventoryEvent.event_type.in_(["credited", "released"]),
+                    )
+                ),
+                0,
+            )
+            # И нет credit-проводок по reference входа.
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.wallet_id == wallet.id,
+                        WalletTransaction.reference_type == "mission_entry_debit",
+                        WalletTransaction.reference_id == ids["target"],
+                        WalletTransaction.transaction_type == "credit",
+                    )
+                ),
+                0,
+            )
+
+    def test_zz_4_2_4_ledger_immutability_trigger_blocks_mutation(self) -> None:
+        from sqlalchemy import exc as sa_exc
+        from sqlalchemy import text
+
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong_answer",
+            sequence=None,
+        )
+
+        def assert_immutable(sql: str, params: dict[str, str]) -> None:
+            # SQLite RAISE(ABORT) может прийти и как OperationalError,
+            # и как IntegrityError (зависит от драйвера/extended codes),
+            # поэтому ловим общего родителя DBAPIError и проверяем message.
+            try:
+                with self.engine.begin() as connection:
+                    connection.execute(text(sql), params)
+            except sa_exc.DBAPIError as error:
+                self.assertIn(
+                    "immutable",
+                    str(getattr(error, "orig", "")),
+                )
+            else:
+                self.fail("БД допустила мутацию immutable-ledger записи")
+
+        assert_immutable(
+            "UPDATE wallet_transactions SET amount = 999 "
+            "WHERE reference_type = :rt AND reference_id = :rid",
+            {"rt": "mission_entry_debit", "rid": ids["target"]},
+        )
+        assert_immutable(
+            "DELETE FROM inventory_events "
+            "WHERE reference_type = :rt AND reference_id = :rid",
+            {"rt": "mission_entry", "rid": ids["target"]},
+        )
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            debits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_entry_debit",
+                    WalletTransaction.reference_id == ids["target"],
+                )
+            ).all()
+            # UPDATE не прошёл: проводка на месте и не изменена.
+            self.assertEqual(len(debits), 1)
+            self.assertEqual(debits[0].amount, 5)
+
+            # DELETE не прошёл: consumed-событие на месте.
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(InventoryEvent.id)).where(
+                        InventoryEvent.reference_type == "mission_entry",
+                        InventoryEvent.reference_id == ids["target"],
+                    )
+                ),
+                1,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
