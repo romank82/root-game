@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     JSON,
@@ -412,6 +413,98 @@ class RewardPoolEntry(TimestampMixin, Base):
         CheckConstraint(
             "weight > 0",
             name="ck_reward_pool_entries_weight_positive",
+        ),
+    )
+
+
+class GeoZone(TimestampMixin, Base):
+    """CMS-справочник геозон для миссий и AR-объектов.
+
+    Внешние ссылки на зону идут по ``slug`` строкой без FK
+    (validationConfig.geo.zoneId, LocationProof.zone_id).
+    Координаты хранятся как Float/JSON: PostGIS не используется.
+    Cross-field-валидация по типу зоны (radius требует radius_meters,
+    polygon — polygon_coordinates) выполняется в Python-контракте, не в БД.
+    """
+
+    __tablename__ = "geo_zones"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    zone_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="radius",
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="draft",
+        index=True,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Центр зоны для radius / poi / event.
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    radius_meters: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Контур полигона: [[lat, lon], ...], минимум 3 точки.
+    polygon_coordinates: Mapped[list | None] = mapped_column(
+        JSON, nullable=True, default=list
+    )
+
+    timezone: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="UTC",
+    )
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    max_location_accuracy_meters: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    minimum_presence_seconds: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "zone_type IN ('radius', 'polygon', 'poi', 'event')",
+            name="ck_geo_zones_zone_type",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')",
+            name="ck_geo_zones_status",
+        ),
+        CheckConstraint(
+            "latitude IS NULL OR (latitude >= -90 AND latitude <= 90)",
+            name="ck_geo_zones_latitude_range",
+        ),
+        CheckConstraint(
+            "longitude IS NULL OR (longitude >= -180 AND longitude <= 180)",
+            name="ck_geo_zones_longitude_range",
+        ),
+        CheckConstraint(
+            "radius_meters IS NULL OR radius_meters > 0",
+            name="ck_geo_zones_radius_positive",
+        ),
+        CheckConstraint(
+            "max_location_accuracy_meters IS NULL OR max_location_accuracy_meters >= 0",
+            name="ck_geo_zones_accuracy_nonnegative",
+        ),
+        CheckConstraint(
+            "minimum_presence_seconds >= 0",
+            name="ck_geo_zones_presence_nonnegative",
+        ),
+        CheckConstraint(
+            "ends_at IS NULL OR starts_at IS NULL OR ends_at >= starts_at",
+            name="ck_geo_zones_time_order",
         ),
     )
 

@@ -55,14 +55,14 @@
 - **Зависит от**: 3.4
 - **Риск**: низкий
 
-### Шаг 3.7: Модель GeoZone
+### ✅ Шаг 3.7: Модель GeoZone
 - **Что**: справочник геозон (radius/polygon/POI).
 - **Файлы**: файл моделей проекта.
 - **Проверка**: создать GeoZone.
 - **Зависит от**: —
 - **Риск**: низкий
 
-### Шаг 3.8: Миграция и админ-роутер для GeoZone
+### ✅ Шаг 3.8: Миграция и админ-роутер для GeoZone
 - **Что**: миграция + CRUD для геозон.
 - **Файлы**: папка миграций, файл роутера геозон.
 - **Проверка**: создание геозоны через API.
@@ -100,6 +100,9 @@
 - **3.4** Модели `RewardPool` и `RewardPoolEntry` в `backend/app/models.py`.
 - **3.5** Миграция `8f098e3e0a63_add_reward_pools_tables` (SQLite + PostgreSQL).
 - **3.6** Роутер `backend/app/admin_reward_pools.py` (4 эндпоинта: GET list, GET one, POST, PATCH). Permissions `reward_pools.read`, `reward_pools.manage` (category=economy) — миграция `a9d4e2b8c7f1`. Тесты `backend/tests/test_admin_reward_pools.py` (18 тестов).
+- **3.7** Модель `GeoZone` в `backend/app/models.py`.
+- **3.8** Миграции `a1d2aafc3d3b_add_geo_zones_table` и `38f24f405a8b_add_geo_zones_admin_permissions` (SQLite + PostgreSQL). Permissions `geo_zones.read`, `geo_zones.manage` (category=geo).
+- **3.8.9** Роутер `backend/app/admin_geo_zones.py` (4 эндпоинта, cross-field-валидация geometry). Тесты `backend/tests/test_admin_geo_zones.py` (26 тестов).
 
 Все проверки: 83/83 unit-тестов, эндпоинты зарегистрированы в OpenAPI, миграции применены к SQLite и PostgreSQL.
 
