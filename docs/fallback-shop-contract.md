@@ -50,6 +50,41 @@ foundation may need a separately reviewed migration before it can express all
 repeatable-run policy cases. No schema workaround or overloaded mutable field
 is permitted without that review.
 
+## V1 semantics (implemented in 4.3a)
+
+Until the full product/pool schema is reviewed, 4.3a implements a deliberately
+narrow subset of the target contract:
+
+- A **qualifying outcome** is the first failed answer submission
+  (`attempt_count_before == 0`) for the owning player. It is eligible whether
+  or not the mission has a paid entry policy; a failed answer on a free/legacy
+  mission is equally eligible.
+- Only the **personal entitlement** is created as a `PlayerFallbackEntitlement`
+  row with `offer_id = shop.fallback.default_offer_id`,
+  `quota_limit = shop.fallback.default_quota_limit`, `consumed_count = 0` and
+  `status = 'available'`.
+- The **global offer pool is not touched**: V1 has no pool rows.
+- Creation is **idempotent** via the existing unique `(player_id, mission_id)`
+  constraint and the `attempt_count_before != 0` guard: later failed attempts
+  cannot extend or duplicate the entitlement.
+- The empty-string `offer_id` default means no entitlement is recorded until an
+  admin enables a real `shop.fallback.default_offer_id` (and
+  `shop.fallback.enabled = true`) through System Settings.
+- `shop.fallback.default_available_seconds` is catalog-only in V1: entitlement
+  rows have no `expires_at`, so the value is reserved for 4.4+.
+
+### Configuration keys (4.3a)
+
+| key | type | default | purpose |
+| --- | --- | --- | --- |
+| `shop.fallback.enabled` | boolean | `false` | master feature flag for V1 |
+| `shop.fallback.default_offer_id` | string | `""` | product reference recorded into entitlement |
+| `shop.fallback.default_quota_limit` | integer | `1` | entitlement purchase quota |
+| `shop.fallback.default_available_seconds` | integer | `0` | reserved for 4.4+; not persisted in V1 |
+
+Rows are seeded by migration `07131ffe9d13` (append-only data migration;
+`downgrade` is intentionally not implemented).
+
 ## Product and pool policy
 
 Fallback is a reference to a pre-published product; it is not dynamically

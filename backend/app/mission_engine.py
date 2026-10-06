@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
+from app.fallback_shop import create_first_failure_entitlement
 from app.models import (
     GamePlayer,
     InventoryEvent,
@@ -671,6 +672,7 @@ def _submit_mission_once(
                 "bootstrap": _build_bootstrap(session, player_id),
             }
 
+        attempt_count_before = player_mission.attempt_count
         player_mission.attempt_count += 1
 
         if player_mission.started_at is None:
@@ -684,6 +686,17 @@ def _submit_mission_once(
         _consume_entry_resources(session, player_id, mission, player_mission)
 
         if not _validate_submission(mission, answer, sequence):
+            # Шаг 4.3a: первый неверный ответ → персональный fallback-entitlement.
+            # attempt_count_before == 0 => это первая попытка (V1 semantics,
+            # docs/fallback-shop-contract.md): eligible независимо от paid policy,
+            # работает и для бесплатных миссий. Функция идемпотентна, вызываем
+            # только после успешного _consume_entry_resources и только при отказе.
+            create_first_failure_entitlement(
+                session,
+                player_id,
+                mission.id,
+                attempt_count_before=attempt_count_before,
+            )
             return {
                 "accepted": False,
                 "alreadyCompleted": False,

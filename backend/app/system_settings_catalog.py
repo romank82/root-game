@@ -8,7 +8,7 @@ from typing import Any
 class SystemSettingDefinition:
     key: str
     value_type: str
-    default_value: int | bool | list[float]
+    default_value: int | bool | str | list[float]
     category: str
     title: str
     description: str
@@ -115,6 +115,42 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         description="Сумма ROOT, с которой ручная корректировка требует approval.",
         is_sensitive=True,
     ),
+    "shop.fallback.enabled": SystemSettingDefinition(
+        key="shop.fallback.enabled",
+        value_type="boolean",
+        default_value=False,
+        category="shop",
+        title="Fallback-магазин после первого провала",
+        description="Включает персональный магазин после первого провала миссии.",
+        is_sensitive=False,
+    ),
+    "shop.fallback.default_offer_id": SystemSettingDefinition(
+        key="shop.fallback.default_offer_id",
+        value_type="string",
+        default_value="",
+        category="shop",
+        title="Идентификатор fallback-предложения по умолчанию",
+        description="Ссылка на CMS product; значение offer_id entitlement (V1).",
+        is_sensitive=False,
+    ),
+    "shop.fallback.default_quota_limit": SystemSettingDefinition(
+        key="shop.fallback.default_quota_limit",
+        value_type="integer",
+        default_value=1,
+        category="shop",
+        title="Лимит покупок fallback-ключа по умолчанию",
+        description="Сколько раз игрок может купить ключ по предложению (quota_limit).",
+        is_sensitive=False,
+    ),
+    "shop.fallback.default_available_seconds": SystemSettingDefinition(
+        key="shop.fallback.default_available_seconds",
+        value_type="integer",
+        default_value=0,
+        category="shop",
+        title="Срок действия fallback-предложения по умолчанию",
+        description="0 = бессрочно; иначе секунды. Резерв для 4.4+ (в V1 не персистится).",
+        is_sensitive=False,
+    ),
     "features.demo_seed_enabled": SystemSettingDefinition(
         key="features.demo_seed_enabled",
         value_type="boolean",
@@ -154,6 +190,11 @@ def validate_value(definition: SystemSettingDefinition, value: Any) -> None:
     if definition.value_type == "boolean":
         if not isinstance(value, bool):
             raise ValueError("Значение должно быть boolean.")
+        return
+
+    if definition.value_type == "string":
+        if not isinstance(value, str):
+            raise ValueError("Значение должно быть строкой.")
         return
 
     if definition.key == "missions.default_attempt_reward_multipliers":
