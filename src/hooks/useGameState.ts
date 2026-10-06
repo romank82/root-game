@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react'
 import {
-  resetEngineDemoProgress,
   submitEngineMission,
   type EngineBootstrap,
   type EngineInventoryItem,
@@ -57,18 +56,12 @@ export function useGameState() {
     }
   }, [applyEngineBootstrap])
 
-  const resetProgress = useCallback(async () => {
-    try {
-      const bootstrap = await resetEngineDemoProgress()
-      applyEngineBootstrap(bootstrap)
-      setAccepted(false)
-      setScreen('briefing')
-      localStorage.removeItem('chimera-screen')
-      localStorage.removeItem('chimera-accepted')
-    } catch {
-      setApiStatus('offline')
-    }
-  }, [applyEngineBootstrap])
+  const resetProgress = useCallback(() => {
+    setAccepted(false)
+    setScreen('briefing')
+    localStorage.removeItem('chimera-screen')
+    localStorage.removeItem('chimera-accepted')
+  }, [])
 
   return {
     screen,

@@ -13,7 +13,6 @@ from app.db import SessionLocal
 from app.mission_engine import (
     MissionEngineError,
     get_bootstrap as get_engine_bootstrap,
-    reset_demo_engine_progress,
     submit_mission,
 )
 from app.models import GamePlayer
@@ -329,29 +328,6 @@ def submit_engine_mission(
             answer=payload.answer,
             sequence=payload.sequence,
         )
-    except MissionEngineError as error:
-        raise HTTPException(
-            status_code=error.status_code,
-            detail=error.detail,
-        ) from error
-
-@limiter.limit("5/minute")
-@app.post("/api/v1/engine/reset-demo-progress")
-def reset_engine_demo_progress_route(
-    request: Request,
-    player_id: str = Depends(get_current_player_id),
-):
-    """
-    Development-only test endpoint.
-
-    Production intentionally does not expose a route capable of wiping a
-    player's game state.
-    """
-    if settings.app_env == "production":
-        raise HTTPException(status_code=404, detail="Not found.")
-
-    try:
-        return reset_demo_engine_progress(player_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

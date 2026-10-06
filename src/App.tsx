@@ -49,7 +49,7 @@ function App() {
 
   function stopSession() {
     const confirmed = window.confirm(
-      'Остановить игровую сессию? Прогресс этой локальной версии будет удалён.',
+      'Завершить игровую сессию? Прогресс сохранится, вы сможете вернуться.',
     )
 
     if (!confirmed) return

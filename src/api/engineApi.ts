@@ -175,15 +175,3 @@ export async function submitEngineMission(
 
   return response.json() as Promise<MissionSubmission>
 }
-
-export async function resetEngineDemoProgress(): Promise<EngineBootstrap> {
-  const response = await apiFetch('/api/v1/engine/reset-demo-progress', {
-    method: 'POST',
-  })
-
-  if (!response.ok) {
-    throw new Error(await readError(response))
-  }
-
-  return response.json() as Promise<EngineBootstrap>
-}
