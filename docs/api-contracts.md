@@ -5,7 +5,6 @@
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/engine/bootstrap`
 - `POST /api/v1/engine/missions/{mission_id}/submit`
-- `POST /api/v1/engine/reset-demo-progress` — только вне production.
 
 `GET /api/v1/engine/bootstrap` returns only public player content. Schema and redaction policy for `Segment.content` and `Mission.content` are defined in `docs/segment-content-contract.md`; validation configuration, answers, and server-side award rules are excluded.
 

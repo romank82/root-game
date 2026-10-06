@@ -42,7 +42,6 @@ shared-runtime boundary), `docs/api-contracts.md`.
 |---|---|
 | `GET /api/v1/engine/bootstrap` | публичный срез игрока, миссий, сегментов, инвентаря, story nodes |
 | `POST /api/v1/engine/missions/{mission_id}/submit` | проверка ответа и выдача награды |
-| `POST /api/v1/engine/reset-demo-progress` | dev-only, в production отвечает 404 |
 
 Модель данных legacy-пути:
 
@@ -54,8 +53,8 @@ shared-runtime boundary), `docs/api-contracts.md`.
   `reference_type='mission_reward'`;
 - предметы — прямая мутация `player_items.quantity` без `InventoryEvent`.
 
-`docs/system-settings.md` уже фиксирует, что публичный reset endpoint подлежит
-удалению отдельной задачей после backup и аудита demo-данных.
+`docs/system-settings.md` фиксирует: публичный reset endpoint удалён (3.11.a);
+backup, аудит и удаление demo-данных — отдельная задача (demo cleanup).
 
 ## 2. Существующая основа, пригодная для новой вертикали
 
@@ -97,7 +96,6 @@ repeatability остаются validated versioned CMS configuration и в syste
 | `_award_mission_rewards` | награды из `mission_rewards`; целевая модель — settlement |
 | мутация `player_items.quantity` | прямая запись проекции без `InventoryEvent` |
 | `submit_mission` retry-loop | идемпотентность через перехват `IntegrityError`; целевая — явный `Idempotency-Key` |
-| `reset_demo_engine_progress` | физическое удаление `PlayerMission` и `PlayerItem`; контракты запрещают удаление |
 | legacy `submit` как основная точка входа | не создаёт `MissionRun` и `MissionAttempt` |
 
 Legacy-маршрут сам по себе не удаляется (см. §9).

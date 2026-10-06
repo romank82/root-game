@@ -55,8 +55,9 @@ TON credentials и иные секретные значения в system settin
 `default_max_attempts` чисел от 0 до 1, быть не возрастающим, а первое значение
 должно равняться `1.0`.
 
-До demo cleanup flags не включают seed/reset: текущий публичный reset endpoint
-будет удалён отдельной задачей после backup и аудита demo-данных.
+Флаги features.demo_* зарезервированы для development-инструментов вне production
+и не включаются до demo cleanup. Публичный reset endpoint удалён (3.11.a).
+Backup, аудит и удаление demo-данных — отдельная задача.
 
 ## Permissions и API
 - `system_settings.read`: чтение каталога и значений;

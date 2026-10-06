@@ -130,7 +130,7 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         default_value=False,
         category="features",
         title="Demo reset enabled",
-        description="Зарезервированный флаг; публичный demo reset будет удалён отдельно.",
+        description="Зарезервированный флаг для development-инструмента сброса demo-данных вне production (публичный reset удалён в 3.11.a).",
         is_sensitive=True,
     ),
 }
