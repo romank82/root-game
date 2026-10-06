@@ -9,7 +9,7 @@
 
 ---
 
-## Этап 3. CMS игровых заданий — ⚠️ в работе
+## Этап 3. CMS игровых заданий — ✅ готов
 
 Уже реализовано: Season, Chapter, StoryNode, Mission, MissionRequirement, MissionReward, Item + админ-роутеры + жизненный цикл draft → published → archived.
 
@@ -83,7 +83,7 @@
 - **Зависит от**: 3.9
 - **Риск**: низкий
 
-### Шаг 3.11: Отключение demo-сида и удаление публичного reset-API
+### ✅ Шаг 3.11: Отключение demo-сида и удаление публичного reset-API
 - **Что**: убрать автосоздание demo-контента при старте backend и убрать публичный эндпоинт сброса прогресса.
 - **Файлы**: скрипт сида, роутер reset-API, файл запуска backend.
 - **Проверка**: рестарт backend не создаёт demo-сущностей; эндпоинт сброса возвращает 404.
@@ -106,8 +106,11 @@
 - **3.9** Модель `ARObject` в `backend/app/models.py` (FK `geo_zone_id → geo_zones.id` с `ondelete=RESTRICT`).
 - **3.10** Миграции `f1ab8ea28db5_add_ar_objects_table` и `15ed269093cb_add_ar_objects_admin_permissions` (SQLite + PostgreSQL). Permissions `ar_objects.read`, `ar_objects.manage` (category=content).
 - **3.10.8** Роутер `backend/app/admin_ar_objects.py` (4 эндпоинта, cross-field валидация окна доступности). Тесты `backend/tests/test_admin_ar_objects.py` (25 тестов).
+- **3.11.a** Удалён публичный reset-endpoint `POST /api/v1/engine/reset-demo-progress` (backend + frontend). Кнопка «Остановить сессию» переделана на локальный выход без потери прогресса.
+- **3.11.b** Удалён мёртвый код `reset_demo_engine_progress` из `mission_engine.py` (-42 строки). `seed.py` оформлен как dev-инструмент: production guard (`APP_ENV=production`), явный docstring.
+- **3.11.c** Синхронизированы docs: `api-contracts.md`, `roadmap.md` §2.4, `stage-4-gap-analysis.md`, `system-settings.md`, `system_settings_catalog.py`.
 
-Все проверки: 134/134 unit-тестов, эндпоинты зарегистрированы в OpenAPI, миграции применены к SQLite и PostgreSQL.
+Все проверки: 134/134 unit-тестов, эндпоинты зарегистрированы в OpenAPI, миграции применены к SQLite и PostgreSQL. Публичный reset-endpoint удалён, `seed.py` защищён production guard.
 
 ---
 
