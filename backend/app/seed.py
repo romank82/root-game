@@ -1,3 +1,15 @@
+"""Development-only seed tool for CHIMERA demo content.
+
+WARNING: This tool is not meant to run in production or on any shared
+environment. It performs session.merge() on catalog entities (Season,
+Chapter, Item, Mission, ...) — idempotent but overwrites demo records
+— and create-only inserts for demo-player/Wallet. Refuses to run when
+APP_ENV=production.
+
+Usage (dev only):  cd backend && python -m app.seed
+"""
+
+from app.config import settings
 from app.db import SessionLocal
 from app.models import (
     Chapter,
@@ -435,4 +447,9 @@ def seed_content() -> None:
 
 
 if __name__ == "__main__":
+    if settings.app_env == "production":
+        raise SystemExit(
+            "app.seed is a development-only tool; refusing to run "
+            "with APP_ENV=production."
+        )
     seed_content()
