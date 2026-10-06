@@ -69,14 +69,14 @@
 - **Зависит от**: 3.7
 - **Риск**: низкий
 
-### Шаг 3.9: Модель ARObject
+### ✅ Шаг 3.9: Модель ARObject
 - **Что**: AR-объекты, привязанные к геозонам.
 - **Файлы**: файл моделей проекта.
 - **Проверка**: создать ARObject.
 - **Зависит от**: 3.7
 - **Риск**: низкий
 
-### Шаг 3.10: Миграция и админ-роутер для ARObject
+### ✅ Шаг 3.10: Миграция и админ-роутер для ARObject
 - **Что**: миграция + CRUD для AR-объектов.
 - **Файлы**: папка миграций, файл роутера AR.
 - **Проверка**: создание AR-объекта через API.
@@ -103,8 +103,11 @@
 - **3.7** Модель `GeoZone` в `backend/app/models.py`.
 - **3.8** Миграции `a1d2aafc3d3b_add_geo_zones_table` и `38f24f405a8b_add_geo_zones_admin_permissions` (SQLite + PostgreSQL). Permissions `geo_zones.read`, `geo_zones.manage` (category=geo).
 - **3.8.9** Роутер `backend/app/admin_geo_zones.py` (4 эндпоинта, cross-field-валидация geometry). Тесты `backend/tests/test_admin_geo_zones.py` (26 тестов).
+- **3.9** Модель `ARObject` в `backend/app/models.py` (FK `geo_zone_id → geo_zones.id` с `ondelete=RESTRICT`).
+- **3.10** Миграции `f1ab8ea28db5_add_ar_objects_table` и `15ed269093cb_add_ar_objects_admin_permissions` (SQLite + PostgreSQL). Permissions `ar_objects.read`, `ar_objects.manage` (category=content).
+- **3.10.8** Роутер `backend/app/admin_ar_objects.py` (4 эндпоинта, cross-field валидация окна доступности). Тесты `backend/tests/test_admin_ar_objects.py` (25 тестов).
 
-Все проверки: 83/83 unit-тестов, эндпоинты зарегистрированы в OpenAPI, миграции применены к SQLite и PostgreSQL.
+Все проверки: 134/134 unit-тестов, эндпоинты зарегистрированы в OpenAPI, миграции применены к SQLite и PostgreSQL.
 
 ---
 

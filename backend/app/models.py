@@ -509,6 +509,75 @@ class GeoZone(TimestampMixin, Base):
     )
 
 
+class ARObject(TimestampMixin, Base):
+    """CMS-справочник AR-объектов, привязанных к геозонам.
+
+    Контур roadmap 7.2: тип объекта, ассет, место появления, время
+    доступности, сценарий обнаружения, мини-игра, инструкция,
+    конфигурация валидации (и награды — отдельным шагом).
+    GeoZone-связь — FK (CMS -> CMS) с ondelete=RESTRICT; runtime-ссылки
+    на зоны остаются slug-строками без FK (LocationProof.zone_id,
+    validationConfig.geo.zoneId).
+    """
+
+    __tablename__ = "ar_objects"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="draft",
+        index=True,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    geo_zone_id: Mapped[str] = mapped_column(
+        ForeignKey("geo_zones.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    object_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    asset_uri: Mapped[str] = mapped_column(String(512), nullable=False)
+    asset_mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    scene_preset: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    discovery_scenario: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    minigame_config: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    instruction_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Server-only: ответы, QR-secret, правила проверки. Не попадает в player API.
+    validation_config: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')",
+            name="ck_ar_objects_status",
+        ),
+        CheckConstraint(
+            "ends_at IS NULL OR starts_at IS NULL OR ends_at >= starts_at",
+            name="ck_ar_objects_time_order",
+        ),
+        Index(
+            "ix_ar_objects_geo_zone_status",
+            "geo_zone_id",
+            "status",
+        ),
+    )
+
+
 class GamePlayer(TimestampMixin, Base):
     __tablename__ = "game_players"
 

@@ -40,6 +40,7 @@ from app.admin_segments import router as admin_segments_router
 from app.admin_key_rules import router as admin_key_rules_router
 from app.admin_reward_pools import router as admin_reward_pools_router
 from app.admin_geo_zones import router as admin_geo_zones_router
+from app.admin_ar_objects import router as admin_ar_objects_router
 from app.admin_system_settings import router as admin_system_settings_router
 
 SESSION_COOKIE_NAME = "chimera_session"
@@ -446,4 +447,5 @@ app.include_router(admin_segments_router)
 app.include_router(admin_key_rules_router)
 app.include_router(admin_reward_pools_router)
 app.include_router(admin_geo_zones_router)
+app.include_router(admin_ar_objects_router)
 app.include_router(admin_system_settings_router)

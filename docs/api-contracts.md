@@ -51,6 +51,7 @@ or settlement internals. Exact behavior is defined in
   - `archived` Segment is final and cannot be published, unpublished, or edited.
 - `/api/v1/admin/reward-pools` — list/get/create/update; entries передаются и заменяются целиком в payload (`entries`); статус меняется через PATCH (draft/published); physical DELETE недоступен.
 - `/api/v1/admin/geo-zones` — list/get/create/update; типы: radius/polygon/poi/event, cross-field-валидация геометрии в Python-контракте; статус меняется через PATCH (draft/published/archived); physical DELETE недоступен.
+- `/api/v1/admin/ar-objects` — list/get/create/update; AR-объекты привязаны к геозонам через `geoZoneId` (FK ondelete=RESTRICT); cross-field-валидация окна доступности `startsAt`/`endsAt`; статус меняется через PATCH (draft/published/archived); physical DELETE недоступен.
 - `/api/v1/admin/admins` — list/create/grant/revoke/deactivate/reactivate.
 - `/api/v1/admin/approvals` — список собственных заявок (creation unavailable);
   super-admin видит все заявки.
