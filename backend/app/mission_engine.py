@@ -11,10 +11,13 @@ from sqlalchemy.orm import Session
 from app.db import SessionLocal
 from app.models import (
     GamePlayer,
+    InventoryEvent,
     Item,
+    KeyRules,
     Mission,
     MissionRequirement,
     MissionReward,
+    MissionRuntimePolicy,
     PlayerItem,
     PlayerMission,
     Segment,
@@ -24,6 +27,13 @@ from app.models import (
 )
 
 ROOT_CURRENCY = "ROOT"
+
+# Reference-типы входа в миссию (шаг 4.1). Значения — по контракту ledger:
+# уникальные ключи идемпотентности = (wallet_id, reference_type, reference_id)
+# и (player_item_id, event_type, reference_type, reference_id).
+ENTRY_DEBIT_REFERENCE_TYPE = "mission_entry_debit"
+ENTRY_ITEM_REFERENCE_TYPE = "mission_entry"
+ENTRY_ITEM_EVENT_TYPE = "consumed"
 
 
 class MissionEngineError(Exception):
@@ -75,6 +85,24 @@ def _get_or_create_root_wallet(session: Session, player_id: str) -> Wallet:
         session.flush()
 
     return wallet
+
+
+def _get_published_runtime_policy(
+    session: Session,
+    mission_id: str,
+) -> MissionRuntimePolicy | None:
+    """Единственная опубликованная policy миссии (или None для legacy-миссий).
+
+    Частичный unique index ``uq_mission_runtime_policies_one_published_per_mission``
+    гарантирует на уровне БД не более одной published policy на миссию,
+    поэтому scalar безопасен.
+    """
+    return session.scalar(
+        select(MissionRuntimePolicy).where(
+            MissionRuntimePolicy.mission_id == mission_id,
+            MissionRuntimePolicy.status == "published",
+        )
+    )
 
 
 def _requirements_met(
@@ -456,6 +484,144 @@ def _award_mission_rewards(
     }
 
 
+def _consume_entry_resources(
+    session: Session,
+    player_id: str,
+    mission: Mission,
+    player_mission: PlayerMission,
+) -> None:
+    """Атомарно списать ROOT-взнос и расходуемые ключи при взятии миссии.
+
+    - Нет published policy (legacy-миссия) — вернуться без действий и логов.
+    - Порядок: 1) баланс ROOT, 2) наличие/количество PlayerItem,
+      3) Item.status == published, 4) debit ROOT, 5) списание ключей.
+    - amount в WalletTransaction всегда положительный, направление задаёт
+      transaction_type ("debit"). balance_after = баланс после списания.
+    - Идемпотентность: повторный вход видит существующий WalletTransaction
+      (миссия уже оплачена) или InventoryEvent (ключ уже списан) и не пишет
+      дубликат; на гонки работает уникальный индекс + retry-цикл submit_mission.
+    - player_mission зарезервирован под Stage 5 (snapshot/run) и в v1 не читается.
+    - Любая ошибка всплывает MissionEngineError → транзакция откатывается целиком.
+    """
+    policy = _get_published_runtime_policy(session, mission.id)
+    if policy is None:
+        return
+
+    requirements = policy.required_items_json.get("items", [])
+    root_debit = policy.entry_root_atomic
+
+    wallet = _get_or_create_root_wallet(session, player_id)
+
+    # 1. ROOT: вход запрещён, пока не хватает баланса.
+    if root_debit > 0 and wallet.available_balance < root_debit:
+        raise MissionEngineError(409, "Недостаточно ROOT для взятия миссии.")
+
+    # 2. Ключи: наличие PlayerItem и достаточное количество (AND-семантика).
+    player_items: dict[str, PlayerItem] = {}
+    for requirement in requirements:
+        item_id = requirement["itemId"]
+        required_quantity = requirement["quantity"]
+
+        player_item = session.scalar(
+            select(PlayerItem).where(
+                PlayerItem.player_id == player_id,
+                PlayerItem.item_id == item_id,
+            )
+        )
+        if player_item is None or player_item.quantity < required_quantity:
+            raise MissionEngineError(
+                409,
+                "Недостаточно ключей для взятия миссии.",
+            )
+        player_items[item_id] = player_item
+
+    # 3. Lifecycle Item: повторная проверка на start (контракт policy).
+    for requirement in requirements:
+        item = session.get(Item, requirement["itemId"])
+        if item is None or item.status != "published":
+            raise MissionEngineError(409, "Ключ недоступен.")
+
+    # 4. ROOT debit (идемпотентно по уникальному индексу wallet+reference).
+    if root_debit > 0:
+        existing_debit = session.scalar(
+            select(WalletTransaction.id).where(
+                WalletTransaction.wallet_id == wallet.id,
+                WalletTransaction.reference_type == ENTRY_DEBIT_REFERENCE_TYPE,
+                WalletTransaction.reference_id == mission.id,
+            )
+        )
+        if existing_debit is None:
+            wallet.available_balance -= root_debit
+            session.add(
+                WalletTransaction(
+                    id=_new_id("wallet-transaction"),
+                    wallet_id=wallet.id,
+                    amount=root_debit,
+                    balance_after=wallet.available_balance,
+                    transaction_type="debit",
+                    reason=f"Mission entry debit: {mission.slug}",
+                    reference_type=ENTRY_DEBIT_REFERENCE_TYPE,
+                    reference_id=mission.id,
+                    metadata_json={
+                        "missionId": mission.id,
+                        "missionSlug": mission.slug,
+                        "policyId": policy.id,
+                        "policyVersion": policy.version,
+                    },
+                )
+            )
+
+    # 5. Списание ключей: только is_consumable=True; остальные уже проверены.
+    for requirement in requirements:
+        item_id = requirement["itemId"]
+
+        rule = session.scalar(
+            select(KeyRules).where(KeyRules.item_id == item_id)
+        )
+        # Нет записи KeyRules — дефолт модели: ключ расходуется.
+        if rule is not None and not rule.is_consumable:
+            continue
+
+        player_item = player_items[item_id]
+        required_quantity = requirement["quantity"]
+
+        existing_event = session.scalar(
+            select(InventoryEvent.id).where(
+                InventoryEvent.player_item_id == player_item.id,
+                InventoryEvent.event_type == ENTRY_ITEM_EVENT_TYPE,
+                InventoryEvent.reference_type == ENTRY_ITEM_REFERENCE_TYPE,
+                InventoryEvent.reference_id == mission.id,
+            )
+        )
+        if existing_event is not None:
+            continue
+
+        player_item.quantity -= required_quantity
+        session.add(
+            InventoryEvent(
+                id=_new_id("inventory-event"),
+                player_item_id=player_item.id,
+                # Stage 5: ссылка на MissionRun появится вместе с run-таблицами.
+                mission_run_id=None,
+                event_type=ENTRY_ITEM_EVENT_TYPE,
+                quantity_delta=-required_quantity,
+                reference_type=ENTRY_ITEM_REFERENCE_TYPE,
+                reference_id=mission.id,
+                metadata_json={
+                    "missionId": mission.id,
+                    "missionSlug": mission.slug,
+                    "itemId": item_id,
+                    "policyId": policy.id,
+                    "policyVersion": policy.version,
+                },
+            )
+        )
+
+    # Явный flush: поверхность ошибок идемпотентности до commit,
+    # чтобы retry-цикл submit_mission увидел IntegrityError без частичных записей.
+    session.flush()
+
+
 def _submit_mission_once(
     player_id: str,
     mission_id: str,
@@ -511,6 +677,11 @@ def _submit_mission_once(
             player_mission.started_at = _utcnow()
 
         player_mission.status = "in_progress"
+
+        # Шаг 4.1: списание ROOT-взноса и расходуемых ключей при взятии миссии.
+        # До валидации ответа: «вход» оплачивается независимо от исхода попытки.
+        # Любая нехватка ресурсов/недоступный ключ → 409 и полный откат.
+        _consume_entry_resources(session, player_id, mission, player_mission)
 
         if not _validate_submission(mission, answer, sequence):
             return {

@@ -324,6 +324,95 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             if mission["id"] == mission_id
         )
 
+    # ---- Хелперы шага 4.1 --------------------------------------------
+
+    def _seed_policy(
+        self,
+        mission_id: str,
+        *,
+        entry_root_atomic: int = 0,
+        required_items: list[tuple[str, int]] | None = None,
+    ) -> None:
+        """Создать published policy напрямую через SQLAlchemy (без admin API)."""
+        from app.geo_team_runtime_models import MissionRuntimePolicy
+
+        with self.SessionLocal.begin() as session:
+            session.add(
+                MissionRuntimePolicy(
+                    id=f"policy-{uuid.uuid4().hex}",
+                    mission_id=mission_id,
+                    version=1,
+                    status="published",
+                    entry_root_atomic=entry_root_atomic,
+                    max_attempts=3,
+                    attempt_deadline_seconds=600,
+                    repeatability_policy="one_time",
+                    required_items_json={
+                        "schemaVersion": 1,
+                        "items": [
+                            {"itemId": item_id, "quantity": quantity}
+                            for item_id, quantity in (required_items or [])
+                        ],
+                    },
+                    challenge_policy_json={},
+                    reward_policy_json={},
+                    fallback_policy_json=None,
+                    feature_flags_json={},
+                )
+            )
+
+    def _seed_root_wallet(self, player_id: str, amount: int) -> None:
+        """Кошелёк с кредитной проводкой — игровой ROOT на старте теста."""
+        from app.models import Wallet, WalletTransaction
+
+        with self.SessionLocal.begin() as session:
+            wallet = Wallet(
+                id=f"wallet-{uuid.uuid4().hex}",
+                player_id=player_id,
+                currency="ROOT",
+                available_balance=amount,
+                locked_balance=0,
+            )
+            session.add(wallet)
+            session.flush()
+            session.add(
+                WalletTransaction(
+                    id=f"wallet-transaction-{uuid.uuid4().hex}",
+                    wallet_id=wallet.id,
+                    amount=amount,
+                    balance_after=amount,
+                    transaction_type="credit",
+                    reason="Test seed balance",
+                    reference_type="test_seed",
+                    reference_id=f"seed-{uuid.uuid4().hex}",
+                    metadata_json={},
+                )
+            )
+
+    def _seed_key(self, player_id: str, item_id: str, quantity: int) -> None:
+        from app.models import PlayerItem
+
+        with self.SessionLocal.begin() as session:
+            session.add(
+                PlayerItem(
+                    id=f"player-item-{uuid.uuid4().hex}",
+                    player_id=player_id,
+                    item_id=item_id,
+                    quantity=quantity,
+                )
+            )
+
+    def _unlock(self, ids: dict[str, str]) -> dict:
+        """Пройти prerequisite-миссию, чтобы target стал available."""
+        result = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["unlock"],
+            answer="unlock",
+            sequence=None,
+        )
+        self.assertTrue(result["accepted"])
+        return result
+
     def test_bootstrap_exposes_only_public_content_and_redacts_validation(self) -> None:
         ids = self._fixture()
 
@@ -488,6 +577,440 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             {story["id"] for story in final_bootstrap["storyNodes"]},
             {ids["story"]},
         )
+
+
+    def test_zz_4_1_1_success_consumes_root_and_key(self) -> None:
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import PlayerItem, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            # 50 (seed) - 5 (entry) + 15 (reward) = 60.
+            self.assertEqual(wallet.available_balance, 60)
+
+            debits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type
+                    == "mission_entry_debit",
+                    WalletTransaction.reference_id == ids["target"],
+                )
+            ).all()
+            self.assertEqual(len(debits), 1)
+            self.assertEqual(debits[0].amount, 5)
+            self.assertEqual(debits[0].transaction_type, "debit")
+            self.assertEqual(debits[0].balance_after, 45)  # до награды
+
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(item)
+            # 2 (seed) - 1 (consumed) + 2 (reward) = 3.
+            self.assertEqual(item.quantity, 3)
+
+            events = session.scalars(
+                select(InventoryEvent).where(
+                    InventoryEvent.reference_type == "mission_entry",
+                    InventoryEvent.reference_id == ids["target"],
+                )
+            ).all()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].event_type, "consumed")
+            self.assertEqual(events[0].quantity_delta, -1)
+
+    def test_zz_4_1_2_insufficient_root_is_409_and_rolls_back(self) -> None:
+        from app.geo_team_runtime_models import MissionRun
+        from app.models import WalletTransaction
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], entry_root_atomic=30)
+        self._unlock(ids)  # создаёт кошелёк с балансом 0
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as error:
+            self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="complete",
+                sequence=None,
+            )
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(
+            error.exception.detail,
+            "Недостаточно ROOT для взятия миссии.",
+        )
+
+        with self.SessionLocal() as session:
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.reference_type
+                        == "mission_entry_debit",
+                        WalletTransaction.reference_id == ids["target"],
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(MissionRun.id)).where(
+                        MissionRun.mission_id == ids["target"]
+                    )
+                ),
+                0,
+            )
+
+        bootstrap = self.mission_engine.get_bootstrap(ids["player"])
+        # Откат: миссия не стартовала и не завершена.
+        self.assertEqual(
+            self._mission_by_id(bootstrap, ids["target"])["status"],
+            "available",
+        )
+        self.assertEqual(bootstrap["wallet"]["availableBalance"], 0)
+
+
+    def test_zz_4_1_3_insufficient_key_is_409_and_rolls_back(self) -> None:
+        from app.geo_team_runtime_models import InventoryEvent, MissionRun
+        from app.models import Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as error:
+            self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="complete",
+                sequence=None,
+            )
+        self.assertEqual(error.exception.status_code, 409)
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertEqual(wallet.available_balance, 50)  # ROOT не тронут
+
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.reference_type
+                        == "mission_entry_debit",
+                        WalletTransaction.reference_id == ids["target"],
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(InventoryEvent.id)).where(
+                        InventoryEvent.reference_id == ids["target"]
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(MissionRun.id)).where(
+                        MissionRun.mission_id == ids["target"]
+                    )
+                ),
+                0,
+            )
+
+    def test_zz_4_1_4_repeated_submit_does_not_charge_twice(self) -> None:
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import (
+            Mission,
+            PlayerItem,
+            PlayerMission,
+            Wallet,
+            WalletTransaction,
+        )
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        first = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(first["accepted"])
+
+        second = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(second["alreadyCompleted"])
+
+        # Прямой повторный вызов consume в новой сессии — проверка охранника
+        # идемпотентности в самом механизме (не только через alreadyCompleted).
+        with self.SessionLocal() as session:
+            mission = session.get(Mission, ids["target"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.mission_engine._consume_entry_resources(
+                session,
+                ids["player"],
+                mission,
+                player_mission,
+            )
+            session.flush()
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            debits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type
+                    == "mission_entry_debit",
+                    WalletTransaction.reference_id == ids["target"],
+                )
+            ).all()
+            self.assertEqual(len(debits), 1)
+
+            events = session.scalars(
+                select(InventoryEvent).where(
+                    InventoryEvent.reference_type == "mission_entry",
+                    InventoryEvent.reference_id == ids["target"],
+                )
+            ).all()
+            self.assertEqual(len(events), 1)
+
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            # 2 - 1 (единственное списание) + 2 (награда) = 3.
+            self.assertEqual(item.quantity, 3)
+            # 50 - 5 (entry) + 15 (reward) = 60 — повторных списаний нет.
+            self.assertEqual(wallet.available_balance, 60)
+
+
+    def test_zz_4_1_5_non_consumable_key_checked_but_not_spent(self) -> None:
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import KeyRules, PlayerItem, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        with self.SessionLocal.begin() as session:
+            session.add(
+                KeyRules(
+                    id=f"key-rules-{uuid.uuid4().hex}",
+                    item_id=ids["item"],
+                    is_consumable=False,
+                )
+            )
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            # ROOT списан, ключ — нет: 50 - 5 + 15 = 60.
+            self.assertEqual(wallet.available_balance, 60)
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.reference_type
+                        == "mission_entry_debit",
+                        WalletTransaction.reference_id == ids["target"],
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(InventoryEvent.id)).where(
+                        InventoryEvent.reference_id == ids["target"]
+                    )
+                ),
+                0,
+            )
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            # 2 (seed) + 2 (награда) = 4 — списания не было.
+            self.assertEqual(item.quantity, 4)
+
+    def test_zz_4_1_6_zero_entry_policy_consumes_nothing(self) -> None:
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], entry_root_atomic=0, required_items=[])
+        self._unlock(ids)
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            # Только награда за target: 15.
+            self.assertEqual(wallet.available_balance, 15)
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.reference_type
+                        == "mission_entry_debit",
+                        WalletTransaction.reference_id == ids["target"],
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(InventoryEvent.id)).where(
+                        InventoryEvent.reference_id == ids["target"]
+                    )
+                ),
+                0,
+            )
+
+    def test_zz_4_1_7_unpublished_required_item_is_409(self) -> None:
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import Item, PlayerItem, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        draft_item_id = f"draft-key-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                Item(
+                    id=draft_item_id,
+                    slug=f"draft-key-{uuid.uuid4().hex}",
+                    code=f"DRAFT-{uuid.uuid4().hex[:12]}",
+                    title="Draft key",
+                    description="Must not gate entry",
+                    symbol="◇",
+                    category="key",
+                    rarity="common",
+                    is_unique=False,
+                    content={"schemaVersion": 1},
+                    status="draft",
+                )
+            )
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], draft_item_id, 1)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(draft_item_id, 1)],
+        )
+        self._unlock(ids)
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as error:
+            self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="complete",
+                sequence=None,
+            )
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(error.exception.detail, "Ключ недоступен.")
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertEqual(wallet.available_balance, 50)  # откат
+
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.reference_type
+                        == "mission_entry_debit",
+                        WalletTransaction.reference_id == ids["target"],
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(InventoryEvent.id)).where(
+                        InventoryEvent.reference_id == ids["target"]
+                    )
+                ),
+                0,
+            )
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == draft_item_id,
+                )
+            )
+            self.assertEqual(player_item.quantity, 1)  # не списан
 
 
 if __name__ == "__main__":
