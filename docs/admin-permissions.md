@@ -9,6 +9,10 @@ Super-admin имеет все permissions напрямую. Обычный admin
 `admin_approvals.read`, `admin_approvals.review`, `audit.read`,
 `missions.read`, `missions.manage`, `segments.read`, `segments.manage`.
 
+Mission runtime policies (`mission_runtime_policies`) управляются тем же
+правом `missions.manage` — это конфигурация правил входа конкретной миссии,
+не отдельный домен.
+
 ## Защиты
 Нельзя деактивировать себя или последнего active super-admin.
 Деактивация отзывает все server-side sessions target admin.

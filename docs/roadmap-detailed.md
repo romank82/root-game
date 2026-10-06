@@ -118,6 +118,15 @@
 
 Уже реализовано: Item, Inventory, выдача наград, таблицы резервов и событий инвентаря, fallback-награды.
 
+### ✅ Шаг 4.0: Admin-API для MissionRuntimePolicy
+- **Что**: CRUD + publish/unpublish/archive для правил входа миссии.
+- **Файлы**: новый `backend/app/admin_mission_runtime_policies.py`,
+  регистрация в `main.py`, тесты `backend/tests/test_admin_mission_runtime_policies.py`.
+- **Проверка**: через API создать policy, опубликовать, получить.
+- **Зависит от**: — (модель `MissionRuntimePolicy`, миграция `3a9e1c7d5f24`
+  и контракт `runtime_policy_contract.py` уже готовы).
+- **Риск**: низкий.
+
 ### Шаг 4.1: Списание ключа и ROOT-взноса при взятии миссии
 - **Что**: при принятии миссии атомарно списывать ключ и entry_fee_root.
 - **Файлы**: движок миссий, модели.
