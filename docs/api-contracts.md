@@ -105,6 +105,18 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
 - При direct-grant: сумма ниже порога → 200 (прямое исполнение); сумма ≥ порога
   или approval-grant → 201 (approval-заявка). Super-admin всегда исполняет напрямую
   (по конвенции проекта он не создаёт заявки).
+- `POST /api/v1/admin/players/{id}/inventory-item-adjustment` — ручная выдача/отзыв предмета
+  (`direction=grant|revoke`, `item_id`, `quantity>0`, `reason`, `request_id`). При direct-grant и
+  количестве ниже `gameplay.manual_item_adjustment_approval_threshold` — прямое исполнение (200),
+  иначе 201 (approval-заявка). Ответ: ключ `inventoryEvent` (+ `playerItem`, `idempotent`).
+- `POST /api/v1/admin/players/inventory-item-adjustment-requests/{approval_id}/execute` — исполнение
+  approved заявки, только super-admin, только `player.inventory_grant|player.inventory_revoke`.
+- Grant требует `Item.status == "published"` (иначе 409); revoke статус не проверяет, но требует
+  существующий `PlayerItem` и достаточное количество (иначе 409). Ledger:
+  `InventoryEvent(event_type=credited|consumed, reference_type=admin_item_grant|admin_item_revoke,
+  reference_id=request_id)`; новая строка помечается `obtained_from_type="admin_manual"`,
+  `obtained_from_id=request_id`. Player-ограничения (`sale_forbidden`, `transfer_forbidden`,
+  `trade_forbidden`, `stack_limit`, `is_consumable`) админ-операции не блокируют.
 
 
 ## System settings

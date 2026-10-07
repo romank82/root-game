@@ -115,6 +115,15 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         description="Сумма ROOT, с которой ручная корректировка требует approval.",
         is_sensitive=True,
     ),
+    "gameplay.manual_item_adjustment_approval_threshold": SystemSettingDefinition(
+        key="gameplay.manual_item_adjustment_approval_threshold",
+        value_type="integer",
+        default_value=5,
+        category="gameplay",
+        title="Порог approval для ручной выдачи/отзыва предметов",
+        description="Количество предметов, с которого ручная выдача/отзыв ключа требует approval.",
+        is_sensitive=True,
+    ),
     "shop.fallback.enabled": SystemSettingDefinition(
         key="shop.fallback.enabled",
         value_type="boolean",

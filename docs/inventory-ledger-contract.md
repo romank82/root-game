@@ -123,3 +123,35 @@ configuration; it is not inferred from a title, slug, or fallback purchase.
 Archiving content does not delete historical `PlayerItem`, `InventoryEvent`,
 reservation, run, or settlement records. A new future use of archived content
 is denied by the relevant executor, while historical references remain intact.
+
+## Admin manual grants and revokes (step 5.5)
+
+An administrator may manually grant or revoke an item to/from a player. The
+operation follows the same domain-executor pattern as manual ROOT adjustments:
+permission-gated endpoints, idempotent requests, immutable inventory events,
+and a dedicated super-admin-only executor for approval-backed requests.
+
+Rules:
+
+- `grant` requires `Item.status == "published"`; otherwise the request is
+  rejected with 409. `revoke` does not check item status, but requires an
+  existing `PlayerItem` row and sufficient quantity (409 otherwise).
+- Every operation appends exactly one immutable `InventoryEvent`:
+  - grant: `event_type="credited"`, `reference_type="admin_item_grant"`;
+  - revoke: `event_type="consumed"`, `reference_type="admin_item_revoke"`;
+  - `reference_id` equals the client-supplied `request_id` (idempotency key).
+- `PlayerItem.quantity` changes only inside the same transaction as the event.
+  For a grant with no existing row, the row is created with
+  `obtained_from_type="admin_manual"` and `obtained_from_id=request_id`.
+- Player-level restrictions (`sale_forbidden`, `transfer_forbidden`,
+  `trade_forbidden`, `stack_limit`, `is_consumable`) do not block admin manual
+  grants/revokes: they govern gameplay flows, not administrative balancing.
+- Idempotency: the unique `(player_item_id, event_type, reference_type,
+  reference_id)` constraint guards retries; a retry with identical content
+  replays the committed effect, a retry with different content returns 409.
+- The approval threshold for non-super-admin quantities is
+  `gameplay.manual_item_adjustment_approval_threshold` (sensitive, integer,
+  catalog default `5`). Super-admin executes directly and never creates
+  approval requests for this operation.
+- All admin actions write to the immutable `admin_audit_log` with safe
+  metadata only.

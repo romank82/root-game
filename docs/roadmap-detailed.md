@@ -271,6 +271,27 @@
 - **Зависит от**: 5.3
 - **Риск**: средний (согласовано в рамках плана 5.4)
 
+### ✅ Шаг 5.5: Ручные операции — выдать/отозвать ключ
+- **Что**:
+  - `POST /api/v1/admin/players/{id}/inventory-item-adjustment` (`direction=grant|revoke`,
+    `item_id`, `quantity`, `reason`, `request_id`) — ручная выдача/отзыв предмета.
+    Direct 200 при direct-grant и количестве ниже
+    `gameplay.manual_item_adjustment_approval_threshold`, иначе 201 (approval-заявка);
+  - `POST /api/v1/admin/players/inventory-item-adjustment-requests/{approval_id}/execute` —
+    только super-admin, только `player.inventory_grant|player.inventory_revoke`;
+  - ledger: immutable `InventoryEvent`, `event_type=credited|consumed`,
+    `reference_type=admin_item_grant|admin_item_revoke`, `reference_id=request_id`;
+    новая строка `PlayerItem` — `obtained_from_type="admin_manual"`,
+    `obtained_from_id=request_id`. Grant требует `Item.status == "published"`; revoke — только
+    существующий `PlayerItem` и достаточное количество. Player-ограничения
+    (`sale_forbidden`/`transfer_forbidden`/`trade_forbidden`/`stack_limit`/`is_consumable`)
+    админ-операции не блокируют.
+- **Файлы**: `backend/app/admin_player_inventory.py`, регистрация в `main.py`,
+  новый SystemSetting `gameplay.manual_item_adjustment_approval_threshold`.
+- **Проверка**: ✅ выполнено — `backend/tests/test_admin_player_inventory.py` (15 unit-кейсов).
+- **Зависит от**: 5.3
+- **Риск**: средний (согласовано в рамках плана 5.5)
+
 ### Уже сделано (обновлено 2026-10-07)
 - ✅ 5.4 Ручные начисление/списание ROOT:
   - `POST /api/v1/admin/players/{id}/wallet-adjustment` — direct 200 при
@@ -283,13 +304,18 @@
   - аудит `write_admin_audit` без sensitive-данных; reason в ledger ≤ 255,
     полная причина — в `metadata_json["fullReason"]`;
   - тесты: `backend/tests/test_admin_player_wallet.py` (18 unit-кейсов).
-
-### Шаг 5.5: Ручные операции — выдать/отозвать ключ
-- **Что**: администратор может выдать или отозвать ключ с аудитом.
-- **Файлы**: роутер админ-операций, инвентарь.
-- **Проверка**: выдача/отзыв отражается в инвентаре и аудите.
-- **Зависит от**: 5.3
-- **Риск**: средний ⚠️ ТРЕБУЕТ СОГЛАСОВАНИЯ
+- ✅ 5.5 Ручная выдача/отзыв ключа:
+  - `POST /api/v1/admin/players/{id}/inventory-item-adjustment` — direct 200 при
+    direct-grant + количество < порога, иначе 201 (approval-путь);
+  - `POST /api/v1/admin/players/inventory-item-adjustment-requests/{approval_id}/execute` —
+    только super-admin, только `player.inventory_grant|player.inventory_revoke`;
+  - ledger: immutable `InventoryEvent`, `event_type=credited|consumed`,
+    `reference_type=admin_item_grant|admin_item_revoke`, `reference_id=request_id`;
+  - новая строка `PlayerItem` — `obtained_from_type="admin_manual"`, `obtained_from_id=request_id`;
+  - grant требует `published`; revoke — существующий `PlayerItem` + достаточное количество;
+    идемпотентность по `request_id` (UNIQUE на события и заявки), 409 при конфликте содержимого;
+  - аудит `write_admin_audit`; execution_failed с `execution_error`-строкой и ответом 409;
+  - тесты: `backend/tests/test_admin_player_inventory.py` (15 unit-кейсов).
 
 ### Шаг 5.6: Ручные операции — отменить/завершить миссию
 - **Что**: снять игрока с миссии, отменить, принудительно завершить.
