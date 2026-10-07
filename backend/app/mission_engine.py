@@ -166,7 +166,9 @@ def _synchronize_player_missions(
             session.add(player_mission)
             progress[mission.id] = player_mission
 
-        if player_mission.status == "completed":
+        # Терминальные статусы движок не трогает: cancelled — admin-only
+        # terminal, синхронизация не имеет права «реактивировать» отмену.
+        if player_mission.status in {"completed", "cancelled"}:
             continue
 
         if _requirements_met(mission.id, requirements_by_mission, completed):
@@ -651,6 +653,12 @@ def _submit_mission_once(
 
         progress = _synchronize_player_missions(session, player_id)
         player_mission = progress[mission.id]
+
+        if player_mission.status == "cancelled":
+            raise MissionEngineError(
+                409,
+                "Миссия отменена администратором.",
+            )
 
         if player_mission.status == "locked":
             raise MissionEngineError(

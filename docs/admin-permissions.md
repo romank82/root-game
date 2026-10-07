@@ -7,7 +7,13 @@ Super-admin имеет все permissions напрямую. Обычный admin
 Текущий каталог:
 `admins.read`, `admins.manage`, `admin_permissions.manage`,
 `admin_approvals.read`, `admin_approvals.review`, `audit.read`,
-`missions.read`, `missions.manage`, `segments.read`, `segments.manage`.
+`missions.read`, `missions.manage`, `segments.read`, `segments.manage`,
+`players.manage`.
+
+`players.manage` — игрок-ориентированные ручные операции, требующие админ-вмешательства:
+кошелёк (5.4, `player.wallet_credit/debit`), инвентарь (5.5,
+`player.inventory_grant/revoke`), миссии (5.6, `player.mission_cancel/...`).
+Разрешённые action_type для каждого поддомена — в каталоге action_type соответствующих модулей.
 
 Mission runtime policies (`mission_runtime_policies`) управляются тем же
 правом `missions.manage` — это конфигурация правил входа конкретной миссии,

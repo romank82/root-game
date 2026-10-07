@@ -324,6 +324,20 @@
 - **Зависит от**: 5.3
 - **Риск**: средний ⚠️ ТРЕБУЕТ СОГЛАСОВАНИЯ
 
+Подшаги:
+- **5.6.a — mission-cancel** ✅: `POST .../missions/{mission_id}/mission-cancel`
+  (+ `/mission-cancel-requests/{approval_id}/execute`), статус `cancelled` (terminal),
+  guards в `_synchronize_player_missions`/`_submit_mission_once`, идемпотентность
+  через admin_audit_log (вариант B), audit entity_type=player_mission, без
+  порога-магнитуды (чувствительность — execution-режим `players.manage`).
+  Тесты: `backend/tests/test_admin_player_mission.py` (23 unit-кейса).
+- **5.6.b — mission-force-complete** ⏳ (с флагом `awardRewards`; предполагаемый
+  порог-магнитуда `economy.mission_force_complete_approval_threshold` — решится в 5.6.b).
+- **5.6.c — attempts-adjustment** ⏳.
+- **5.6.d — manual reward endpoint** ❌ не делаем: покрывается 5.4/5.5. Известное
+  ограничение: `MissionReward.story_node_id` не покрывается 5.4/5.5 — фиксируется
+  документально, отдельная работа не планируется.
+
 ### Шаг 5.7: Управление ограничениями игрока через админку
 - **Что**: выдать/снять ограничение с причиной, сроком и аудитом.
 - **Файлы**: роутер админ-операций.

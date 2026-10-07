@@ -111,6 +111,16 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
   иначе 201 (approval-заявка). Ответ: ключ `inventoryEvent` (+ `playerItem`, `idempotent`).
 - `POST /api/v1/admin/players/inventory-item-adjustment-requests/{approval_id}/execute` — исполнение
   approved заявки, только super-admin, только `player.inventory_grant|player.inventory_revoke`.
+- `POST /api/v1/admin/players/{id}/missions/{mission_id}/mission-cancel` — снять/отменить миссию
+  (`reason`, `request_id`, `expires_at?`, `invalidate_fallback_entitlement=false`). При
+  `players.manage` direct-grant — прямое исполнение (200); при `requires_super_admin_approval`
+  — 201 (approval-заявка `player.mission_cancel`). Устанавливает терминальный статус `cancelled`
+  из `available`/`in_progress`; `completed`/`cancelled` — 409. Повтор с тем же `request_id` —
+  200 `idempotent` (признак — запись в immutable admin_audit_log). Ресурсы при отмене не
+  возвращаются (компенсация — 5.4/5.5). Fallback-entitlement отключается (available -> disabled)
+  только при `invalidate_fallback_entitlement=true`; exhausted/disabled не трогаются.
+- `POST /api/v1/admin/players/mission-cancel-requests/{approval_id}/execute` — исполнение approved
+  заявки, только super-admin, только `player.mission_cancel`.
 - Grant требует `Item.status == "published"` (иначе 409); revoke статус не проверяет, но требует
   существующий `PlayerItem` и достаточное количество (иначе 409). Ledger:
   `InventoryEvent(event_type=credited|consumed, reference_type=admin_item_grant|admin_item_revoke,

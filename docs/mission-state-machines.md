@@ -1,7 +1,16 @@
 # Состояния миссий и заявок
 
 ## Текущие player mission states
-`locked`, `available`, `completed`.
+`locked`, `available`, `in_progress`, `completed`, `cancelled`.
+
+`cancelled` — admin-only terminal status (шаг 5.6.a). Устанавливается через
+`POST /api/v1/admin/players/{id}/missions/{mission_id}/mission-cancel`.
+Ресурсы при отмене не возвращаются; компенсация при необходимости — ручными
+операциями 5.4/5.5. Отменённая миссия не удовлетворяет `MissionRequirement`
+зависимых миссий и не реактивируется движком: `_synchronize_player_missions`
+пропускает терминальные статусы, `_submit_mission_once` отвечает 409.
+Fallback-entitlement независим от статуса миссии; отключается только при
+`invalidate_fallback_entitlement=true` (available -> disabled).
 
 ## Целевой mission run
 `PlayerMission` остаётся current-progress projection. Исторический runtime
