@@ -5,8 +5,18 @@
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/engine/bootstrap`
 - `POST /api/v1/engine/missions/{mission_id}/submit`
+- `GET /api/v1/engine/fallback-offers`
 
 `GET /api/v1/engine/bootstrap` returns only public player content. Schema and redaction policy for `Segment.content` and `Mission.content` are defined in `docs/segment-content-contract.md`; validation configuration, answers, and server-side award rules are excluded.
+
+`GET /api/v1/engine/fallback-offers` (4.3b) возвращает только персональные
+fallback-предложения вызывающего игрока после первого провала
+(`docs/fallback-shop-contract.md`): mission id/slug/title, offer id,
+quota/remaining лимиты, presentation status и предмет-ключ (id/slug/code/title/
+symbol/category/rarity). Цена намеренно отсутствует (появится с покупкой в 4.4);
+`shop.fallback.enabled=false` → пустой список; item не published / KeyRules
+удалён → `status: "disabled"` (derived, без записи в БД). Response никогда не
+содержит price/pool/mode/expiry, policy JSON или server-only метаданные.
 
 ## Planned geo/team API (not implemented)
 
@@ -111,7 +121,6 @@ response schemas must be finalized before implementation.
 - `GET /api/v1/engine/mission-runs/{run_id}` — owner-permitted run projection.
 - `POST /api/v1/engine/mission-runs/{run_id}/attempts` — issue next attempt.
 - `POST /api/v1/engine/mission-attempts/{attempt_id}/submit` — resolve attempt.
-- `GET /api/v1/engine/fallback-offers` — permitted personal offer projection.
 - `POST /api/v1/engine/fallback-offers/{offer_id}/purchases` — atomic purchase.
 
 Responses expose only caller-permitted state. They never expose accepted
@@ -163,6 +172,7 @@ presentation, deadline, номер attempt, safe run state и фактическ
 Response никогда не содержит accepted answers, correct sequence, protected snapshot,
 validation config, policy JSON, raw ledger/inventory metadata, QR/location data,
 other players data, audit metadata, tokens, cookies, secrets или Telegram initData.
-Fallback offers и purchases не входят в API v1.
+Fallback purchases (4.4) не входят в API v1; `GET /api/v1/engine/fallback-offers`
+реализован отдельным маршрутом (4.3b).
 Legacy `POST /api/v1/engine/missions/{mission_id}/submit` остаётся отдельным
 маршрутом до отдельной reviewed migration/deprecation задачи.

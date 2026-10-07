@@ -16,6 +16,7 @@ from app.mission_engine import (
     submit_mission,
 )
 from app.models import GamePlayer
+from app.fallback_shop import get_fallback_offers
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -331,6 +332,21 @@ def submit_engine_mission(
             answer=payload.answer,
             sequence=payload.sequence,
         )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/fallback-offers")
+def get_engine_fallback_offers_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return get_fallback_offers(player_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

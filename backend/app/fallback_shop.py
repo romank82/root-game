@@ -6,8 +6,9 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db import SessionLocal
 from app.geo_team_runtime_models import PlayerFallbackEntitlement
-from app.models import Item, KeyRules, MissionReward, SystemSetting
+from app.models import Item, KeyRules, Mission, MissionReward, SystemSetting
 from app.system_settings_catalog import get_definition
 
 logger = logging.getLogger(__name__)
@@ -134,3 +135,69 @@ def create_first_failure_entitlement(
         )
     )
     session.flush()
+
+
+def build_fallback_offers(session: Session, player_id: str) -> list[dict]:
+    """Презентер персональных fallback-предложений игрока (4.3b).
+
+    Возвращает только entitlement'ы запрошенного игрока и текущий CMS-статус
+    предмета. Намеренно не включает price/pool/mode/expires, любые policy JSON
+    и служебные метаданные (created_at, updated_at): цена появится в 4.4 вместе
+    со схемой продукта, а публичная граница задана в docs/fallback-shop-contract.md.
+
+    Presentation-правила:
+    - shop.fallback.enabled is not True -> пустой список;
+    - миссия не найдена (теоретически невозможно из-за FK RESTRICT) -> пропуск;
+    - item не найден / не published / нет KeyRules -> status="disabled"
+      (derived, в БД не пишется, entitlement.status не трогается).
+    """
+    if _read_setting(session, FALLBACK_ENABLED_KEY) is not True:
+        return []
+
+    entitlements = session.scalars(
+        select(PlayerFallbackEntitlement).where(
+            PlayerFallbackEntitlement.player_id == player_id,
+        )
+    ).all()
+
+    offers: list[dict] = []
+    for entitlement in entitlements:
+        mission = session.get(Mission, entitlement.mission_id)
+        if mission is None:
+            continue
+
+        item = _mission_has_purchasable_key_reward(session, entitlement.mission_id)
+        effective_status = entitlement.status if item is not None else "disabled"
+        remaining_quota = max(0, entitlement.quota_limit - entitlement.consumed_count)
+
+        offers.append(
+            {
+                "missionId": entitlement.mission_id,
+                "missionSlug": mission.slug,
+                "missionTitle": mission.title,
+                "offerId": entitlement.offer_id,
+                "quotaLimit": entitlement.quota_limit,
+                "consumedCount": entitlement.consumed_count,
+                "remainingQuota": remaining_quota,
+                "status": effective_status,
+                "item": {
+                    "id": item.id,
+                    "slug": item.slug,
+                    "code": item.code,
+                    "title": item.title,
+                    "symbol": item.symbol,
+                    "category": item.category,
+                    "rarity": item.rarity,
+                }
+                if item is not None
+                else None,
+            }
+        )
+
+    return offers
+
+
+def get_fallback_offers(player_id: str) -> dict:
+    """Точка вызова из HTTP-слоя: персональные офферы в формате {"offers": [...]}."""
+    with SessionLocal.begin() as session:
+        return {"offers": build_fallback_offers(session, player_id)}

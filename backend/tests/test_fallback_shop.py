@@ -80,8 +80,20 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         )
         cls._session_local_patch.start()
 
+        # 4.3b: get_fallback_offers тоже открывает собственную сессию.
+        from app import fallback_shop
+
+        cls.fallback_shop = fallback_shop
+        cls._fallback_session_local_patch = patch.object(
+            fallback_shop,
+            "SessionLocal",
+            cls.SessionLocal,
+        )
+        cls._fallback_session_local_patch.start()
+
     @classmethod
     def tearDownClass(cls) -> None:
+        cls._fallback_session_local_patch.stop()
         cls._session_local_patch.stop()
         cls.engine.dispose()
         cls._temporary_directory.cleanup()
@@ -544,6 +556,154 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             )
         self.assertEqual(catcher.exception.status_code, 409)
         self.assertEqual(self._count_entitlements(ids["player"]), 0)
+
+    # ---- 4.3b.1–4.3b.7 (GET /api/v1/engine/fallback-offers) ------------
+    def test_4_3b_1_no_entitlement_returns_empty(self):
+        ids = self._fixture()
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(offers, [])
+
+    def test_4_3b_2_first_failure_returns_one_offer(self):
+        ids = self._fixture()
+        result = self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        self.assertFalse(result["accepted"])
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 1)
+        offer = offers[0]
+        self.assertEqual(offer["missionId"], ids["target"])
+        self.assertEqual(offer["missionSlug"], ids["target"])
+        self.assertEqual(offer["missionTitle"], "Fallback target mission")
+        self.assertEqual(offer["offerId"], "offer-fallback-1")
+        self.assertEqual(offer["quotaLimit"], 1)
+        self.assertEqual(offer["consumedCount"], 0)
+        self.assertEqual(offer["remainingQuota"], 1)
+        self.assertEqual(offer["status"], "available")
+        self.assertEqual(
+            set(offer),
+            {
+                "missionId",
+                "missionSlug",
+                "missionTitle",
+                "offerId",
+                "quotaLimit",
+                "consumedCount",
+                "remainingQuota",
+                "status",
+                "item",
+            },
+        )
+        item = offer["item"]
+        self.assertEqual(item["id"], ids["item"])
+        self.assertEqual(item["slug"], ids["item"])
+        self.assertEqual(item["code"], f"ITEM-{ids['item'][5:17]}")
+        self.assertEqual(item["title"], "Fixture key")
+        self.assertEqual(item["symbol"], "KEY")
+        self.assertEqual(item["category"], "key")
+        self.assertEqual(item["rarity"], "common")
+        self.assertEqual(
+            set(item),
+            {"id", "slug", "code", "title", "symbol", "category", "rarity"},
+        )
+
+    def test_4_3b_3_success_returns_empty(self):
+        ids = self._fixture()
+        result = self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="complete"
+        )
+        self.assertTrue(result["accepted"])
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(offers, [])
+
+    def test_4_3b_4_disabled_flag_returns_empty(self):
+        ids = self._fixture()
+        result = self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        self.assertFalse(result["accepted"])
+        self.assertEqual(self._count_entitlements(ids["player"]), 1)
+        with self.SessionLocal.begin() as session:
+            from app.models import SystemSetting
+
+            setting = session.get(SystemSetting, "shop.fallback.enabled")
+            self.assertIsNotNone(setting)
+            setting.value_json = False
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(offers, [])
+
+    def test_4_3b_5_two_missions_two_offers(self):
+        ids = self._fixture(second_mission=True)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target_second"], answer="wrong-second"
+        )
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 2)
+        by_mission = {offer["missionId"]: offer for offer in offers}
+        self.assertEqual(set(by_mission), {ids["target"], ids["target_second"]})
+        first = by_mission[ids["target"]]
+        second = by_mission[ids["target_second"]]
+        self.assertEqual(first["missionSlug"], ids["target"])
+        self.assertEqual(second["missionSlug"], ids["target_second"])
+        self.assertEqual(first["missionTitle"], "Fallback target mission")
+        self.assertEqual(second["missionTitle"], "Second fallback mission")
+        self.assertEqual(first["item"]["id"], ids["item"])
+        self.assertEqual(second["item"]["id"], ids["item_second"])
+        self.assertEqual(first["status"], "available")
+        self.assertEqual(second["status"], "available")
+
+    def test_4_3b_6_isolated_per_player(self):
+        ids = self._fixture(second_player=True)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        self.mission_engine.submit_mission(
+            ids["player_second"], ids["target"], answer="wrong-answer"
+        )
+        self.assertEqual(self._count_entitlements(ids["player"]), 1)
+        self.assertEqual(self._count_entitlements(ids["player_second"]), 1)
+        first_offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        second_offers = self.fallback_shop.get_fallback_offers(
+            ids["player_second"]
+        )["offers"]
+        self.assertEqual(len(first_offers), 1)
+        self.assertEqual(len(second_offers), 1)
+        self.assertEqual(first_offers[0]["missionId"], ids["target"])
+        self.assertEqual(second_offers[0]["missionId"], ids["target"])
+        # В БД 2 entitlement'а, но каждый видит ровно свой — фильтр по player_id.
+        self.assertEqual(
+            len(first_offers) + len(second_offers),
+            2,
+        )
+
+    def test_4_3b_7_unpublished_item_returns_disabled_status(self):
+        ids = self._fixture()
+        result = self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        self.assertFalse(result["accepted"])
+        self.assertEqual(
+            self._get_entitlement(ids["player"], ids["target"]).status,
+            "available",
+        )
+        with self.SessionLocal.begin() as session:
+            from app.models import Item
+
+            item = session.get(Item, ids["item"])
+            self.assertIsNotNone(item)
+            item.status = "draft"
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0]["status"], "disabled")
+        self.assertIsNone(offers[0]["item"])
+        # Derived presentation: entitlement в БД не меняется.
+        self.assertEqual(
+            self._get_entitlement(ids["player"], ids["target"]).status,
+            "available",
+        )
 
     # ---- mini-тесты validate_value: тип string ------------------------
 
