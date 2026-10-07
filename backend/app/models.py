@@ -636,6 +636,94 @@ class GamePlayer(TimestampMixin, Base):
     )
 
 
+class PlayerRestriction(TimestampMixin, Base):
+    """Ограничения игрока (шаг 5.1).
+
+    PlayerRestriction — источник истины о гранулярных ограничениях
+    (chat/transfer/team/mission/payment/withdrawal, suspended, blocked).
+    GamePlayer.status остаётся кэшем агрегата для быстрого auth-гейтинга
+    (не-active = вход запрещён), синхронизация — через domain-executor
+    в шагах 5.4+. Физическое удаление запрещено: lifecycle active →
+    expired (lazy по expires_at) или revoked (админом).
+    """
+
+    __tablename__ = "player_restrictions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    restriction_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="active",
+        index=True,
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    admin_id: Mapped[str] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    approval_request_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_approval_requests.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    revoked_by_admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    revocation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "restriction_type IN ('chat_restricted', 'transfer_restricted', "
+            "'team_restricted', 'mission_restricted', 'payment_restricted', "
+            "'withdrawal_restricted', 'suspended', 'blocked')",
+            name="ck_player_restrictions_type",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'expired', 'revoked')",
+            name="ck_player_restrictions_status",
+        ),
+        CheckConstraint(
+            "expires_at IS NULL OR starts_at IS NULL OR expires_at >= starts_at",
+            name="ck_player_restrictions_time_order",
+        ),
+        Index(
+            "ix_player_restrictions_player_type",
+            "player_id",
+            "restriction_type",
+        ),
+        Index(
+            "uq_player_restrictions_active_per_type",
+            "player_id",
+            "restriction_type",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+
 class PlayerMission(TimestampMixin, Base):
     __tablename__ = "player_missions"
 
