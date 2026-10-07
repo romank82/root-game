@@ -453,6 +453,36 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                 )
             )
 
+    def _seed_root_wallet(self, player_id: str, amount: int) -> str:
+        """Кошелёк с кредитной проводкой — игровой ROOT на старте (как в 4.1)."""
+        from app.models import Wallet, WalletTransaction
+
+        wallet_id = f"wallet-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                Wallet(
+                    id=wallet_id,
+                    player_id=player_id,
+                    currency="ROOT",
+                    available_balance=amount,
+                    locked_balance=0,
+                )
+            )
+            session.add(
+                WalletTransaction(
+                    id=f"wallet-transaction-{uuid.uuid4().hex}",
+                    wallet_id=wallet_id,
+                    amount=amount,
+                    balance_after=amount,
+                    transaction_type="credit",
+                    reason="Test seed balance",
+                    reference_type="test_seed",
+                    reference_id=f"seed-{uuid.uuid4().hex}",
+                    metadata_json={},
+                )
+            )
+        return wallet_id
+
     # ---- 4.3a.1–4.3a.9 -----------------------------------------------
     def test_4_3a_1_first_failed_attempt_creates_entitlement(self):
         ids = self._fixture()
@@ -575,7 +605,12 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         self.assertEqual(offer["missionId"], ids["target"])
         self.assertEqual(offer["missionSlug"], ids["target"])
         self.assertEqual(offer["missionTitle"], "Fallback target mission")
+        self.assertEqual(
+            offer["entitlementId"],
+            self._get_entitlement(ids["player"], ids["target"]).id,
+        )
         self.assertEqual(offer["offerId"], "offer-fallback-1")
+        self.assertEqual(offer["priceRoot"], 100)
         self.assertEqual(offer["quotaLimit"], 1)
         self.assertEqual(offer["consumedCount"], 0)
         self.assertEqual(offer["remainingQuota"], 1)
@@ -584,9 +619,11 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             set(offer),
             {
                 "missionId",
+                "entitlementId",
                 "missionSlug",
                 "missionTitle",
                 "offerId",
+                "priceRoot",
                 "quotaLimit",
                 "consumedCount",
                 "remainingQuota",
@@ -704,6 +741,483 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             self._get_entitlement(ids["player"], ids["target"]).status,
             "available",
         )
+
+    # ---- 4.4.1–4.4.10 (POST /api/v1/engine/fallback-offers/{offer_id}/purchases)
+
+    def test_4_4_1_successful_purchase_debits_root_and_credits_item(self):
+        ids = self._fixture()
+        wallet_id = self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(entitlement)
+
+        result = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], entitlement.id
+        )
+
+        self.assertTrue(result["purchased"])
+        self.assertEqual(result["entitlementId"], entitlement.id)
+        self.assertEqual(result["consumedCount"], 1)
+        self.assertEqual(result["remainingQuota"], 0)
+        self.assertEqual(result["status"], "exhausted")
+        self.assertEqual(result["priceRoot"], 100)
+        self.assertEqual(result["rootBalance"], 900)
+        self.assertEqual(result["item"]["id"], ids["item"])
+        self.assertEqual(result["item"]["slug"], ids["item"])
+        self.assertEqual(
+            set(result["item"]),
+            {"id", "slug", "code", "title", "symbol", "category", "rarity"},
+        )
+
+        with self.SessionLocal() as session:
+            from app.geo_team_runtime_models import InventoryEvent
+
+            from app.models import PlayerItem, Wallet, WalletTransaction
+
+            wallet = session.get(Wallet, wallet_id)
+            self.assertEqual(wallet.available_balance, 900)
+
+            tx = session.scalar(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet_id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            )
+            self.assertIsNotNone(tx)
+            self.assertEqual(tx.wallet_id, wallet_id)
+            self.assertEqual(tx.amount, 100)
+            self.assertEqual(tx.balance_after, 900)
+            self.assertEqual(tx.transaction_type, "debit")
+            self.assertEqual(tx.reference_id, f"{entitlement.id}:1")
+
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(player_item)
+            self.assertEqual(player_item.quantity, 1)
+            self.assertEqual(player_item.obtained_from_type, "fallback_purchase")
+            self.assertEqual(player_item.obtained_from_id, entitlement.id)
+
+            event = session.scalar(
+                select(InventoryEvent).where(
+                    InventoryEvent.player_item_id == player_item.id,
+                    InventoryEvent.event_type == "credited",
+                )
+            )
+            self.assertIsNotNone(event)
+            self.assertEqual(event.quantity_delta, 1)
+            self.assertEqual(event.reference_type, "fallback_purchase")
+            self.assertEqual(event.reference_id, f"{entitlement.id}:1")
+
+    def test_4_4_2_repeated_purchase_is_idempotent(self):
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+
+        first = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], entitlement.id
+        )
+        second = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], entitlement.id
+        )
+
+        self.assertTrue(first["purchased"])
+        self.assertTrue(second["purchased"])
+        self.assertEqual(second["entitlementId"], entitlement.id)
+        self.assertEqual(second["consumedCount"], 1)
+        self.assertEqual(second["status"], "exhausted")
+        self.assertEqual(second["rootBalance"], 900)
+
+        with self.SessionLocal() as session:
+            from app.geo_team_runtime_models import InventoryEvent
+
+            from app.models import PlayerItem, Wallet, WalletTransaction
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertEqual(wallet.available_balance, 900)
+
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertEqual(player_item.quantity, 1)
+
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 1)
+
+            events = session.scalars(
+                select(InventoryEvent).where(
+                    InventoryEvent.player_item_id == player_item.id,
+                    InventoryEvent.event_type == "credited",
+                    InventoryEvent.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(events), 1)
+
+    def test_4_4_3_insufficient_root_returns_409_no_changes(self):
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as catcher:
+            self.fallback_shop.purchase_fallback_offer_entrypoint(
+                ids["player"], entitlement.id
+            )
+        self.assertEqual(catcher.exception.status_code, 409)
+        self.assertEqual(catcher.exception.detail, "Недостаточно ROOT.")
+
+        with self.SessionLocal() as session:
+            from app.models import PlayerItem, Wallet, WalletTransaction
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 0)
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNone(player_item)
+
+        refreshed = self._get_entitlement(ids["player"], ids["target"])
+        self.assertEqual(refreshed.status, "available")
+        self.assertEqual(refreshed.consumed_count, 0)
+
+    def test_4_4_4_disabled_shop_returns_409(self):
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        with self.SessionLocal.begin() as session:
+            from app.models import SystemSetting
+
+            setting = session.get(SystemSetting, "shop.fallback.enabled")
+            self.assertIsNotNone(setting)
+            setting.value_json = False
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as catcher:
+            self.fallback_shop.purchase_fallback_offer_entrypoint(
+                ids["player"], entitlement.id
+            )
+        self.assertEqual(catcher.exception.status_code, 409)
+        self.assertEqual(catcher.exception.detail, "Магазин отключён.")
+
+        with self.SessionLocal() as session:
+            from app.models import Wallet, WalletTransaction
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 0)
+        refreshed = self._get_entitlement(ids["player"], ids["target"])
+        self.assertEqual(refreshed.status, "available")
+        self.assertEqual(refreshed.consumed_count, 0)
+
+    def test_4_4_5_wrong_player_returns_404(self):
+        ids = self._fixture(second_player=True)
+        self._seed_root_wallet(ids["player"], 1000)
+        self._seed_root_wallet(ids["player_second"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(entitlement)
+
+        # Чужой entitlement покупается только игроком-владельцем.
+        with self.assertRaises(self.mission_engine.MissionEngineError) as catcher:
+            self.fallback_shop.purchase_fallback_offer_entrypoint(
+                ids["player_second"], entitlement.id
+            )
+        self.assertEqual(catcher.exception.status_code, 404)
+        self.assertEqual(catcher.exception.detail, "Предложение не найдено.")
+
+        # Несуществующий entitlement_id — то же 404.
+        with self.assertRaises(self.mission_engine.MissionEngineError) as catcher:
+            self.fallback_shop.purchase_fallback_offer_entrypoint(
+                ids["player"], f"fallback-entitlement-{uuid.uuid4().hex}"
+            )
+        self.assertEqual(catcher.exception.status_code, 404)
+
+        refreshed = self._get_entitlement(ids["player"], ids["target"])
+        self.assertEqual(refreshed.status, "available")
+        self.assertEqual(refreshed.consumed_count, 0)
+
+    def test_4_4_6_unpublished_item_returns_409(self):
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        self.assertEqual(entitlement.status, "available")
+        with self.SessionLocal.begin() as session:
+            from app.models import Item
+
+            item = session.get(Item, ids["item"])
+            self.assertIsNotNone(item)
+            item.status = "draft"
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as catcher:
+            self.fallback_shop.purchase_fallback_offer_entrypoint(
+                ids["player"], entitlement.id
+            )
+        self.assertEqual(catcher.exception.status_code, 409)
+        self.assertEqual(catcher.exception.detail, "Ключ недоступен.")
+
+        with self.SessionLocal() as session:
+            from app.models import Wallet, WalletTransaction
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 0)
+        refreshed = self._get_entitlement(ids["player"], ids["target"])
+        self.assertEqual(refreshed.status, "available")
+        self.assertEqual(refreshed.consumed_count, 0)
+
+    def test_4_4_7_exhausted_entitlement_returns_409(self):
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        # Квота уже исчерпана, но коммиченной покупки нет (ломаные данные) —
+        # идемпотентный возврат не срабатывает, отдаётся честный 409.
+        with self.SessionLocal.begin() as session:
+            from app.geo_team_runtime_models import PlayerFallbackEntitlement
+
+            row = session.get(PlayerFallbackEntitlement, entitlement.id)
+            row.consumed_count = 1
+            row.status = "available"  # проверяем именно квоту, не статус
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as catcher:
+            self.fallback_shop.purchase_fallback_offer_entrypoint(
+                ids["player"], entitlement.id
+            )
+        self.assertEqual(catcher.exception.status_code, 409)
+        self.assertEqual(catcher.exception.detail, "Квота исчерпана.")
+
+        with self.SessionLocal() as session:
+            from app.models import Wallet, WalletTransaction
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 0)
+
+    def test_4_4_8_disabled_entitlement_returns_409(self):
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        with self.SessionLocal.begin() as session:
+            from app.geo_team_runtime_models import PlayerFallbackEntitlement
+
+            row = session.get(PlayerFallbackEntitlement, entitlement.id)
+            row.status = "disabled"
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as catcher:
+            self.fallback_shop.purchase_fallback_offer_entrypoint(
+                ids["player"], entitlement.id
+            )
+        self.assertEqual(catcher.exception.status_code, 409)
+        self.assertEqual(catcher.exception.detail, "Предложение недоступно.")
+
+        with self.SessionLocal() as session:
+            from app.models import Wallet, WalletTransaction
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 0)
+
+    def test_4_4_9_two_entitlements_with_same_item_stack_quantity(self):
+        ids = self._fixture(second_mission=True)
+        self._seed_root_wallet(ids["player"], 1000)
+        # Вторая миссия получает ту же награду (тот же Item), что и первая.
+        with self.SessionLocal.begin() as session:
+            from app.models import MissionReward
+
+            reward = session.scalar(
+                select(MissionReward).where(
+                    MissionReward.mission_id == ids["target_second"],
+                    MissionReward.reward_type == "item",
+                )
+            )
+            self.assertIsNotNone(reward)
+            reward.item_id = ids["item"]
+
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target_second"], answer="wrong-second"
+        )
+        first = self._get_entitlement(ids["player"], ids["target"])
+        second = self._get_entitlement(ids["player"], ids["target_second"])
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertNotEqual(first.id, second.id)
+
+        result_first = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], first.id
+        )
+        result_second = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], second.id
+        )
+        self.assertTrue(result_first["purchased"])
+        self.assertTrue(result_second["purchased"])
+        self.assertEqual(result_first["rootBalance"], 900)
+        self.assertEqual(result_second["rootBalance"], 800)
+
+        with self.SessionLocal() as session:
+            from app.models import PlayerItem, Wallet, WalletTransaction
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(player_item)
+            self.assertEqual(player_item.quantity, 2)
+
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 2)
+            # reference_id привязан к entitlement — у двух разных entitlement'ов
+            # ключи различаются даже при одном и том же item.
+            self.assertEqual(
+                {tx.reference_id for tx in txs},
+                {f"{first.id}:1", f"{second.id}:1"},
+            )
+            self.assertEqual(wallet.available_balance, 800)
+
+    def test_4_4_10_ledger_consistency(self):
+        ids = self._fixture()
+        wallet_id = self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+
+        result = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], entitlement.id
+        )
+        self.assertTrue(result["purchased"])
+
+        with self.SessionLocal() as session:
+            from app.geo_team_runtime_models import InventoryEvent
+
+            from app.models import PlayerItem, Wallet, WalletTransaction
+
+            wallet = session.get(Wallet, wallet_id)
+            self.assertEqual(wallet.available_balance, 1000 - 100)
+
+            credit = session.scalar(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet_id,
+                    WalletTransaction.transaction_type == "credit",
+                )
+            )
+            debit = session.scalar(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet_id,
+                    WalletTransaction.transaction_type == "debit",
+                )
+            )
+            self.assertIsNotNone(credit)
+            self.assertIsNotNone(debit)
+            self.assertEqual(credit.balance_after, 1000)
+            self.assertEqual(debit.amount, 100)
+            self.assertEqual(debit.balance_after, 900)
+            # Баланс кошелька равен балансу последней проводки (ledger — truth).
+            self.assertEqual(wallet.available_balance, debit.balance_after)
+
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(player_item)
+            events = session.scalars(
+                select(InventoryEvent).where(
+                    InventoryEvent.player_item_id == player_item.id,
+                    InventoryEvent.event_type == "credited",
+                    InventoryEvent.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(events), 1)
+            # quantity инвентаря = сумма quantity_delta событий credited.
+            self.assertEqual(
+                player_item.quantity,
+                sum(event.quantity_delta for event in events),
+            )
 
     # ---- mini-тесты validate_value: тип string ------------------------
 

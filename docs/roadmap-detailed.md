@@ -114,7 +114,7 @@
 
 ---
 
-## Этап 4. Инвентарь и ключи — ⚠️ в работе
+## Этап 4. Инвентарь и ключи — ✅ готов
 
 Уже реализовано: Item, Inventory, выдача наград, таблицы резервов и событий инвентаря, fallback-награды.
 
@@ -192,12 +192,31 @@
 - **Зависит от**: 4.1
 - **Риск**: средний ⚠️ ТРЕБУЕТ СОГЛАСОВАНИЯ
 
-### Шаг 4.4: Логика покупки из персонального магазина
+### ✅ Шаг 4.4: Логика покупки из персонального магазина
 - **Что**: покупка ключа за ROOT с проверкой лимитов и идемпотентности.
 - **Файлы**: сервис магазина, ledger.
 - **Проверка**: покупка проходит, ключ выдан, баланс уменьшен, проводка в ledger.
 - **Зависит от**: 4.3
 - **Риск**: средний ⚠️ ТРЕБУЕТ СОГЛАСОВАНИЯ
+
+### Уже сделано (обновлено 2026-10-07)
+
+- **4.4** `purchase_fallback_offer` в `backend/app/fallback_shop.py`:
+  атомарная покупка fallback-ключа за ROOT в одной транзакции.
+  `POST /api/v1/engine/fallback-offers/{offer_id}/purchases` — путевой параметр
+  исторически назван `offer_id`, но адресует `entitlement.id` (GET отдаёт его
+  как `entitlementId`; `offer_id` у одного игрока не уникален). Цена —
+  `shop.fallback.default_price_root` (5-й ключ, data-миграция `1c439c558aa7`,
+  дефолт 100 atomic units). Идемпотентность — `reference_id = "{entitlement.id}:{n}"`
+  + unique-индексы WalletTransaction/InventoryEvent; повторный POST возвращает
+  committed-результат. Порядок в транзакции: entitlement FOR UPDATE → enabled →
+  ключ published/KeyRules → цена → идемпотентный возврат → статус → квота →
+  wallet FOR UPDATE → баланс → debit → PlayerItem upsert + InventoryEvent
+  `credited` → consumed_count++/exhausted. Пул/mode/expiry не реализованы
+  (по контракту). Без `admin_audit` (player-операция), только structured logger.
+  Тесты `backend/tests/test_fallback_shop.py` (10 кейсов 4.4.1–4.4.10).
+  Покупка здесь — первая покупка проекта: закрывает контрактный гэп, когда
+  mission reward upsert'ил PlayerItem без InventoryEvent.
 
 ---
 

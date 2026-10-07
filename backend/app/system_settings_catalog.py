@@ -151,6 +151,15 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         description="0 = бессрочно; иначе секунды. Резерв для 4.4+ (в V1 не персистится).",
         is_sensitive=False,
     ),
+    "shop.fallback.default_price_root": SystemSettingDefinition(
+        key="shop.fallback.default_price_root",
+        value_type="integer",
+        default_value=100,
+        category="shop",
+        title="Цена fallback-ключа в ROOT",
+        description="Сколько ROOT игрок платит за покупку ключа из fallback-предложения (atomic units).",
+        is_sensitive=False,
+    ),
     "features.demo_seed_enabled": SystemSettingDefinition(
         key="features.demo_seed_enabled",
         value_type="boolean",

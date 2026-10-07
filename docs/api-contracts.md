@@ -6,17 +6,39 @@
 - `GET /api/v1/engine/bootstrap`
 - `POST /api/v1/engine/missions/{mission_id}/submit`
 - `GET /api/v1/engine/fallback-offers`
+- `POST /api/v1/engine/fallback-offers/{offer_id}/purchases`
 
 `GET /api/v1/engine/bootstrap` returns only public player content. Schema and redaction policy for `Segment.content` and `Mission.content` are defined in `docs/segment-content-contract.md`; validation configuration, answers, and server-side award rules are excluded.
 
 `GET /api/v1/engine/fallback-offers` (4.3b) возвращает только персональные
 fallback-предложения вызывающего игрока после первого провала
-(`docs/fallback-shop-contract.md`): mission id/slug/title, offer id,
-quota/remaining лимиты, presentation status и предмет-ключ (id/slug/code/title/
-symbol/category/rarity). Цена намеренно отсутствует (появится с покупкой в 4.4);
+(`docs/fallback-shop-contract.md`): mission id/slug/title, `entitlementId`
+(уникальный адрес предложения в API), offer id, `priceRoot` (цена ключа в ROOT
+atomic units, из system_settings), quota/remaining лимиты, presentation status
+и предмет-ключ (id/slug/code/title/symbol/category/rarity).
 `shop.fallback.enabled=false` → пустой список; item не published / KeyRules
 удалён → `status: "disabled"` (derived, без записи в БД). Response никогда не
-содержит price/pool/mode/expiry, policy JSON или server-only метаданные.
+содержит pool/mode/expiry, policy JSON или server-only метаданные.
+
+`POST /api/v1/engine/fallback-offers/{offer_id}/purchases` (4.4) покупает
+fallback-ключ за ROOT в одной атомарной транзакции: debit ROOT
+(`WalletTransaction`, `transaction_type="debit"`, amount всегда положительный)
+→ выдача ключа (`PlayerItem` upsert + `InventoryEvent("credited")`) →
+`consumed_count++`, при достижении quota — `status="exhausted"`. Путевой
+параметр исторически назван `offer_id`, но адресует именно `entitlement.id`
+(у одного игрока несколько entitlement'ов могут иметь одинаковый `offer_id`,
+уникальный адрес — `entitlementId` из GET-ответа). Body отсутствует;
+аутентификация — текущая player identity; rate limit 10/minute.
+Pre-checks (каждый — HTTP 409 с русским detail): магазин отключён, ключ
+недоступен, цена не настроена, предложение недоступно, квота исчерпана,
+недостаточно ROOT. Чужой/несуществующий entitlement.id → 404.
+Client `Idempotency-Key` не требуется: естественная идемпотентность через
+`reference_id = f"{entitlement.id}:{n}"` на unique-индексах `WalletTransaction`
+и `InventoryEvent`; повторный POST после успешной покупки возвращает прежний
+committed-результат (`purchased: true`).
+Response: `{"purchased": true, "entitlementId", "consumedCount",
+"remainingQuota", "status", "priceRoot", "rootBalance", "item": {id, slug,
+code, title, symbol, category, rarity}}`.
 
 ## Planned geo/team API (not implemented)
 
@@ -121,7 +143,6 @@ response schemas must be finalized before implementation.
 - `GET /api/v1/engine/mission-runs/{run_id}` — owner-permitted run projection.
 - `POST /api/v1/engine/mission-runs/{run_id}/attempts` — issue next attempt.
 - `POST /api/v1/engine/mission-attempts/{attempt_id}/submit` — resolve attempt.
-- `POST /api/v1/engine/fallback-offers/{offer_id}/purchases` — atomic purchase.
 
 Responses expose only caller-permitted state. They never expose accepted
 answers, correct sequences, protected challenge snapshots, raw location
@@ -172,7 +193,7 @@ presentation, deadline, номер attempt, safe run state и фактическ
 Response никогда не содержит accepted answers, correct sequence, protected snapshot,
 validation config, policy JSON, raw ledger/inventory metadata, QR/location data,
 other players data, audit metadata, tokens, cookies, secrets или Telegram initData.
-Fallback purchases (4.4) не входят в API v1; `GET /api/v1/engine/fallback-offers`
-реализован отдельным маршрутом (4.3b).
+Fallback purchases (4.4) входят в API v1: `POST /api/v1/engine/fallback-offers/{offer_id}/purchases`
+реализован в 4.4; `GET /api/v1/engine/fallback-offers` — отдельный маршрут (4.3b).
 Legacy `POST /api/v1/engine/missions/{mission_id}/submit` остаётся отдельным
 маршрутом до отдельной reviewed migration/deprecation задачи.

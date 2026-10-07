@@ -16,7 +16,7 @@ from app.mission_engine import (
     submit_mission,
 )
 from app.models import GamePlayer
-from app.fallback_shop import get_fallback_offers
+from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -347,6 +347,26 @@ def get_engine_fallback_offers_route(
 ):
     try:
         return get_fallback_offers(player_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+# 4.4: покупка fallback-ключа. Путевой параметр {offer_id} намеренно назван
+# offer_id из-за исторического URL, но адресует именно player_fallback_entitlements.id
+# (см. та же оговорка в GET): у одного игрока несколько entitlement'ов могут иметь
+# одинаковый offer_id, поэтому уникальный адрес — entitlement.id.
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/fallback-offers/{offer_id}/purchases")
+def purchase_fallback_offer_route(
+    request: Request,
+    offer_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return purchase_fallback_offer_entrypoint(player_id, offer_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,
