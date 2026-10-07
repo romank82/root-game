@@ -218,6 +218,20 @@
   Покупка здесь — первая покупка проекта: закрывает контрактный гэп, когда
   mission reward upsert'ил PlayerItem без InventoryEvent.
 
+- **5.3** read-only админ-эндпоинты игроков (`backend/app/admin_players.py`):
+  `GET /api/v1/admin/players` — список с фильтрами `search` (ilike по username/
+  display_name/first_name), `status`, `authProvider` и пагинацией `limit`/`offset`
+  (default 50, max 200); `GET /api/v1/admin/players/{player_id}` — полная карточка:
+  `player` (external_id показывается полностью, `lastActivityAt = updated_at`,
+  приблизительно), `wallet` (нули, если нет), `inventory` (batch JOIN c Item,
+  quantity > 0), `activeMissions` (in_progress/available), `missionHistory` (только
+  completed, limit 10), `restrictions` (active сверху, limit 20),
+  `recentTransactions` (limit 20, metadata через `sanitize_audit_data`), `stats`
+  (totalMissionsCompleted, totalRootEarned, totalRootSpent). Оба эндпоинта требуют
+  прямое право `players.read`, read-only сессия без `begin()`. Миграция
+  `92aa64e01b1a` добавила 4 права категории `players` (read/manage/restrict/block).
+  Тесты `backend/tests/test_admin_players.py` (10 unit-кейсов, fake-session без БД).
+
 ---
 
 ## Этап 5. Карточка игрока, ручные операции, ограничения — ❌ не начат
@@ -236,10 +250,13 @@
 - **Зависит от**: 5.1
 - **Риск**: низкий
 
-### Шаг 5.3: Админ-роутер «Карточка игрока»
-- **Что**: эндпоинт с полной информацией по игроку (баланс, инвентарь, миссии, история, ограничения).
-- **Файлы**: файл роутера игроков.
-- **Проверка**: запрос возвращает полный профиль.
+### ✅ Шаг 5.3: Админ-роутер «Карточка игрока»
+- **Что**: read-only эндпоинты `GET /api/v1/admin/players` (список с фильтрами
+  `search`/`status`/`authProvider` и пагинацией `limit`/`offset`) и
+  `GET /api/v1/admin/players/{id}` (карточка: баланс, инвентарь, миссии, история,
+  ограничения, проводки, статистика).
+- **Файлы**: `backend/app/admin_players.py`, миграция `92aa64e01b1a` (права `players.*`).
+- **Проверка**: ✅ выполнено — `backend/tests/test_admin_players.py` (10 unit-кейсов).
 - **Зависит от**: 5.1
 - **Риск**: низкий
 

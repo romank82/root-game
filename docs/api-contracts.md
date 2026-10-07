@@ -95,6 +95,8 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
 `executed`, `execution_failed`. Final states cannot be reused for execution.
 - `/api/v1/admin/system-settings` — catalog/list/get/update non-sensitive
   settings; sensitive changes use a dedicated approval workflow.
+- `/api/v1/admin/players` — list (search/status/authProvider filters, limit/offset).
+- `/api/v1/admin/players/{id}` — player card (wallet, inventory, missions, restrictions, recent transactions, stats).
 
 
 ## System settings
