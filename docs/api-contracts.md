@@ -97,6 +97,14 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
   settings; sensitive changes use a dedicated approval workflow.
 - `/api/v1/admin/players` — list (search/status/authProvider filters, limit/offset).
 - `/api/v1/admin/players/{id}` — player card (wallet, inventory, missions, restrictions, recent transactions, stats).
+- `POST /api/v1/admin/players/{id}/wallet-adjustment` — ручное начисление/списание ROOT
+  (`direction=credit|debit`, `amount>0`, `reason`, `request_id`). При direct-grant и сумме
+  ниже `economy.manual_adjustment_approval_threshold` — прямое исполнение (200), иначе 201 (approval-заявка).
+- `POST /api/v1/admin/players/wallet-adjustment-requests/{approval_id}/execute` — исполнение
+  approved заявки, только super-admin, только `player.wallet_credit|player.wallet_debit`.
+- При direct-grant: сумма ниже порога → 200 (прямое исполнение); сумма ≥ порога
+  или approval-grant → 201 (approval-заявка). Super-admin всегда исполняет напрямую
+  (по конвенции проекта он не создаёт заявки).
 
 
 ## System settings

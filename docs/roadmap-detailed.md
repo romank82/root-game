@@ -234,7 +234,7 @@
 
 ---
 
-## Этап 5. Карточка игрока, ручные операции, ограничения — ❌ не начат
+## Этап 5. Карточка игрока, ручные операции, ограничения — 🔄 в работе
 
 ### Шаг 5.1: Модель PlayerRestriction
 - **Что**: ограничения игрока (suspended, transfer_restricted, mission_restricted и др.) с reason, admin_id, expires_at.
@@ -260,12 +260,29 @@
 - **Зависит от**: 5.1
 - **Риск**: низкий
 
-### Шаг 5.4: Ручные операции — начислить/списать ROOT
-- **Что**: через админку с причиной, аудитом и (при необходимости) approval.
-- **Файлы**: роутер админ-операций, ledger.
-- **Проверка**: начисление/списание создаёт проводку, отражается в аудите.
+### ✅ Шаг 5.4: Ручные операции — начислить/списать ROOT
+- **Что**: `POST /api/v1/admin/players/{id}/wallet-adjustment` — начисление/списание ROOT
+  с причиной, idempotency `request_id` и аудитом; прямое исполнение при direct-grant и сумме
+  ниже `economy.manual_adjustment_approval_threshold` (иначе создаётся approval-заявка).
+  Dedicated executor `POST /api/v1/admin/players/wallet-adjustment-requests/{approval_id}/execute`
+  — только super-admin, только `player.wallet_credit|player.wallet_debit`.
+- **Файлы**: `backend/app/admin_player_wallet.py`, регистрация в `main.py`.
+- **Проверка**: ✅ выполнено — `backend/tests/test_admin_player_wallet.py` (18 unit-кейсов).
 - **Зависит от**: 5.3
-- **Риск**: средний ⚠️ ТРЕБУЕТ СОГЛАСОВАНИЯ
+- **Риск**: средний (согласовано в рамках плана 5.4)
+
+### Уже сделано (обновлено 2026-10-07)
+- ✅ 5.4 Ручные начисление/списание ROOT:
+  - `POST /api/v1/admin/players/{id}/wallet-adjustment` — direct 200 при
+    direct-grant + сумма < порога, иначе 201 (approval-путь);
+  - `POST /api/v1/admin/players/wallet-adjustment-requests/{approval_id}/execute` —
+    только super-admin, только `player.wallet_credit|player.wallet_debit`;
+  - ledger: immutable `WalletTransaction`, `transaction_type=credit|debit`,
+    `amount>0`, `reference_type=admin_credit|admin_debit`, `reference_id=request_id`;
+  - идемпотентность по `request_id` (заявки и проводки), 409 при конфликте содержимого;
+  - аудит `write_admin_audit` без sensitive-данных; reason в ledger ≤ 255,
+    полная причина — в `metadata_json["fullReason"]`;
+  - тесты: `backend/tests/test_admin_player_wallet.py` (18 unit-кейсов).
 
 ### Шаг 5.5: Ручные операции — выдать/отозвать ключ
 - **Что**: администратор может выдать или отозвать ключ с аудитом.
