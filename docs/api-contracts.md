@@ -121,6 +121,14 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
   только при `invalidate_fallback_entitlement=true`; exhausted/disabled не трогаются.
 - `POST /api/v1/admin/players/mission-cancel-requests/{approval_id}/execute` — исполнение approved
   заявки, только super-admin, только `player.mission_cancel`.
+- `POST /api/v1/admin/players/{id}/missions/{mission_id}/mission-force-complete` — принудительно
+  завершить миссию (`reason`, `request_id`, `expires_at?`, `award_rewards=true`). Прямое исполнение
+  при direct-grant (super-admin или суммарные ROOT-награды < `economy.mission_force_complete_approval_threshold`),
+  иначе 201 (approval-заявка `player.mission_force_complete`). Статус `completed` из
+  `available`/`in_progress`/`locked`; `completed`/`cancelled` — 409. Повтор с тем же `request_id` — 200
+  `idempotent` (replay из immutable admin_audit_log). Entry-ресурсы не возвращаются.
+- `POST /api/v1/admin/players/mission-force-complete-requests/{approval_id}/execute` — исполнение
+  approved заявки, только super-admin, только `player.mission_force_complete`.
 - Grant требует `Item.status == "published"` (иначе 409); revoke статус не проверяет, но требует
   существующий `PlayerItem` и достаточное количество (иначе 409). Ledger:
   `InventoryEvent(event_type=credited|consumed, reference_type=admin_item_grant|admin_item_revoke,

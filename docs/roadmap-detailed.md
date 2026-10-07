@@ -331,8 +331,25 @@
   через admin_audit_log (вариант B), audit entity_type=player_mission, без
   порога-магнитуды (чувствительность — execution-режим `players.manage`).
   Тесты: `backend/tests/test_admin_player_mission.py` (23 unit-кейса).
-- **5.6.b — mission-force-complete** ⏳ (с флагом `awardRewards`; предполагаемый
-  порог-магнитуда `economy.mission_force_complete_approval_threshold` — решится в 5.6.b).
+- ✅ 5.6.b Принудительное завершение миссии:
+  - `POST /api/v1/admin/players/{id}/missions/{mission_id}/mission-force-complete` —
+    direct 200 при direct-grant (super-admin или магнитуда < порога), иначе 201 (approval-путь);
+  - порог-магнитуда — суммарные ROOT-награды миссии, настройка
+    `economy.mission_force_complete_approval_threshold` (default 5000, System Settings);
+  - статус `completed` из `available`/`in_progress`/`locked`; награды опционально
+    (`awardRewards`, ROOT — ledger-idempotent), entry-ресурсы не возвращаются,
+    `rewardSkipped`/`entryConsumed` в аудите;
+  - `POST /api/v1/admin/players/mission-force-complete-requests/{approval_id}/execute` —
+    только super-admin, только `player.mission_force_complete`;
+  - идемпотентность через immutable admin_audit_log (replay из metadata_json);
+  - тесты: `backend/tests/test_admin_player_mission.py` (43 unit-кейса, включая 5.6.a).
+- **5.6.b — mission-force-complete** ✅: `POST .../missions/{mission_id}/mission-force-complete`
+  (+ `/mission-force-complete-requests/{approval_id}/execute`), статус `completed` из
+  `available`/`in_progress`/`locked`, опциональная выдача наград (`awardRewards`; ROOT —
+  ledger-idempotent), порог-магнитуда (суммарные ROOT-награды миссии)
+  `economy.mission_force_complete_approval_threshold` (default 5000, CMS/System Settings,
+  super-admin исполняет напрямую), идемпотентность через admin_audit_log
+  (replay: awardedRoot/awardedItems/awardedStoryNodeIds/rewardSkipped/entryConsumed).
 - **5.6.c — attempts-adjustment** ⏳.
 - **5.6.d — manual reward endpoint** ❌ не делаем: покрывается 5.4/5.5. Известное
   ограничение: `MissionReward.story_node_id` не покрывается 5.4/5.5 — фиксируется

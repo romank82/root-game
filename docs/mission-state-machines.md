@@ -12,6 +12,12 @@
 Fallback-entitlement независим от статуса миссии; отключается только при
 `invalidate_fallback_entitlement=true` (available -> disabled).
 
+`completed` — достижим игровым движком (submit) и админ-операцией force-complete
+(шаг 5.6.b): `POST .../missions/{mission_id}/mission-force-complete` из
+`available`/`in_progress`/`locked`. Награды выдаются опционально (`awardRewards`;
+ROOT — ledger-idempotent), entry-ресурсы не возвращаются, entitlement не трогается.
+Повтор операции на `completed`/`cancelled` — 409; повтор с тем же `request_id` — 200 idempotent.
+
 ## Целевой mission run
 `PlayerMission` остаётся current-progress projection. Исторический runtime
 использует отдельные `MissionRun` и `MissionAttempt`.

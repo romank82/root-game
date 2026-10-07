@@ -115,6 +115,18 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         description="Сумма ROOT, с которой ручная корректировка требует approval.",
         is_sensitive=True,
     ),
+    "economy.mission_force_complete_approval_threshold": SystemSettingDefinition(
+        key="economy.mission_force_complete_approval_threshold",
+        value_type="integer",
+        default_value=5000,
+        category="economy",
+        title="Порог approval для принудительного завершения миссии",
+        description=(
+            "Сумма ROOT-наград миссии, начиная с которой "
+            "mission-force-complete требует approval."
+        ),
+        is_sensitive=True,
+    ),
     "gameplay.manual_item_adjustment_approval_threshold": SystemSettingDefinition(
         key="gameplay.manual_item_adjustment_approval_threshold",
         value_type="integer",

@@ -47,6 +47,7 @@ TON credentials и иные секретные значения в system settin
 | `economy.transfer_max_amount` | integer | 10000 | yes |
 | `economy.daily_transfer_limit` | integer | 50000 | yes |
 | `economy.manual_adjustment_approval_threshold` | integer | 1000 | yes |
+| `economy.mission_force_complete_approval_threshold` | integer | 5000 | yes |
 | `features.demo_seed_enabled` | boolean | false | yes |
 | `features.demo_reset_enabled` | boolean | false | yes |
 
