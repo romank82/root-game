@@ -7,6 +7,15 @@
 - `POST /api/v1/engine/missions/{mission_id}/submit`
 - `GET /api/v1/engine/fallback-offers`
 - `POST /api/v1/engine/fallback-offers/{offer_id}/purchases`
+- `POST /api/v1/engine/teams` — создать команду (201)
+- `GET /api/v1/engine/teams/me` — моя команда
+- `GET /api/v1/engine/teams/{team_id}` — карточка команды
+- `PATCH /api/v1/engine/teams/{team_id}` — обновить профиль (лидер)
+- `POST /api/v1/engine/teams/{team_id}/join` — вступить
+- `POST /api/v1/engine/teams/{team_id}/leave` — выйти (204)
+- `POST /api/v1/engine/teams/{team_id}/members/{player_id}/kick` — исключить (204)
+- `POST /api/v1/engine/teams/{team_id}/transfer-leadership` — передать лидерство
+- `POST /api/v1/engine/teams/{team_id}/disband` — расформировать (204)
 
 `GET /api/v1/engine/bootstrap` returns only public player content. Schema and redaction policy for `Segment.content` and `Mission.content` are defined in `docs/segment-content-contract.md`; validation configuration, answers, and server-side award rules are excluded.
 
@@ -39,6 +48,54 @@ committed-результат (`purchased: true`).
 Response: `{"purchased": true, "entitlementId", "consumedCount",
 "remainingQuota", "status", "priceRoot", "rootBalance", "item": {id, slug,
 code, title, symbol, category, rarity}}`.
+
+## Teams API (этап 6.4)
+
+Постоянные команды — сущность `Team` (НЕ `TeamSession` из этапа 3/7).
+Player-facing endpoints; admin-модерация команд — этап 6.7. Все мутации —
+`@limiter.limit("10/minute")` + player identity; тело и ответы — публичные
+данные (без приглашений/заявок — шаг 6.5, без чата — шаг 6.6).
+
+- `POST /api/v1/engine/teams` (201) — создать команду. Body:
+  `{"name" (1..128), "description"?, "emblemUrl"?, "joinPolicy"?
+  (open|by_request|invite_only, default "by_request"), "maxMembers"? >=1}`.
+  Создаёт `Team(status="active")` + `TeamMember(role="leader")` + history
+  `joined`. Если игрок уже в активной команде → 409.
+- `GET /api/v1/engine/teams/me` — активная команда игрока либо 404
+  «Вы не состоите в команде».
+- `GET /api/v1/engine/teams/{team_id}` — карточка (только `status="active"`;
+  расформированные → 404). Смотрит любой игрок.
+- `PATCH /api/v1/engine/teams/{team_id}` (200) — только лидер; изменяет
+  только переданные поля. Ответ — сериализованная команда.
+- `POST /api/v1/engine/teams/{team_id}/join` (200) — вступить. Guard'ы (409):
+  уже в активной команде; `joinPolicy != "open"` (заявки/приглашения — 6.5);
+  `maxMembers` достигнут. Повторное вступление после выхода реактивирует
+  прежнюю запись `TeamMember` (а не создаёт дубль).
+- `POST /api/v1/engine/teams/{team_id}/leave` (204) — выйти. Guard 5.3 (409):
+  игрок в активной командной миссии (`team_sessions.status` in
+  collecting/ready_to_start/active). Лидер не может выйти (409) — только
+  передать лидерство или расформировать.
+- `POST /api/v1/engine/teams/{team_id}/members/{player_id}/kick` (204) —
+  исключить (только лидер; не себя, не не-участника). History `kicked`
+  с `actor_player_id=лидер`.
+- `POST /api/v1/engine/teams/{team_id}/transfer-leadership` (200) — передать
+  лидерство активному участнику. Атомарно: `team.leader_id`, roles старого
+  и нового членства, history `leadership_transferred` (`newLeaderId`).
+  Ответ — сериализованная команда.
+- `POST /api/v1/engine/teams/{team_id}/disband` (204) — расформировать
+  (только лидер). Guard 5.3 для всех участников (409 при активной миссии
+  хотя бы у одного). `Team.status="disbanded"`, все active-члены →
+  `left`, history `disbanded` для каждого.
+
+Общий ответ карточки команды (create/get/update/join):
+`{"id", "name", "description", "emblemUrl", "status", "joinPolicy",
+"maxMembers", "memberCount", "leader": {"id", "displayName"},
+"members": [{"id", "role", "joinedAt"}]}` — только active-состав, без
+приватных данных участников. Idempotency-Key не требуется: уникальные
+индексы `uq_team_members_team_player` / `uq_team_members_active_player` +
+статус-машина дают естественную идемпотентность вступления.
+Физического удаления нет: lifecycle active → disbanded, история состава
+(`team_membership_history`) immutable.
 
 ## Planned geo/team API (not implemented)
 

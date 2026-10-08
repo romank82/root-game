@@ -17,6 +17,17 @@ from app.mission_engine import (
 )
 from app.models import GamePlayer
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
+from app.teams_service import (
+    create_team_entrypoint,
+    disband_team_entrypoint,
+    get_my_team,
+    get_team,
+    join_team_entrypoint,
+    kick_member_entrypoint,
+    leave_team_entrypoint,
+    transfer_leadership_entrypoint,
+    update_team_entrypoint,
+)
 from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -110,6 +121,23 @@ class TelegramAuthPayload(BaseModel):
 class AdminAuthPayload(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=12)
+
+class TeamCreatePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=10_000)
+    emblem_url: str | None = Field(default=None, max_length=2048)
+    join_policy: str = "by_request"
+    max_members: int | None = Field(default=None, ge=1)
+
+class TeamUpdatePayload(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=10_000)
+    emblem_url: str | None = Field(default=None, max_length=2048)
+    join_policy: str | None = None
+    max_members: int | None = Field(default=None, ge=1)
+
+class TransferLeadershipPayload(BaseModel):
+    new_leader_id: str = Field(min_length=1, max_length=64)
 
 def _new_player_id() -> str:
     return f"player-{uuid4().hex}"
@@ -389,6 +417,186 @@ def purchase_fallback_offer_route(
             status_code=error.status_code,
             detail=error.detail,
         ) from error
+
+
+# ============================================================================
+# Teams (этап 6.4) — player-facing endpoints.
+# Важно: GET /teams/me регистрируется ДО GET /teams/{team_id}, иначе FastAPI
+# сопоставит «me» с {team_id}.
+# ============================================================================
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/teams", status_code=201)
+def create_team_route(
+    request: Request,
+    payload: TeamCreatePayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return create_team_entrypoint(
+            player_id,
+            name=payload.name,
+            description=payload.description,
+            emblem_url=payload.emblem_url,
+            join_policy=payload.join_policy,
+            max_members=payload.max_members,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/teams/me")
+def get_my_team_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        team = get_my_team(player_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    if team is None:
+        raise HTTPException(status_code=404, detail="Вы не состоите в команде.")
+    return team
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/teams/{team_id}")
+def get_team_route(
+    request: Request,
+    team_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return get_team(team_id, requester_id=player_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.patch("/api/v1/engine/teams/{team_id}")
+def update_team_route(
+    request: Request,
+    team_id: str,
+    payload: TeamUpdatePayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    changes: dict = {}
+    if payload.name is not None:
+        changes["name"] = payload.name
+    if payload.description is not None:
+        changes["description"] = payload.description
+    if payload.emblem_url is not None:
+        changes["emblem_url"] = payload.emblem_url
+    if payload.join_policy is not None:
+        changes["join_policy"] = payload.join_policy
+    if payload.max_members is not None:
+        changes["max_members"] = payload.max_members
+    try:
+        return update_team_entrypoint(player_id, team_id, **changes)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/teams/{team_id}/join")
+def join_team_route(
+    request: Request,
+    team_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return join_team_entrypoint(player_id, team_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/teams/{team_id}/leave", status_code=204)
+def leave_team_route(
+    request: Request,
+    team_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        leave_team_entrypoint(player_id, team_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    return Response(status_code=204)
+
+
+@limiter.limit("10/minute")
+@app.post(
+    "/api/v1/engine/teams/{team_id}/members/{target_player_id}/kick",
+    status_code=204,
+)
+def kick_member_route(
+    request: Request,
+    team_id: str,
+    target_player_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        kick_member_entrypoint(player_id, team_id, target_player_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    return Response(status_code=204)
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/teams/{team_id}/transfer-leadership")
+def transfer_leadership_route(
+    request: Request,
+    team_id: str,
+    payload: TransferLeadershipPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        transfer_leadership_entrypoint(player_id, team_id, payload.new_leader_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    return get_team(team_id, requester_id=player_id)
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/teams/{team_id}/disband", status_code=204)
+def disband_team_route(
+    request: Request,
+    team_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        disband_team_entrypoint(player_id, team_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    return Response(status_code=204)
 
 
 # ============================================================================
