@@ -17,6 +17,7 @@ from app.mission_engine import (
 )
 from app.models import GamePlayer
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
+from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -49,6 +50,7 @@ from app.admin_players import router as admin_players_router
 from app.admin_player_wallet import router as admin_player_wallet_router
 from app.admin_player_inventory import router as admin_player_inventory_router
 from app.admin_player_mission import router as admin_player_mission_router
+from app.admin_player_restrictions import router as admin_player_restrictions_router
 
 SESSION_COOKIE_NAME = "chimera_session"
 
@@ -180,10 +182,15 @@ def _upsert_telegram_player(
             player.telegram_photo_url = photo_url
 
         if player.status != "active":
-            raise HTTPException(
-                status_code=403,
-                detail="Игровой профиль неактивен.",
-            )
+            # Lazy-рикавери (шаг 5.7): истёкшие/снятые ограничения не должны
+            # навсегда запирать игрока вне входа. PlayerRestriction — источник
+            # истины, GamePlayer.status — синхронизируемый кэш.
+            recompute_player_status(session, player)
+            if player.status != "active":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Игровой профиль неактивен.",
+                )
 
         return player
 
@@ -207,10 +214,16 @@ def get_current_player_id(request: Request) -> str:
             raise HTTPException(status_code=401, detail="Игрок не найден.")
 
         if player.status != "active":
-            raise HTTPException(
-                status_code=403,
-                detail="Игровой профиль неактивен.",
-            )
+            # Lazy-рикавери (шаг 5.7): устаревший кэш не должен запирать
+            # игрока вне входа после снятия/expiry ограничений.
+            recompute_player_status(session, player)
+            # Обычная (не begin) сессия: синхронизацию кэша фиксируем явно.
+            session.commit()
+            if player.status != "active":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Игровой профиль неактивен.",
+                )
 
     return player_id
 
@@ -473,3 +486,4 @@ app.include_router(admin_players_router)
 app.include_router(admin_player_wallet_router)
 app.include_router(admin_player_inventory_router)
 app.include_router(admin_player_mission_router)
+app.include_router(admin_player_restrictions_router)

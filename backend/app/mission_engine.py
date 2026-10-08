@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.fallback_shop import create_first_failure_entitlement
+from app.player_restrictions_engine import recompute_player_status
 from app.models import (
     GamePlayer,
     InventoryEvent,
@@ -61,7 +62,12 @@ def _ensure_player(session: Session, player_id: str) -> GamePlayer:
         raise MissionEngineError(404, "Игрок не найден.")
 
     if player.status != "active":
-        raise MissionEngineError(403, "Игровой профиль неактивен.")
+        # Lazy-рикавери (шаг 5.7): истёкшие/снятые ограничения не должны
+        # навсегда запирать игрока вне входа. PlayerRestriction — источник
+        # истины, GamePlayer.status — синхронизируемый кэш.
+        recompute_player_status(session, player)
+        if player.status != "active":
+            raise MissionEngineError(403, "Игровой профиль неактивен.")
 
     return player
 

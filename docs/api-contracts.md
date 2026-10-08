@@ -140,6 +140,24 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
   при существующем entitlement эффекта нет (unique `(player_id, mission_id)`).
 - `POST /api/v1/admin/players/attempts-adjustment-requests/{approval_id}/execute` — исполнение approved
   заявки, только super-admin, только `player.mission_attempts_adjust`.
+- `POST /api/v1/admin/players/{id}/restrictions` — создание ограничения
+  (`restriction_type` из каталога: chat/transfer/team/mission/payment/withdrawal_restricted,
+  suspended, blocked; `reason`, `request_id`, `starts_at?`, `expires_at?`, `evidence?`). Permission —
+  от типа: `blocked`/`suspended` → `players.block`, остальные → `players.restrict`. При direct-grant —
+  200 (прямое исполнение, `GamePlayer.status` синхронизируется всегда); при
+  `requires_super_admin_approval` — 201 (заявка `player.restriction_create`; `expiresAt` становится
+  и дедлайном одобрения). Активное ограничение того же типа — 409; повтор с тем же `request_id` —
+  200 `idempotent` (replay из immutable admin_audit_log).
+- `POST /api/v1/admin/players/restriction-requests/{approval_id}/execute` — исполнение approved
+  заявки, только super-admin, только `player.restriction_create`.
+- `POST /api/v1/admin/players/{id}/restrictions/{restriction_id}/revoke` — снятие ограничения
+  (active → revoked; `reason`, `request_id`, `expires_at?` — дедлайн одобрения). Снятие уже
+  снятого/истёкшего: тот же `request_id` — 200 `idempotent`, иной — 409. Статус игрока
+  пересчитывается всегда (возврат в `active`/понижение `blocked` → `suspended`).
+- `POST /api/v1/admin/players/restriction-revoke-requests/{approval_id}/execute` — исполнение approved
+  заявки, только super-admin, только `player.restriction_revoke`.
+- Истёкшие по `expires_at` ограничения лениво переводятся в `expired` при любом обращении
+  (recompute в admin-операциях и auth-гейтах), без фоновых джобов.
 - Grant требует `Item.status == "published"` (иначе 409); revoke статус не проверяет, но требует
   существующий `PlayerItem` и достаточное количество (иначе 409). Ledger:
   `InventoryEvent(event_type=credited|consumed, reference_type=admin_item_grant|admin_item_revoke,

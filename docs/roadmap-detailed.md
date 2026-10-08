@@ -361,12 +361,35 @@
   ограничение: `MissionReward.story_node_id` не покрывается 5.4/5.5 — фиксируется
   документально, отдельная работа не планируется.
 
-### Шаг 5.7: Управление ограничениями игрока через админку
-- **Что**: выдать/снять ограничение с причиной, сроком и аудитом.
-- **Файлы**: роутер админ-операций.
-- **Проверка**: ограничение активно, применяется в API.
-- **Зависит от**: 5.2, 5.3
-- **Риск**: средний ⚠️ ТРЕБУЕТ СОГЛАСОВАНИЯ
+### Шаг 5.7: Управление ограничениями игрока через админку — ✅ сделано
+
+- `POST /api/v1/admin/players/{id}/restrictions` — создать ограничение
+  (chat/transfer/team/mission/payment/withdrawal_restricted, suspended, blocked)
+  с причиной, окном действия и аудитом. Direct 200, approval-путь 201
+  (`player.restriction_create`). Permission от типа: `blocked`/`suspended` →
+  `players.block`, остальные → `players.restrict`. Активное ограничение того же
+  типа → 409; replay по `request_id` из immutable admin_audit_log → 200 idempotent.
+- `POST /api/v1/admin/players/restriction-requests/{approval_id}/execute` —
+  только super-admin, только `player.restriction_create`.
+- `POST /api/v1/admin/players/{id}/restrictions/{restriction_id}/revoke` — снять
+  (active → revoked) с причиной и аудитом; снятие снятого/истёкшего: replay →
+  200 idempotent, иначе 409. Permission — от типа снимаемого ограничения.
+- `POST /api/v1/admin/players/restriction-revoke-requests/{approval_id}/execute` —
+  только super-admin, только `player.restriction_revoke`.
+- Синхронизация: `GamePlayer.status` — кэш-агрегат, пересчитывается ВСЕГДА при
+  create/revoke (write-through) через `player_restrictions_engine.recompute_player_status`;
+  lazy-expiry просроченных ограничений без фоновых джобов; lazy-рикавери
+  запирающих ограничений в auth-гейтах (`get_current_player_id`,
+  `_upsert_telegram_player`, `mission_engine._ensure_player`).
+- Тесты: `backend/tests/test_admin_player_restrictions.py` (21 кейс: fake-session
+  endpoints + real SQLite/alembic для кэша статуса, lazy expiry и гейтов).
+
+### Уже сделано (обновлено 2026-10-08)
+- ✅ 5.7 управление ограничениями игрока через админку (см. шаг 5.7 выше):
+  создание/снятие с approval-workflow, идемпотентность по request_id,
+  права `players.block`/`players.restrict`, write-through синхронизация
+  `GamePlayer.status`, lazy-expiry и lazy-рикавери гейтов; аудит без
+  sensitive-данных в immutable admin_audit_log.
 
 ---
 
