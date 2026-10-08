@@ -19,14 +19,18 @@ from pydantic import ValidationError
 
 from app.admin_access import APPROVAL_EXECUTION_MODE, DIRECT_EXECUTION_MODE
 from app.admin_player_mission import (
+    ACTION_TYPE_ATTEMPTS_ADJUST,
     ACTION_TYPE_CANCEL,
     ACTION_TYPE_FORCE_COMPLETE,
     FORCE_COMPLETE_THRESHOLD_KEY,
     PLAYERS_MANAGE_PERMISSION,
+    MissionAttemptsAdjustPayload,
     MissionCancelPayload,
     MissionForceCompletePayload,
+    create_player_mission_attempts_adjustment,
     create_player_mission_cancel,
     create_player_mission_force_complete,
+    execute_player_mission_attempts_adjustment,
     execute_player_mission_cancel,
     execute_player_mission_force_complete,
 )
@@ -225,6 +229,20 @@ def _audit_force_complete(**overrides) -> SimpleNamespace:
             "rewardSkipped": False,
             "entryConsumed": False,
         },
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def _audit_attempts_adjust(**overrides) -> SimpleNamespace:
+    base = {
+        "id": "admin-audit-aa-1",
+        "entity_type": "player_mission",
+        "entity_id": "player-mission-1",
+        "action": ACTION_TYPE_ATTEMPTS_ADJUST,
+        "request_id": "req-attempts-1",
+        "outcome": "success",
+        "metadata_json": {"oldValue": 3, "newValue": 7},
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -1113,6 +1131,275 @@ class ForceCompleteExecuteApprovalTests(unittest.TestCase):
                     "approval-1", _request(), _admin(is_super_admin=True)
                 )
         self.assertEqual(caught.exception.status_code, 422)
+
+
+class AttemptsAdjustDirectTests(unittest.TestCase):
+    """5.6.c direct: абсолютная установка attempt_count, аудит, терминальные."""
+
+    def _adjust(
+        self, session, *, new_attempt_count=7, request_id="req-attempts-1",
+        audit_ctx=None,
+    ):
+        payload = MissionAttemptsAdjustPayload(
+            new_attempt_count=new_attempt_count,
+            reason="Корректировка попыток",
+            request_id=request_id,
+        )
+        with (
+            _run_begin(session),
+            patch(
+                "app.admin_player_mission.get_permission_execution_mode",
+                return_value=DIRECT_EXECUTION_MODE,
+            ),
+            patch("app.admin_player_mission.write_admin_audit") as audit,
+        ):
+            try:
+                result = create_player_mission_attempts_adjustment(
+                    "player-1", "mission-1", payload, _request(), _admin()
+                )
+            except HTTPException as exc:
+                return exc
+        if audit_ctx is not None:
+            audit_ctx.append(audit)
+        return result
+
+    def test_attempts_adjust_direct_changes_count_and_audits(self) -> None:
+        pm = _player_mission(attempt_count=3)
+        session = FakeSession(
+            scalar_script=[pm],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        audit_ctx: list = []
+        result = self._adjust(session, audit_ctx=audit_ctx)
+
+        self.assertIs(result["idempotent"], False)
+        self.assertIs(result["changed"], True)
+        self.assertEqual(result["playerMission"]["attemptCount"], 7)
+        self.assertEqual(pm.attempt_count, 7)
+
+        audit = audit_ctx[0]
+        self.assertEqual(
+            audit.call_args.kwargs["action"], "player.mission_attempts_adjust"
+        )
+        self.assertEqual(audit.call_args.kwargs["entity_type"], "player_mission")
+        self.assertEqual(audit.call_args.kwargs["entity_id"], "player-mission-1")
+        self.assertEqual(audit.call_args.kwargs["request_id"], "req-attempts-1")
+        self.assertEqual(audit.call_args.kwargs["before"], {"attemptCount": 3})
+        self.assertEqual(audit.call_args.kwargs["after"], {"attemptCount": 7})
+        self.assertEqual(audit.call_args.kwargs["metadata"]["oldValue"], 3)
+        self.assertEqual(audit.call_args.kwargs["metadata"]["newValue"], 7)
+        self.assertIs(audit.call_args.kwargs["metadata"]["changed"], True)
+
+    def test_attempts_adjust_direct_new_equals_old_changed_false(self) -> None:
+        pm = _player_mission(attempt_count=7)
+        session = FakeSession(
+            scalar_script=[pm],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        audit_ctx: list = []
+        result = self._adjust(session, new_attempt_count=7, audit_ctx=audit_ctx)
+
+        self.assertIs(result["changed"], False)
+        self.assertEqual(pm.attempt_count, 7)
+        audit = audit_ctx[0]
+        self.assertIs(audit.call_args.kwargs["metadata"]["changed"], False)
+        self.assertEqual(audit.call_args.kwargs["before"], {"attemptCount": 7})
+        self.assertEqual(audit.call_args.kwargs["after"], {"attemptCount": 7})
+
+    def test_attempts_adjust_direct_terminal_409_without_replay(self) -> None:
+        pm = _player_mission(status="completed", attempt_count=3)
+        session = FakeSession(
+            scalar_script=[pm, None],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        exc = self._adjust(session)
+        self.assertIsInstance(exc, HTTPException)
+        self.assertEqual(exc.status_code, 409)
+
+    def test_attempts_adjust_direct_terminal_replay_idempotent_200(self) -> None:
+        pm = _player_mission(status="completed", attempt_count=7)
+        audit = _audit_attempts_adjust(
+            metadata_json={"oldValue": 3, "newValue": 7}
+        )
+        session = FakeSession(
+            scalar_script=[pm, audit],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        result = self._adjust(session)
+        self.assertIs(result["idempotent"], True)
+        self.assertEqual(result["playerMission"]["attemptCount"], 7)
+        self.assertIs(result["changed"], True)
+        # Состояние не перезаписывается: status/started_at не трогаем.
+        self.assertEqual(pm.status, "completed")
+
+    def test_attempts_adjust_payload_bounds(self) -> None:
+        MissionAttemptsAdjustPayload(
+            new_attempt_count=0, reason="обнуление", request_id="req-1"
+        )
+        MissionAttemptsAdjustPayload(
+            new_attempt_count=1000, reason="кап", request_id="req-1"
+        )
+        for bad in (-1, 1001):
+            with self.assertRaises(ValidationError):
+                MissionAttemptsAdjustPayload(
+                    new_attempt_count=bad, reason="вне границ", request_id="req-1"
+                )
+        with self.assertRaises(ValidationError):
+            MissionAttemptsAdjustPayload(reason="нет счётчика", request_id="req-1")
+
+
+class AttemptsAdjustApprovalRequestTests(unittest.TestCase):
+    """5.6.c approval-грант: заявка 201 + идемпотентный replay 200."""
+
+    def _adjust_approval(self, session, request_id="req-attempts-1"):
+        with (
+            _run_begin(session),
+            patch(
+                "app.admin_player_mission.get_permission_execution_mode",
+                return_value=APPROVAL_EXECUTION_MODE,
+            ),
+            patch(
+                "app.admin_player_mission._serialize_approval",
+                side_effect=_fake_serialize_approval,
+            ),
+            patch("app.admin_player_mission.write_admin_audit") as audit,
+        ):
+            response = create_player_mission_attempts_adjustment(
+                "player-1",
+                "mission-1",
+                MissionAttemptsAdjustPayload(
+                    new_attempt_count=7,
+                    reason="Корректировка",
+                    request_id=request_id,
+                ),
+                _request(),
+                _admin(),
+            )
+        return response, audit
+
+    def test_attempts_adjust_approval_mode_creates_request_201(self) -> None:
+        pm = _player_mission()
+        session = FakeSession(
+            scalar_script=[pm, None],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        response, audit = self._adjust_approval(session)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIs(json.loads(response.body)["idempotent"], False)
+
+        approvals = [o for o in session.added if isinstance(o, AdminApprovalRequest)]
+        self.assertEqual(len(approvals), 1)
+        self.assertEqual(approvals[0].action_type, ACTION_TYPE_ATTEMPTS_ADJUST)
+        self.assertEqual(
+            approvals[0].required_permission_code, PLAYERS_MANAGE_PERMISSION
+        )
+        self.assertEqual(approvals[0].request_id, "req-attempts-1")
+        self.assertEqual(approvals[0].status, "pending")
+        self.assertEqual(approvals[0].target_entity_type, "player_mission")
+        self.assertEqual(approvals[0].target_entity_id, "player-mission-1")
+        self.assertEqual(approvals[0].payload_snapshot["newAttemptCount"], 7)
+        self.assertEqual(approvals[0].payload_snapshot["playerId"], "player-1")
+        self.assertEqual(approvals[0].payload_snapshot["missionId"], "mission-1")
+        self.assertEqual(
+            audit.call_args.kwargs["action"], "admin_approval_request.created"
+        )
+
+    def test_attempts_adjust_approval_mode_reuses_request_200(self) -> None:
+        existing = _approval(
+            action_type=ACTION_TYPE_ATTEMPTS_ADJUST,
+            payload_snapshot={
+                "playerId": "player-1",
+                "missionId": "mission-1",
+                "newAttemptCount": 7,
+                "reason": "Корректировка",
+            },
+            reason="Корректировка",
+        )
+        pm = _player_mission()
+        session = FakeSession(
+            scalar_script=[pm, existing],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        response, audit = self._adjust_approval(session)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(json.loads(response.body)["idempotent"], True)
+        self.assertEqual(
+            len([o for o in session.added if isinstance(o, AdminApprovalRequest)]), 0
+        )
+        audit.assert_not_called()
+
+
+class AttemptsAdjustExecuteApprovalTests(unittest.TestCase):
+    """5.6.c executor: только super-admin, только attempts_adjust-заявки."""
+
+    def _approval_for_execute(self, **overrides):
+        return _approval(
+            action_type=ACTION_TYPE_ATTEMPTS_ADJUST,
+            payload_snapshot={
+                "playerId": "player-1",
+                "missionId": "mission-1",
+                "newAttemptCount": 7,
+                "reason": "Корректировка",
+            },
+            reason="Корректировка",
+            request_id="req-attempts-1",
+            **overrides,
+        )
+
+    def test_attempts_adjust_execute_happy_path_applies_and_audits(self) -> None:
+        approval = self._approval_for_execute()
+        pm = _player_mission(attempt_count=3)
+        session = FakeSession(
+            scalar_script=[approval, pm],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        with _run_begin(session), patch(
+            "app.admin_player_mission.write_admin_audit"
+        ) as audit:
+            result = execute_player_mission_attempts_adjustment(
+                "approval-1", _request(), _admin(is_super_admin=True)
+            )
+
+        self.assertIs(result["idempotent"], False)
+        self.assertIs(result["changed"], True)
+        self.assertEqual(result["playerMission"]["attemptCount"], 7)
+        self.assertEqual(pm.attempt_count, 7)
+        self.assertEqual(approval.status, "executed")
+        self.assertEqual(approval.executed_by_admin_id, "admin-1")
+        self.assertIsNotNone(approval.executed_at)
+        self.assertEqual(approval.execution_result["attemptCount"], 7)
+
+        actions = [call.kwargs["action"] for call in audit.call_args_list]
+        self.assertIn(ACTION_TYPE_ATTEMPTS_ADJUST + ".via_approval", actions)
+        self.assertIn("admin_approval_request.executed", actions)
+
+    def test_attempts_adjust_execute_wrong_action_422(self) -> None:
+        approval = _approval(action_type=ACTION_TYPE_CANCEL)
+        session = FakeSession(
+            scalar_script=[approval],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        with _run_begin(session):
+            with self.assertRaises(HTTPException) as caught:
+                execute_player_mission_attempts_adjustment(
+                    "approval-1", _request(), _admin(is_super_admin=True)
+                )
+        self.assertEqual(caught.exception.status_code, 422)
+
+    def test_attempts_adjust_execute_pending_409(self) -> None:
+        approval = self._approval_for_execute(status="pending")
+        session = FakeSession(
+            scalar_script=[approval],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        with _run_begin(session):
+            with self.assertRaises(HTTPException) as caught:
+                execute_player_mission_attempts_adjustment(
+                    "approval-1", _request(), _admin(is_super_admin=True)
+                )
+        self.assertEqual(caught.exception.status_code, 409)
 
 
 class EngineGuardTests(unittest.TestCase):

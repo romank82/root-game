@@ -18,6 +18,14 @@ Fallback-entitlement независим от статуса миссии; отк
 ROOT — ledger-idempotent), entry-ресурсы не возвращаются, entitlement не трогается.
 Повтор операции на `completed`/`cancelled` — 409; повтор с тем же `request_id` — 200 idempotent.
 
+`attempt_count` — исторический счётчик попыток, отдельно корректируется админ-операцией (шаг 5.6.c):
+`POST .../missions/{mission_id}/attempts-adjustment` устанавливает значение абсолютно
+(`new_attempt_count` в `[0, 1000]`, не дельта). Изменяется только `attempt_count` —
+`status`/`started_at`/`progress` не трогаются; терминальные статусы недоступны (409, кроме
+идемпотентного replay 200 из admin_audit_log). Установка `0` при отсутствии активного
+fallback-entitlement означает: следующий неверный submit может создать новое fallback-предложение
+(guard `attempt_count_before == 0`); при существующем entitlement эффекта нет.
+
 ## Целевой mission run
 `PlayerMission` остаётся current-progress projection. Исторический runtime
 использует отдельные `MissionRun` и `MissionAttempt`.

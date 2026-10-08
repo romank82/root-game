@@ -93,6 +93,10 @@ FORCE_COMPLETE_THRESHOLD_KEY = "economy.mission_force_complete_approval_threshol
 DEFAULT_FORCE_COMPLETE_THRESHOLD = 5000
 COMPLETED_STATUS = "completed"
 ACTIVE_SETTING_STATUS = "active"
+# --- 5.6.c: mission attempts adjustment ------------------------------
+ACTION_TYPE_ATTEMPTS_ADJUST = "player.mission_attempts_adjust"
+ATTEMPTS_MIN = 0
+ATTEMPTS_MAX = 1000
 
 
 class MissionCancelError(Exception):
@@ -123,6 +127,20 @@ class MissionForceCompletePayload(BaseModel):
     # Выдавать ли награды миссии при принудительном завершении. ROOT-выдача
     # идемпотентна на уровне ledger (wallet_id + mission_reward + mission.id).
     award_rewards: bool = True
+
+
+class MissionAttemptsAdjustPayload(BaseModel):
+    """Абсолютная ручная корректировка attempt_count (5.6.c).
+
+    Устанавливает исторический счётчик попыток в new_attempt_count
+    ([ATTEMPTS_MIN, ATTEMPTS_MAX]); это не дельта. request_id —
+    идемпотентный ключ: повтор на обработанной миссии -> 200 idempotent.
+    """
+
+    new_attempt_count: int = Field(ge=ATTEMPTS_MIN, le=ATTEMPTS_MAX)
+    reason: str = Field(min_length=1, max_length=4_000)
+    request_id: str = Field(min_length=1, max_length=64)
+    expires_at: datetime | None = None
 
 
 # --- Вспомогательные хелперы -------------------------------------------------
@@ -262,6 +280,26 @@ def _find_force_complete_audit(
                 (
                     ACTION_TYPE_FORCE_COMPLETE,
                     f"{ACTION_TYPE_FORCE_COMPLETE}.via_approval",
+                )
+            ),
+        )
+    )
+
+
+def _find_attempts_adjust_audit(
+    session: Any, player_mission_id: str, request_id: str
+) -> AdminAuditLog | None:
+    """Успешная корректировка attempt_count этой миссии с request_id в audit."""
+    return session.scalar(
+        select(AdminAuditLog).where(
+            AdminAuditLog.entity_type == "player_mission",
+            AdminAuditLog.entity_id == player_mission_id,
+            AdminAuditLog.request_id == request_id,
+            AdminAuditLog.outcome == "success",
+            AdminAuditLog.action.in_(
+                (
+                    ACTION_TYPE_ATTEMPTS_ADJUST,
+                    f"{ACTION_TYPE_ATTEMPTS_ADJUST}.via_approval",
                 )
             ),
         )
@@ -481,6 +519,89 @@ def _apply_mission_force_complete(
     return player_mission, reward_outcome, reward_skipped, entry_consumed
 
 
+def _apply_mission_attempts_adjustment(
+    session: Any,
+    *,
+    player_id: str,
+    mission_id: str,
+    new_attempt_count: int,
+    reason: str,
+    request_id: str,
+    admin: AdminUser,
+    request: Request,
+    approval: AdminApprovalRequest | None = None,
+    player_mission: PlayerMission | None = None,
+) -> tuple[PlayerMission, int, bool]:
+    """Абсолютная ручная корректировка attempt_count (5.6.c).
+
+    Возвращает (player_mission, old_value, changed). Меняется только
+    attempt_count: status/started_at/progress не трогаются. Терминальные
+    статусы -> 409 (mission_already_terminated). new == old -> changed=False,
+    аудит пишется в любом случае. Fallback-семантика: установка 0 при
+    отсутствии активного entitlement — следующий неверный submit может
+    создать новое fallback-предложение (guard attempt_count_before == 0
+    в create_first_failure_entitlement); при существующем entitlement
+    эффекта нет (unique (player_id, mission_id)).
+    """
+    if player_mission is None:
+        player_mission = _find_player_mission(session, player_id, mission_id)
+        if player_mission is None:
+            raise MissionCancelError(
+                status.HTTP_404_NOT_FOUND,
+                "player_mission_not_found",
+                "Прогресс по миссии не найден.",
+            )
+    if player_mission.status in TERMINAL_STATUSES:
+        raise MissionCancelError(
+            status.HTTP_409_CONFLICT,
+            "mission_already_terminated",
+            "Миссия уже завершена или отменена.",
+        )
+
+    def _snapshot(target: PlayerMission) -> dict[str, Any]:
+        return {"attemptCount": target.attempt_count}
+
+    old_value = player_mission.attempt_count
+    changed = old_value != new_attempt_count
+
+    before = _snapshot(player_mission)
+    player_mission.attempt_count = new_attempt_count
+    session.flush()
+    after = _snapshot(player_mission)
+
+    metadata: dict[str, Any] = {
+        "missionId": mission_id,
+        "playerId": player_id,
+        "requestId": request_id,
+        "oldValue": old_value,
+        "newValue": new_attempt_count,
+        "changed": changed,
+        "fullReason": reason,
+    }
+    if approval is not None:
+        metadata["approvalRequestId"] = approval.id
+
+    write_admin_audit(
+        session,
+        actor=admin,
+        action=(
+            ACTION_TYPE_ATTEMPTS_ADJUST
+            if approval is None
+            else f"{ACTION_TYPE_ATTEMPTS_ADJUST}.via_approval"
+        ),
+        entity_type="player_mission",
+        entity_id=player_mission.id,
+        request=request,
+        permission_code=PLAYERS_MANAGE_PERMISSION,
+        approval_request_id=approval.id if approval is not None else None,
+        request_id=request_id,
+        before=before,
+        after=after,
+        metadata=sanitize_audit_data(metadata),
+    )
+    return player_mission, old_value, changed
+
+
 def _serialize_player_mission(player_mission: PlayerMission) -> dict[str, Any]:
     return {
         "id": player_mission.id,
@@ -529,6 +650,16 @@ def _serialize_force_complete_result(
         },
         "rewardSkipped": reward_skipped,
         "entryConsumed": entry_consumed,
+        "idempotent": idempotent,
+    }
+
+
+def _serialize_attempts_adjust_result(
+    player_mission: PlayerMission, changed: bool, idempotent: bool
+) -> dict[str, Any]:
+    return {
+        "playerMission": _serialize_player_mission(player_mission),
+        "changed": changed,
         "idempotent": idempotent,
     }
 
@@ -834,6 +965,113 @@ def _create_force_complete_request(
     )
 
 
+def _create_attempts_adjust_request(
+    *,
+    session: Any,
+    admin: AdminUser,
+    player_id: str,
+    player_mission: PlayerMission,
+    mission_id: str,
+    new_attempt_count: int,
+    reason: str,
+    request_id: str,
+    expires_at: datetime | None,
+    request: Request,
+) -> JSONResponse:
+    """Создать immutable заявку на корректировку attempt_count.
+
+    При повторном request_id с тем же содержимым отвечает 200 + idempotent,
+    с другим содержимым — 409.
+    """
+    snapshot = {
+        "playerId": player_id,
+        "missionId": mission_id,
+        "newAttemptCount": new_attempt_count,
+        "reason": reason,
+    }
+    expected = {
+        "required_permission_code": PLAYERS_MANAGE_PERMISSION,
+        "action_type": ACTION_TYPE_ATTEMPTS_ADJUST,
+        "target_entity_type": "player_mission",
+        "target_entity_id": player_mission.id,
+        "payload_snapshot": snapshot,
+        "reason": reason,
+        "expires_at": expires_at.isoformat() if expires_at is not None else None,
+    }
+
+    existing = session.scalar(
+        select(AdminApprovalRequest)
+        .where(
+            AdminApprovalRequest.requested_by_admin_id == admin.id,
+            AdminApprovalRequest.request_id == request_id,
+        )
+        .with_for_update()
+    )
+    if existing is not None:
+        current = {
+            "required_permission_code": existing.required_permission_code,
+            "action_type": existing.action_type,
+            "target_entity_type": existing.target_entity_type,
+            "target_entity_id": existing.target_entity_id,
+            "payload_snapshot": existing.payload_snapshot,
+            "reason": existing.reason,
+            "expires_at": (
+                existing.expires_at.isoformat()
+                if existing.expires_at is not None
+                else None
+            ),
+        }
+        if current != expected:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="requestId уже использован с другим содержимым заявки.",
+            )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"approval": _serialize_approval(existing), "idempotent": True},
+        )
+
+    approval = AdminApprovalRequest(
+        id=_new_id("admin-approval"),
+        status=PENDING,
+        requested_by_admin_id=admin.id,
+        required_permission_code=PLAYERS_MANAGE_PERMISSION,
+        action_type=ACTION_TYPE_ATTEMPTS_ADJUST,
+        target_entity_type="player_mission",
+        target_entity_id=player_mission.id,
+        payload_snapshot=snapshot,
+        reason=reason,
+        request_ip_address=_client_ip_address(request),
+        request_id=request_id,
+        expires_at=expires_at,
+        execution_result={},
+    )
+    try:
+        session.add(approval)
+        session.flush()
+    except IntegrityError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Конфликт идемпотентности заявки.",
+        ) from error
+
+    serialized = _serialize_approval(approval)
+    _audit_approval(
+        session=session,
+        actor=admin,
+        approval=approval,
+        action="admin_approval_request.created",
+        before={},
+        after=serialized,
+        outcome="success",
+        request=request,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED,
+        content={"approval": serialized, "idempotent": False},
+    )
+
+
 @router.post("/{player_id}/missions/{mission_id}/mission-cancel", response_model=None)
 def create_player_mission_cancel(
     player_id: str,
@@ -1042,6 +1280,106 @@ def create_player_mission_force_complete(
         return _serialize_force_complete_result(
             updated, reward_outcome, reward_skipped, entry_consumed, idempotent=False
         )
+
+
+@router.post(
+    "/{player_id}/missions/{mission_id}/attempts-adjustment", response_model=None
+)
+def create_player_mission_attempts_adjustment(
+    player_id: str,
+    mission_id: str,
+    payload: MissionAttemptsAdjustPayload,
+    request: Request,
+    admin: AdminUser = Depends(get_admin_user),
+) -> dict[str, Any] | JSONResponse:
+    """Ручная корректировка attempt_count миссии игрока (5.6.c).
+
+    direct-grant: исполнение сразу, порога-магнитуды нет — super-admin
+    в direct ничем не блокируется. approval-grant — создание
+    AdminApprovalRequest (player.mission_attempts_adjust) -> 201.
+    Терминальные completed/cancelled -> 409; повтор с тем же request_id —
+    200 idempotent (replay из immutable admin_audit_log).
+    """
+    reason = _normalize_required(payload.reason, "reason")
+    request_id = _normalize_required(payload.request_id, "requestId")
+    expires_at = (
+        _validate_expiry(payload.expires_at) if payload.expires_at is not None else None
+    )
+
+    with SessionLocal.begin() as session:
+        player = session.get(GamePlayer, player_id)
+        if player is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Игрок не найден.",
+            )
+
+        execution_mode = get_permission_execution_mode(admin, PLAYERS_MANAGE_PERMISSION)
+        if execution_mode is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Недостаточно прав для выполнения этого действия.",
+            )
+
+        player_mission = _find_player_mission(session, player_id, mission_id)
+        if player_mission is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Прогресс по миссии не найден.",
+            )
+
+        if player_mission.status in TERMINAL_STATUSES:
+            # Идемпотентный replay: тот же request_id -> 200 idempotent.
+            replay = _find_attempts_adjust_audit(session, player_mission.id, request_id)
+            if replay is not None:
+                meta = replay.metadata_json or {}
+                return _serialize_attempts_adjust_result(
+                    player_mission,
+                    changed=meta.get("oldValue") != meta.get("newValue"),
+                    idempotent=True,
+                )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Миссия уже завершена или отменена.",
+            )
+
+        if execution_mode == APPROVAL_EXECUTION_MODE:
+            return _create_attempts_adjust_request(
+                session=session,
+                admin=admin,
+                player_id=player_id,
+                player_mission=player_mission,
+                mission_id=mission_id,
+                new_attempt_count=payload.new_attempt_count,
+                reason=reason,
+                request_id=request_id,
+                expires_at=expires_at,
+                request=request,
+            )
+
+        try:
+            updated, _old_value, changed = _apply_mission_attempts_adjustment(
+                session=session,
+                player_id=player_id,
+                mission_id=mission_id,
+                new_attempt_count=payload.new_attempt_count,
+                reason=reason,
+                request_id=request_id,
+                admin=admin,
+                request=request,
+                player_mission=player_mission,
+            )
+        except MissionCancelError as error:
+            raise HTTPException(
+                status_code=error.status_code, detail=error.detail
+            ) from error
+        except IntegrityError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Конфликт идемпотентности корректировки попыток.",
+            ) from error
+
+        return _serialize_attempts_adjust_result(updated, changed, idempotent=False)
 
 
 @router.post("/mission-cancel-requests/{approval_id}/execute", response_model=None)
@@ -1316,4 +1654,144 @@ def execute_player_mission_force_complete(
         result = _serialize_force_complete_result(
             updated, reward_outcome, reward_skipped, entry_consumed, idempotent=False
         )
+        return {"approval": after_approval, **result}
+
+
+@router.post("/attempts-adjustment-requests/{approval_id}/execute", response_model=None)
+def execute_player_mission_attempts_adjustment(
+    approval_id: str,
+    request: Request,
+    admin: AdminUser = Depends(require_super_admin),
+) -> dict[str, Any] | JSONResponse:
+    """Исполнить approved заявку на корректировку attempt_count (super-admin).
+
+    Никакого generic executor: принимается исключительно
+    action_type == player.mission_attempts_adjust.
+    """
+    with SessionLocal.begin() as session:
+        approval = session.scalar(
+            select(AdminApprovalRequest)
+            .where(AdminApprovalRequest.id == approval_id)
+            .with_for_update()
+        )
+        if approval is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Заявка не найдена.",
+            )
+
+        if approval.action_type != ACTION_TYPE_ATTEMPTS_ADJUST:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Executor принимает только player.mission_attempts_adjust.",
+            )
+
+        if approval.status == EXECUTED:
+            return {"approval": _serialize_approval(approval), "idempotent": True}
+
+        if approval.expires_at is not None and approval.expires_at <= _now():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Срок действия заявки истёк.",
+            )
+
+        if approval.status != APPROVED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Исполнять можно только approved заявку.",
+            )
+
+        snapshot = approval.payload_snapshot or {}
+        player_id = snapshot.get("playerId") or approval.target_entity_id
+        mission_id = snapshot.get("missionId")
+        reason = approval.reason or snapshot.get("reason") or ""
+        new_attempt_count = snapshot.get("newAttemptCount")
+
+        if (
+            not isinstance(mission_id, str)
+            or not mission_id
+            or not isinstance(new_attempt_count, int)
+            or isinstance(new_attempt_count, bool)
+            or not (ATTEMPTS_MIN <= new_attempt_count <= ATTEMPTS_MAX)
+        ):
+            return _execution_failed_response(
+                session=session,
+                actor=admin,
+                approval=approval,
+                error_code="invalid_payload_snapshot",
+                request=request,
+            )
+
+        player = session.get(GamePlayer, player_id)
+        if player is None:
+            return _execution_failed_response(
+                session=session,
+                actor=admin,
+                approval=approval,
+                error_code="player_not_found",
+                request=request,
+            )
+
+        try:
+            updated, _old_value, changed = _apply_mission_attempts_adjustment(
+                session=session,
+                player_id=player_id,
+                mission_id=mission_id,
+                new_attempt_count=new_attempt_count,
+                reason=reason,
+                request_id=approval.request_id,
+                admin=admin,
+                request=request,
+                approval=approval,
+            )
+        except MissionCancelError as error:
+            return _execution_failed_response(
+                session=session,
+                actor=admin,
+                approval=approval,
+                error_code=error.code,
+                request=request,
+            )
+        except IntegrityError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Конфликт идемпотентности: заявка переиспользует requestId.",
+            ) from error
+
+        before_approval = _serialize_approval(approval)
+        approval.status = EXECUTED
+        approval.executed_by_admin_id = admin.id
+        approval.executed_at = _now()
+        approval.execution_result = {
+            "status": "executed",
+            "playerId": player_id,
+            "missionId": mission_id,
+            "playerMissionId": updated.id,
+            "attemptCount": updated.attempt_count,
+            "changed": changed,
+        }
+        approval.execution_error = None
+        session.flush()
+
+        after_approval = _serialize_approval(approval)
+        _audit_approval(
+            session=session,
+            actor=admin,
+            approval=approval,
+            action="admin_approval_request.executed",
+            before=before_approval,
+            after=after_approval,
+            outcome="success",
+            request=request,
+            metadata={
+                "actionType": approval.action_type,
+                "targetEntityType": approval.target_entity_type,
+                "targetEntityId": approval.target_entity_id,
+                "playerMissionId": updated.id,
+                "attemptCount": updated.attempt_count,
+                "changed": changed,
+            },
+        )
+
+        result = _serialize_attempts_adjust_result(updated, changed, idempotent=False)
         return {"approval": after_approval, **result}

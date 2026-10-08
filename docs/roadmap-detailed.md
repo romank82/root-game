@@ -350,7 +350,13 @@
   `economy.mission_force_complete_approval_threshold` (default 5000, CMS/System Settings,
   super-admin исполняет напрямую), идемпотентность через admin_audit_log
   (replay: awardedRoot/awardedItems/awardedStoryNodeIds/rewardSkipped/entryConsumed).
-- **5.6.c — attempts-adjustment** ⏳.
+- **5.6.c — attempts-adjustment** ✅: `POST .../missions/{mission_id}/attempts-adjustment`
+  (+ `/attempts-adjustment-requests/{approval_id}/execute`), абсолютная установка `attempt_count`
+  (`new_attempt_count` в `[0, 1000]`, не дельта); изменяется только `attempt_count`
+  (`status`/`started_at`/`progress` не трогаются); direct/approval по гранту `players.manage`
+  (порога-магнитуды нет: super-admin в direct исполняет сразу); терминальные статусы — 409,
+  replay через immutable admin_audit_log — 200 idempotent; `new == old` — `changed: false`
+  (аудит пишется); fallback-семантика `0` описана в api-contracts.
 - **5.6.d — manual reward endpoint** ❌ не делаем: покрывается 5.4/5.5. Известное
   ограничение: `MissionReward.story_node_id` не покрывается 5.4/5.5 — фиксируется
   документально, отдельная работа не планируется.

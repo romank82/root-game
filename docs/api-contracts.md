@@ -129,6 +129,17 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
   `idempotent` (replay из immutable admin_audit_log). Entry-ресурсы не возвращаются.
 - `POST /api/v1/admin/players/mission-force-complete-requests/{approval_id}/execute` — исполнение
   approved заявки, только super-admin, только `player.mission_force_complete`.
+- `POST /api/v1/admin/players/{id}/missions/{mission_id}/attempts-adjustment` — абсолютная ручная
+  корректировка `attempt_count` (`new_attempt_count` в `[0, 1000]`, НЕ дельта). Прямое исполнение при
+  direct-grant (super-admin в direct-режиме исполняет сразу, порога-магнитуды нет); approval-grant —
+  201 (заявка `player.mission_attempts_adjust`). Статусы `completed`/`cancelled` — 409
+  (`mission_already_terminated`); повтор с тем же `request_id` — 200 `idempotent` (replay из immutable
+  admin_audit_log). `new == old` — 200 `changed: false`, аудит пишется. `status`/`started_at`/`progress`
+  не трогаются. Fallback-семантика: установка `new_attempt_count=0` без активного entitlement — следующий
+  неверный submit может создать новое fallback-предложение (guard `attempt_count_before == 0`);
+  при существующем entitlement эффекта нет (unique `(player_id, mission_id)`).
+- `POST /api/v1/admin/players/attempts-adjustment-requests/{approval_id}/execute` — исполнение approved
+  заявки, только super-admin, только `player.mission_attempts_adjust`.
 - Grant требует `Item.status == "published"` (иначе 409); revoke статус не проверяет, но требует
   существующий `PlayerItem` и достаточное количество (иначе 409). Ledger:
   `InventoryEvent(event_type=credited|consumed, reference_type=admin_item_grant|admin_item_revoke,
