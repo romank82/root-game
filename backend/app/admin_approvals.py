@@ -16,6 +16,7 @@ from app.admin_audit import (
     build_admin_approval_audit_snapshot,
     write_admin_audit,
 )
+from app.datetime_utils import ensure_utc
 from app.db import SessionLocal
 from app.models import AdminApprovalRequest, AdminUser
 
@@ -62,7 +63,8 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 def _is_expired(approval: AdminApprovalRequest, now: datetime) -> bool:
-    return approval.expires_at is not None and approval.expires_at <= now
+    expires_at = ensure_utc(approval.expires_at)
+    return expires_at is not None and expires_at <= now
 
 def _serialize(approval: AdminApprovalRequest) -> dict[str, Any]:
     return {

@@ -390,6 +390,10 @@
   права `players.block`/`players.restrict`, write-through синхронизация
   `GamePlayer.status`, lazy-expiry и lazy-рикавери гейтов; аудит без
   sensitive-данных в immutable admin_audit_log.
+- ✅ Datetime-fix (pre-existing bug): naive-datetime из SQLite нормализуется
+  в UTC через `app/datetime_utils.ensure_utc` в 6 старых executor'ах
+  (wallet/inventory/mission/system_settings/approvals). До этого `execute`
+  заявки с `expires_at` на dev падал с TypeError.
 
 ---
 

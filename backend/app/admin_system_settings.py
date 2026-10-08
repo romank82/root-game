@@ -29,6 +29,7 @@ from app.admin_audit import (
     build_admin_approval_audit_snapshot,
     write_admin_audit,
 )
+from app.datetime_utils import ensure_utc
 from app.db import SessionLocal
 from app.models import (
     AdminApprovalRequest,
@@ -625,8 +626,9 @@ def execute_sensitive_setting_approval(
                 detail="Инициатор не может исполнять собственную заявку.",
             )
 
+        expires_at = ensure_utc(approval.expires_at)
         if approval.status == APPROVED and (
-            approval.expires_at is not None and approval.expires_at <= _now()
+            expires_at is not None and expires_at <= _now()
         ):
             approval.status = EXPIRED
             session.flush()

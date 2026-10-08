@@ -62,6 +62,7 @@ from app.admin_audit import (
     sanitize_audit_data,
     write_admin_audit,
 )
+from app.datetime_utils import ensure_utc
 from app.db import SessionLocal
 from app.mission_engine import ROOT_CURRENCY, _award_mission_rewards
 from app.models import (
@@ -1414,7 +1415,8 @@ def execute_player_mission_cancel(
         if approval.status == EXECUTED:
             return {"approval": _serialize_approval(approval), "idempotent": True}
 
-        if approval.expires_at is not None and approval.expires_at <= _now():
+        expires_at = ensure_utc(approval.expires_at)
+        if expires_at is not None and expires_at <= _now():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Срок действия заявки истёк.",
@@ -1546,7 +1548,8 @@ def execute_player_mission_force_complete(
         if approval.status == EXECUTED:
             return {"approval": _serialize_approval(approval), "idempotent": True}
 
-        if approval.expires_at is not None and approval.expires_at <= _now():
+        expires_at = ensure_utc(approval.expires_at)
+        if expires_at is not None and expires_at <= _now():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Срок действия заявки истёк.",
@@ -1689,7 +1692,8 @@ def execute_player_mission_attempts_adjustment(
         if approval.status == EXECUTED:
             return {"approval": _serialize_approval(approval), "idempotent": True}
 
-        if approval.expires_at is not None and approval.expires_at <= _now():
+        expires_at = ensure_utc(approval.expires_at)
+        if expires_at is not None and expires_at <= _now():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Срок действия заявки истёк.",
