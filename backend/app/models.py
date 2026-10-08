@@ -724,6 +724,262 @@ class PlayerRestriction(TimestampMixin, Base):
     )
 
 
+class Team(TimestampMixin, Base):
+    """Команда игроков (шаг 6.1).
+
+    Постоянная сущность (в отличие от TeamSession — временной runtime-
+    сборки под конкретную командную миссию из этапа 3). Игрок состоит
+    максимум в одной активной команде — это ограничение уровня сервиса
+    (6.4), не модели.
+
+    Физическое удаление запрещено: lifecycle active → disbanded.
+    leader_id — fast-pointer на текущего лидера; инвариант
+    "leader ∈ members" держит сервис 6.4; после 6.2 role='leader'
+    в TeamMember станет источником истины.
+
+    Имя команды НЕ уникально: игроки не должны искать «свободное»
+    имя. Адресация — по id (String(64)), FK — по id.
+    Лимиты (max_members) могут быть NULL (без лимита); значения
+    по умолчанию — из system settings, не хардкод (CMS-first).
+    """
+
+    __tablename__ = "teams"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    emblem_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    leader_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="active",
+        index=True,
+    )
+    join_policy: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="by_request",
+    )
+    max_members: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'disbanded')",
+            name="ck_teams_status",
+        ),
+        CheckConstraint(
+            "join_policy IN ('open', 'by_request', 'invite_only')",
+            name="ck_teams_join_policy",
+        ),
+        CheckConstraint(
+            "max_members IS NULL OR max_members >= 1",
+            name="ck_teams_max_members_min",
+        ),
+    )
+
+
+class TeamMember(TimestampMixin, Base):
+    """Членство игрока в команде (шаг 6.2).
+
+    Инвариант "игрок в одной активной команде" — сервис-уровень (6.4).
+    Партиал-unique ниже страхует на уровне БД: одна active-запись
+    (team_id, player_id) + одна active-запись (player_id) через два
+    индекса. role: leader | member. Покинувший команду игрок остаётся
+    в таблице со status='left' — история.
+    """
+
+    __tablename__ = "team_members"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    team_id: Mapped[str] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="member")
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="active",
+        index=True,
+    )
+    joined_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    left_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint("role IN ('leader', 'member')", name="ck_team_members_role"),
+        CheckConstraint("status IN ('active', 'left')", name="ck_team_members_status"),
+        UniqueConstraint("team_id", "player_id", name="uq_team_members_team_player"),
+        Index(
+            "uq_team_members_active_player",
+            "player_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+
+class TeamInvitation(TimestampMixin, Base):
+    """Приглашение игрока в команду (шаг 6.2).
+
+    Создаётся лидером/офицером. status: pending | accepted | rejected
+    | expired | cancelled. Партиал-unique: одна pending на пару
+    (team_id, invited_player_id).
+    """
+
+    __tablename__ = "team_invitations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    team_id: Mapped[str] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    invited_player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    invited_by_player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="pending",
+        index=True,
+    )
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'rejected', 'expired', 'cancelled')",
+            name="ck_team_invitations_status",
+        ),
+        Index(
+            "uq_team_invitations_pending",
+            "team_id",
+            "invited_player_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+    )
+
+
+class TeamJoinRequest(TimestampMixin, Base):
+    """Заявка игрока на вступление в команду (шаг 6.2).
+
+    Создаётся игроком. status: pending | accepted | rejected
+    | cancelled. Одна pending на пару (team_id, player_id).
+    """
+
+    __tablename__ = "team_join_requests"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    team_id: Mapped[str] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="pending",
+        index=True,
+    )
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    responded_by_player_id: Mapped[str | None] = mapped_column(
+        ForeignKey("game_players.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'rejected', 'cancelled')",
+            name="ck_team_join_requests_status",
+        ),
+        Index(
+            "uq_team_join_requests_pending",
+            "team_id",
+            "player_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+    )
+
+
+class TeamMembershipHistory(TimestampMixin, Base):
+    """Immutable-лог изменений состава команды (шаг 6.2).
+
+    Одна запись = одно событие: joined | left | kicked | promoted
+    | demoted | leadership_transferred. Записи не удаляются и не
+    изменяются (immutability обеспечена логикой + индексами; триггеры
+    — отдельная задача при необходимости).
+    """
+
+    __tablename__ = "team_membership_history"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    team_id: Mapped[str] = mapped_column(
+        ForeignKey("teams.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    actor_player_id: Mapped[str | None] = mapped_column(
+        ForeignKey("game_players.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('joined', 'left', 'kicked', 'promoted', "
+            "'demoted', 'leadership_transferred', 'disbanded')",
+            name="ck_team_membership_history_event_type",
+        ),
+    )
+
+
 class PlayerMission(TimestampMixin, Base):
     __tablename__ = "player_missions"
 
