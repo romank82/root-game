@@ -73,6 +73,7 @@ from app.admin_player_wallet import router as admin_player_wallet_router
 from app.admin_player_inventory import router as admin_player_inventory_router
 from app.admin_player_mission import router as admin_player_mission_router
 from app.admin_player_restrictions import router as admin_player_restrictions_router
+from app.admin_teams import router as admin_teams_router
 
 SESSION_COOKIE_NAME = "chimera_session"
 
@@ -925,3 +926,4 @@ app.include_router(admin_player_wallet_router)
 app.include_router(admin_player_inventory_router)
 app.include_router(admin_player_mission_router)
 app.include_router(admin_player_restrictions_router)
+app.include_router(admin_teams_router)

@@ -297,6 +297,63 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
   `obtained_from_id=request_id`. Player-ограничения (`sale_forbidden`, `transfer_forbidden`,
   `trade_forbidden`, `stack_limit`, `is_consumable`) админ-операции не блокируют.
 
+---
+
+## Admin Teams API (этап 6.7.a)
+
+Модерация команд: просмотр, состав, история, принудительное
+расформирование и исключение. Все эндпоинты под префиксом
+`/api/v1/admin/teams`. Чат-модерация (6.7.b) — не реализована.
+
+### Permissions
+- `teams.read` — все GET-эндпоинты.
+- `teams.manage` — мутации (force-disband, force-kick).
+  execution_mode выбирается супер-админом: `direct` или
+  `requires_super_admin_approval`.
+
+### Read
+- `GET /api/v1/admin/teams` — список.
+  Query: `status=active|disbanded|all` (default `active`),
+  `join_policy`, `leader_id`, `q` (поиск по name),
+  `limit` (default 50, max 200), `offset`.
+  Ошибка 422 при невалидном `status`.
+- `GET /api/v1/admin/teams/{team_id}` — карточка (disbanded тоже).
+- `GET /api/v1/admin/teams/{team_id}/members` — состав.
+  Query: `status=active|left|all` (default `active`).
+- `GET /api/v1/admin/teams/{team_id}/history` — immutable-история состава.
+  Query: `limit`, `offset`.
+- `GET /api/v1/admin/teams/{team_id}/invitations` — приглашения.
+  Query: `status` (default `pending`).
+- `GET /api/v1/admin/teams/{team_id}/join-requests` — заявки.
+  Query: `status` (default `pending`).
+
+### Mutations (permission `teams.manage`)
+- `POST /api/v1/admin/teams/{team_id}/force-disband`
+  Body: `{reason}`. Прямое исполнение: 200 + `{teamId, disbanded, team}`.
+  Approval-режим: 202 + `{approvalRequestId, approval, idempotent}`.
+  Guard 5.3: 409, если любой участник в активной командной миссии.
+- `POST /api/v1/admin/teams/{team_id}/members/{player_id}/force-kick`
+  Body: `{reason}`. Прямое исполнение: 200 + `{teamId, playerId, kicked}`.
+  Approval-режим: 202 + `{approvalRequestId, approval, idempotent}`.
+  Guard: 409 для лидера; guard 5.3 для участника в активной миссии.
+
+**Validation-правило.** И в direct, и в approval-режиме цель
+проверяется ДО создания заявки: 404 на несуществующую команду,
+409 на не-disbanded команду, 404 на отсутствующее членство.
+
+### Dedicated executors (только супер-админ)
+- `POST /api/v1/admin/teams/force-disband-requests/{approval_id}/execute`
+- `POST /api/v1/admin/teams/force-kick-requests/{approval_id}/execute`
+
+Только `approved` заявки своего action_type (иначе 409 / 422).
+При ошибке исполнения заявка переходит в `execution_failed` (409).
+
+**Idempotent replay.** Если заявка уже `executed` — ответ
+`{"approval": ..., "idempotent": true}` БЕЗ top-level полей
+результата. Это осознанный паттерн проекта (согласован с
+`admin_player_mission` 5.x).
+
+
 
 ## System settings
 Settings API never returns or stores secrets.
