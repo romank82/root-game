@@ -39,6 +39,7 @@ from app.teams_service import (
     transfer_leadership_entrypoint,
     update_team_entrypoint,
 )
+from app.team_missions_service import list_my_team_sessions_entrypoint
 from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -828,6 +829,21 @@ def reject_join_request_route(
             detail=error.detail,
         ) from error
     return Response(status_code=204)
+
+
+# ============================================================================
+# Team missions (этап 7.1.a) — player-facing endpoints.
+# /sessions/me регистрируется ДО любых /sessions/{id} (стандартная ловушка
+# FastAPI: иначе «me» сопоставится с {id}).
+# ============================================================================
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/team-missions/sessions/me")
+def list_my_team_sessions_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    return list_my_team_sessions_entrypoint(player_id)
 
 
 # ============================================================================
