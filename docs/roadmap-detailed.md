@@ -444,13 +444,29 @@
   disband) — шаг 6.7. Чат — не в 6.4 (шаг 6.6).
 - Тесты: `backend/tests/test_teams_service.py` (21 кейс, disposable SQLite
   через alembic upgrade head, патч SessionLocal).
+- ✅ 6.5 приглашения и заявки (см. шаг 6.5 выше): invite/accept/reject/cancel,
+  join-request/approve/reject/cancel, списки (мои / команды). Все 11 маршрутов
+  в `backend/app/main.py` с rate limit 10/minute и `MissionEngineError →
+  HTTPException`; `_join_team` для by_request/invite_only возвращает точные
+  указания маршрутов. Ленивый expire приглашений (SQLite-safe naive/aware через
+  `ensure_utc`), partial-unique pending-индексы на уровне БД. Тесты: те же
+  `test_teams_service.py`, 21 кейс 6.4 сохранён + 25 новых (46 всего OK).
 
-### Шаг 6.5: Логика приглашений и заявок
+### ✅ Шаг 6.5: Логика приглашений и заявок
 - **Что**: приглашение по ссылке, заявка на вступление, approve/reject.
 - **Файлы**: сервис команд.
 - **Проверка**: приглашение принято, заявка одобрена.
 - **Зависит от**: 6.4
 - **Риск**: средний ⚠️ ТРЕБУЕТ СОГЛАСОВАНИЯ
+- **Реализовано 2026-10-08**: приглашения (invite/accept/reject/cancel лидера)
+  и заявки (create/cancel автора, approve/reject лидера, список заявок команды)
+  в `backend/app/teams_service.py` + 11 player-facing эндпоинтов в
+  `backend/app/main.py`. `joinPolicy` закрыт: open → POST /join; by_request →
+  POST /join-requests; invite_only → только invite лидера. TTL инвайтов
+  по умолчанию 72 ч с переопределением через system setting `invite.ttl_hours`
+  (CMS-first). Ленивый expire, partial-unique pending-индексы, реактивация
+  прежней TeamMember (без дублей), immutable history с метаданными via.
+  Контракты — `docs/api-contracts.md`; тесты — `backend/tests/test_teams_service.py`.
 
 ### Шаг 6.6: Модель командного сообщения и логика чата
 - **Что**: сообщения команды, системные события, жалобы, мут, заморозка чата.

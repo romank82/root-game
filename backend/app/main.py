@@ -18,13 +18,24 @@ from app.mission_engine import (
 from app.models import GamePlayer
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
 from app.teams_service import (
+    accept_invitation_entrypoint,
+    approve_join_request_entrypoint,
+    cancel_invitation_entrypoint,
+    cancel_join_request_entrypoint,
+    create_join_request_entrypoint,
     create_team_entrypoint,
     disband_team_entrypoint,
+    get_my_invitations,
+    get_my_join_requests,
     get_my_team,
     get_team,
+    get_team_join_requests,
+    invite_player_entrypoint,
     join_team_entrypoint,
     kick_member_entrypoint,
     leave_team_entrypoint,
+    reject_invitation_entrypoint,
+    reject_join_request_entrypoint,
     transfer_leadership_entrypoint,
     update_team_entrypoint,
 )
@@ -138,6 +149,14 @@ class TeamUpdatePayload(BaseModel):
 
 class TransferLeadershipPayload(BaseModel):
     new_leader_id: str = Field(min_length=1, max_length=64)
+
+class InvitePayload(BaseModel):
+    invited_player_id: str = Field(min_length=1, max_length=64)
+    message: str | None = Field(default=None, max_length=2000)
+    ttl_hours: int | None = Field(default=None, ge=1)
+
+class JoinRequestPayload(BaseModel):
+    message: str | None = Field(default=None, max_length=2000)
 
 def _new_player_id() -> str:
     return f"player-{uuid4().hex}"
@@ -591,6 +610,217 @@ def disband_team_route(
 ):
     try:
         disband_team_entrypoint(player_id, team_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    return Response(status_code=204)
+
+
+# ============================================================================
+# Teams (этап 6.5) — приглашения и заявки (player-facing endpoints).
+# Важно: GET /teams/invitations/me и GET /teams/join-requests/me
+# регистрируются ДО остальных маршрутов этого блока, чтобы FastAPI не
+# сопоставил «me» с {team_id} (та же ловушка, что была с /teams/me в 6.4).
+# ============================================================================
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/teams/invitations/me")
+def get_my_invitations_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return get_my_invitations(player_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/teams/join-requests/me")
+def get_my_join_requests_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return get_my_join_requests(player_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/teams/{team_id}/invitations", status_code=201)
+def invite_player_route(
+    request: Request,
+    team_id: str,
+    payload: InvitePayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return invite_player_entrypoint(
+            player_id,
+            team_id,
+            payload.invited_player_id,
+            message=payload.message,
+            ttl_hours=payload.ttl_hours,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/teams/invitations/{invitation_id}/accept")
+def accept_invitation_route(
+    request: Request,
+    invitation_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return accept_invitation_entrypoint(player_id, invitation_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/teams/invitations/{invitation_id}/reject", status_code=204)
+def reject_invitation_route(
+    request: Request,
+    invitation_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        reject_invitation_entrypoint(player_id, invitation_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    return Response(status_code=204)
+
+
+@limiter.limit("10/minute")
+@app.delete(
+    "/api/v1/engine/teams/{team_id}/invitations/{invitation_id}",
+    status_code=204,
+)
+def cancel_invitation_route(
+    request: Request,
+    team_id: str,
+    invitation_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        cancel_invitation_entrypoint(player_id, team_id, invitation_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    return Response(status_code=204)
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/teams/{team_id}/join-requests", status_code=201)
+def create_join_request_route(
+    request: Request,
+    team_id: str,
+    payload: JoinRequestPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return create_join_request_entrypoint(
+            player_id,
+            team_id,
+            message=payload.message,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.delete(
+    "/api/v1/engine/teams/join-requests/{request_id}",
+    status_code=204,
+)
+def cancel_join_request_route(
+    request: Request,
+    request_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        cancel_join_request_entrypoint(player_id, request_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+    return Response(status_code=204)
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/teams/{team_id}/join-requests")
+def get_team_join_requests_route(
+    request: Request,
+    team_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return get_team_join_requests(player_id, team_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post(
+    "/api/v1/engine/teams/{team_id}/join-requests/{request_id}/approve",
+)
+def approve_join_request_route(
+    request: Request,
+    team_id: str,
+    request_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return approve_join_request_entrypoint(player_id, team_id, request_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post(
+    "/api/v1/engine/teams/{team_id}/join-requests/{request_id}/reject",
+    status_code=204,
+)
+def reject_join_request_route(
+    request: Request,
+    team_id: str,
+    request_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        reject_join_request_entrypoint(player_id, team_id, request_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

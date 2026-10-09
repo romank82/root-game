@@ -16,6 +16,17 @@
 - `POST /api/v1/engine/teams/{team_id}/members/{player_id}/kick` — исключить (204)
 - `POST /api/v1/engine/teams/{team_id}/transfer-leadership` — передать лидерство
 - `POST /api/v1/engine/teams/{team_id}/disband` — расформировать (204)
+- `POST /api/v1/engine/teams/{team_id}/invitations` — пригласить игрока (201)
+- `GET /api/v1/engine/teams/invitations/me` — мои приглашения
+- `POST /api/v1/engine/teams/invitations/{invitation_id}/accept` — принять приглашение
+- `POST /api/v1/engine/teams/invitations/{invitation_id}/reject` — отклонить приглашение (204)
+- `DELETE /api/v1/engine/teams/{team_id}/invitations/{invitation_id}` — отозвать приглашение (204)
+- `POST /api/v1/engine/teams/{team_id}/join-requests` — подать заявку (201)
+- `GET /api/v1/engine/teams/join-requests/me` — мои заявки
+- `DELETE /api/v1/engine/teams/join-requests/{request_id}` — отозвать заявку (204)
+- `GET /api/v1/engine/teams/{team_id}/join-requests` — заявки команды (лидер)
+- `POST /api/v1/engine/teams/{team_id}/join-requests/{request_id}/approve` — одобрить заявку
+- `POST /api/v1/engine/teams/{team_id}/join-requests/{request_id}/reject` — отклонить заявку (204)
 
 `GET /api/v1/engine/bootstrap` returns only public player content. Schema and redaction policy for `Segment.content` and `Mission.content` are defined in `docs/segment-content-contract.md`; validation configuration, answers, and server-side award rules are excluded.
 
@@ -96,6 +107,70 @@ Player-facing endpoints; admin-модерация команд — этап 6.7.
 статус-машина дают естественную идемпотентность вступления.
 Физического удаления нет: lifecycle active → disbanded, история состава
 (`team_membership_history`) immutable.
+
+## Teams API (этап 6.5)
+
+Приглашения и заявки на вступление. Player-facing, все — `@limiter.limit("10/minute")`
++ player identity. Статус-машины соответствуют `CheckConstraint` моделей (6.2);
+«одна pending на пару» страхуется partial-unique индексами
+`uq_team_invitations_pending` / `uq_team_join_requests_pending`. Ленивый expire:
+просроченное приглашение (`expires_at < now`) помечается `expired` при первом
+обращении к accept/reject/cancel/list и не показывается игроку.
+
+Способы вступления по `joinPolicy`:
+- `open` → `POST /teams/{id}/join` (6.4);
+- `by_request` → `POST /teams/{id}/join-requests` (лидер решает approve/reject);
+- `invite_only` → только по приглашению лидера (`POST /teams/{id}/invitations`).
+
+Приглашения (инициирует лидер):
+
+- `POST /api/v1/engine/teams/{team_id}/invitations` (201) — пригласить игрока.
+  Body: `{"invitedPlayerId"(1..64), "message"? (<=2000), "ttlHours"? (>=1)}`.
+  TTL по умолчанию — system setting `invite.ttl_hours` (дефолт 72 часа).
+  Guard'ы (409): не лидер — 403; приглашение самого себя; цель уже в активной
+  команде; уже есть pending-приглашение этой паре; команда заполнена
+  (`maxMembers` достигнут). Ответ — сериализованное приглашение (см. ниже).
+- `GET /api/v1/engine/teams/invitations/me` (200) — список pending-приглашений
+  игрока (просроченные исключаются после ленивого expire), новые первыми.
+- `POST /api/v1/engine/teams/invitations/{invitation_id}/accept` (200) — принять:
+  реактивация/INSERT `TeamMember` (как в 6.4, без дублей), history `joined`
+  (`metadata.via="invitation"`), статус → `accepted`, `respondedAt`.
+  Guard'ы (409): игрок уже в активной команде; команда заполнена;
+  приглашение уже обработано/просрочено; чужое/несуществующее — 404.
+- `POST /api/v1/engine/teams/invitations/{invitation_id}/reject` (204) — статус →
+  `rejected`, `respondedAt`.
+- `DELETE /api/v1/engine/teams/{team_id}/invitations/{invitation_id}` (204) —
+  отозвать приглашение (только лидер этой команды): статус → `cancelled`.
+
+Заявки (инициирует игрок):
+
+- `POST /api/v1/engine/teams/{team_id}/join-requests` (201) — подать заявку.
+  Body: `{"message"? (<=2000)}`. Guard'ы (409): игрок уже в активной команде;
+  `joinPolicy == "open"` («вступайте напрямую через POST /teams/{id}/join»);
+  `joinPolicy == "invite_only"` («только по приглашению»);
+  уже есть pending-заявка этой паре. Ответ — сериализованная заявка.
+- `GET /api/v1/engine/teams/join-requests/me` (200) — список pending-заявок игрока.
+- `DELETE /api/v1/engine/teams/join-requests/{request_id}` (204) — отозвать свою
+  заявку (только автор): статус → `cancelled`.
+- `GET /api/v1/engine/teams/{team_id}/join-requests` (200) — заявки команды
+  (только лидер; не-лидер-участник — 403, не-участник — 404). Query `?status=`
+  (default `pending`, можно `accepted`/`rejected`/`cancelled`).
+- `POST /api/v1/engine/teams/{team_id}/join-requests/{request_id}/approve`
+  (200) — одобрить (только лидер): реактивация/INSERT `TeamMember`, history
+  `joined` (`metadata.via="join_request"`), статус → `accepted`,
+  `respondedByPlayerId`=лидер. Guard'ы (409): заявитель уже в активной команде;
+  команда заполнена; заявка уже обработана.
+- `POST /api/v1/engine/teams/{team_id}/join-requests/{request_id}/reject`
+  (204) — отклонить (только лидер): статус → `rejected`,
+  `respondedByPlayerId`, `respondedAt`.
+
+Ответ приглашения: `{"id", "teamId", "invitedPlayerId", "invitedByPlayerId",
+"status", "message", "expiresAt", "respondedAt"}`.
+Ответ заявки: `{"id", "teamId", "playerId", "status", "message",
+"respondedByPlayerId", "respondedAt"}`.
+Ответ accept/approve — карточка команды (та же схема, что в 6.4).
+2020+ статусов нет: никакого физического удаления, неизменяемые записи
+(`TeamMembershipHistory`, `respondedAt`/статусы — только переход вперёд).
 
 ## Planned geo/team API (not implemented)
 

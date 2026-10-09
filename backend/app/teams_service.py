@@ -16,18 +16,21 @@ player-операций в проекте не используется.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
+from app.datetime_utils import ensure_utc
 from app.geo_team_runtime_models import TeamSession, TeamSessionMember
 from app.models import (
     GamePlayer,
     SystemSetting,
     Team,
+    TeamInvitation,
+    TeamJoinRequest,
     TeamMember,
     TeamMembershipHistory,
 )
@@ -50,6 +53,25 @@ EMBLEM_MAX = 2048
 # эти статусы team_session блокируют leave/disband — участник в них
 # задействован в активной командной миссии.
 SESSION_BLOCKING_STATUSES = frozenset({"collecting", "ready_to_start", "active"})
+
+# ---- Статусы приглашений и заявок (шаг 6.5) -------------------------------
+INVITATION_STATUS_PENDING = "pending"
+INVITATION_STATUS_ACCEPTED = "accepted"
+INVITATION_STATUS_REJECTED = "rejected"
+INVITATION_STATUS_EXPIRED = "expired"
+INVITATION_STATUS_CANCELLED = "cancelled"
+
+JOIN_REQUEST_STATUS_PENDING = "pending"
+JOIN_REQUEST_STATUS_ACCEPTED = "accepted"
+JOIN_REQUEST_STATUS_REJECTED = "rejected"
+JOIN_REQUEST_STATUS_CANCELLED = "cancelled"
+
+INVITE_MESSAGE_MAX = 2000
+JOIN_REQUEST_MESSAGE_MAX = 2000
+
+# Дефолт TTL приглашения (часы). CMS-first: значение переопределяется
+# системной настройкой "invite.ttl_hours" — см. _invitation_ttl_hours.
+DEFAULT_INVITATION_TTL_HOURS = 72
 
 # Маркер "значение не передано" для update_team: позволяет отличить отказ
 # от изменения от намеренного null (в V1 null через API не проходит).
@@ -435,10 +457,17 @@ def _join_team(session: Session, player_id: str, team_id: str) -> dict:
 
     team = _get_active_team(session, team_id)
 
-    if team.join_policy != "open":
+    if team.join_policy == "by_request":
         raise _mission_error(
             409,
-            "Вступление по заявке или приглашению — шаг 6.5.",
+            "Вступление по заявке. "
+            f"Используйте POST /api/v1/engine/teams/{team_id}/join-requests.",
+        )
+    if team.join_policy == "invite_only":
+        raise _mission_error(
+            409,
+            "Режим «только по приглашению»: "
+            "приглашение должен отправить лидер команды.",
         )
 
     active_count = session.scalar(
@@ -691,3 +720,585 @@ def disband_team_entrypoint(leader_id: str, team_id: str) -> None:
     """Точка вызова из HTTP-слоя: расформировать команду (только лидер)."""
     with SessionLocal.begin() as session:
         _disband_team(session, leader_id, team_id)
+
+
+# ============================================================================
+# Приглашения и заявки (шаг 6.5)
+# ----------------------------------------------------------------------------
+# Приглашения инициирует лидер (invite -> accept/reject/cancel); заявки —
+# игрок (create -> approve/reject лидером или cancel автором). Статус-машины
+# соответствуют CheckConstraint'ам моделей (6.2). Partial-unique индексы
+# uq_team_invitations_pending / uq_team_join_requests_pending страхуют "одна
+# pending на пару" на уровне БД, сервис дополнительно даёт чистые 409.
+# ============================================================================
+
+
+def _invitation_ttl_hours(session: Session) -> int:
+    """TTL приглашения в часах: system setting "invite.ttl_hours" (CMS-first)
+    либо безопасный дефолт DEFAULT_INVITATION_TTL_HOURS."""
+    value = _read_setting(session, "invite.ttl_hours")
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and value > 0
+    ):
+        return int(value)
+    return DEFAULT_INVITATION_TTL_HOURS
+
+
+def _ensure_not_in_active_team(session: Session, player_id: str) -> None:
+    """Guard: игрок не состоит в активной команде (любой)."""
+    existing = session.scalar(
+        select(TeamMember).where(
+            TeamMember.player_id == player_id,
+            TeamMember.status == MEMBER_STATUS_ACTIVE,
+        )
+    )
+    if existing is not None:
+        raise _mission_error(409, "Игрок уже состоит в активной команде.")
+
+
+def _team_is_full(session: Session, team: Team) -> bool:
+    """Team.max_members задан и достигнут числом активных участников."""
+    active_count = session.scalar(
+        select(func.count())
+        .select_from(TeamMember)
+        .where(
+            TeamMember.team_id == team.id,
+            TeamMember.status == MEMBER_STATUS_ACTIVE,
+        )
+    )
+    return team.max_members is not None and active_count >= team.max_members
+
+
+def _activate_membership(
+    session: Session,
+    *,
+    team_id: str,
+    player_id: str,
+) -> None:
+    """Реактивация прежней записи TeamMember либо INSERT нового членства.
+
+    Тот же паттерн, что в _join_team (6.4): uq_team_members_team_player
+    запрещает дубликаты, поэтому бывший участник возвращается без новых строк.
+    """
+    previous = session.scalar(
+        select(TeamMember).where(
+            TeamMember.team_id == team_id,
+            TeamMember.player_id == player_id,
+        )
+    )
+    if previous is None:
+        session.add(
+            TeamMember(
+                id=_new_id("team-member"),
+                team_id=team_id,
+                player_id=player_id,
+                role=ROLE_MEMBER,
+                status=MEMBER_STATUS_ACTIVE,
+                joined_at=_utcnow(),
+            )
+        )
+    else:
+        previous.status = MEMBER_STATUS_ACTIVE
+        previous.left_at = None
+        previous.joined_at = _utcnow()
+        if previous.role != ROLE_LEADER:
+            previous.role = ROLE_MEMBER
+
+
+def _lazy_expire(session: Session, invitation: TeamInvitation) -> None:
+    """Ленивое протухание pending-приглашения, если срок уже прошёл.
+
+    Вызывается перед проверкой статуса в accept/reject/cancel/list.
+    """
+    expires_at = getattr(invitation, "expires_at", None)
+    if (
+        invitation.status == INVITATION_STATUS_PENDING
+        and expires_at is not None
+        and ensure_utc(expires_at) < _utcnow()
+    ):
+        invitation.status = INVITATION_STATUS_EXPIRED
+        invitation.responded_at = _utcnow()
+        session.flush()
+
+
+def _ensure_pending(
+    status: str,
+    allowed_pending: str,
+    error_message: str,
+) -> None:
+    """Guard: текущий статус должен быть pending, иначе 409."""
+    if status != allowed_pending:
+        raise _mission_error(409, error_message)
+
+
+def _serialize_invitation(invitation: TeamInvitation) -> dict:
+    return {
+        "id": invitation.id,
+        "teamId": invitation.team_id,
+        "invitedPlayerId": invitation.invited_player_id,
+        "invitedByPlayerId": invitation.invited_by_player_id,
+        "status": invitation.status,
+        "message": invitation.message,
+        "expiresAt": (
+            invitation.expires_at.isoformat() if invitation.expires_at else None
+        ),
+        "respondedAt": (
+            invitation.responded_at.isoformat() if invitation.responded_at else None
+        ),
+    }
+
+
+def _serialize_join_request(request: TeamJoinRequest) -> dict:
+    return {
+        "id": request.id,
+        "teamId": request.team_id,
+        "playerId": request.player_id,
+        "status": request.status,
+        "message": request.message,
+        "respondedByPlayerId": request.responded_by_player_id,
+        "respondedAt": (
+            request.responded_at.isoformat() if request.responded_at else None
+        ),
+    }
+
+
+# ---- Приглашение (инициирует лидер) ---------------------------------------
+def _invite_player(
+    session: Session,
+    leader_id: str,
+    team_id: str,
+    target_player_id: str,
+    *,
+    message: str | None = None,
+    ttl_hours: int | None = None,
+) -> dict:
+    if message is not None and len(message) > INVITE_MESSAGE_MAX:
+        raise _mission_error(
+            400,
+            f"Сообщение приглашения не может быть длиннее "
+            f"{INVITE_MESSAGE_MAX} символов.",
+        )
+
+    team, _membership = _require_active_team_membership(session, leader_id, team_id)
+    _ensure_leader(team, leader_id)
+
+    if target_player_id == leader_id:
+        raise _mission_error(409, "Нельзя пригласить самого себя.")
+
+    _ensure_not_in_active_team(session, target_player_id)
+
+    duplicate = session.scalar(
+        select(TeamInvitation).where(
+            TeamInvitation.team_id == team.id,
+            TeamInvitation.invited_player_id == target_player_id,
+            TeamInvitation.status == INVITATION_STATUS_PENDING,
+        )
+    )
+    if duplicate is not None:
+        raise _mission_error(
+            409,
+            "Этому игроку уже отправлено активное приглашение.",
+        )
+
+    if _team_is_full(session, team):
+        raise _mission_error(409, "Команда заполнена.")
+
+    if ttl_hours is None:
+        ttl_hours = _invitation_ttl_hours(session)
+    if (
+        not isinstance(ttl_hours, int)
+        or isinstance(ttl_hours, bool)
+        or ttl_hours < 1
+    ):
+        raise _mission_error(
+            400,
+            "TTL приглашения должен быть положительным целым числом (часы).",
+        )
+
+    invitation = TeamInvitation(
+        id=_new_id("invitation"),
+        team_id=team.id,
+        invited_player_id=target_player_id,
+        invited_by_player_id=leader_id,
+        status=INVITATION_STATUS_PENDING,
+        message=message,
+        expires_at=_utcnow() + timedelta(hours=ttl_hours),
+    )
+    session.add(invitation)
+    session.flush()
+
+    return _serialize_invitation(invitation)
+
+
+def invite_player_entrypoint(
+    leader_id: str,
+    team_id: str,
+    target_player_id: str,
+    *,
+    message: str | None = None,
+    ttl_hours: int | None = None,
+) -> dict:
+    """Точка вызова из HTTP-слоя: пригласить игрока (только лидер)."""
+    with SessionLocal.begin() as session:
+        return _invite_player(
+            session,
+            leader_id,
+            team_id,
+            target_player_id,
+            message=message,
+            ttl_hours=ttl_hours,
+        )
+
+
+# ---- Список и ответ на приглашения ----------------------------------------
+def get_my_invitations(player_id: str) -> list[dict]:
+    """Все pending-приглашения игрока (просроченные исключаются).
+
+    begin() вместо простого SessionLocal(): ленивый _lazy_expire — это
+    write, поэтому транзакция должна завершаться commit (а не rollback).
+    """
+    with SessionLocal.begin() as session:
+        invitations = session.scalars(
+            select(TeamInvitation)
+            .where(
+                TeamInvitation.invited_player_id == player_id,
+                TeamInvitation.status == INVITATION_STATUS_PENDING,
+            )
+            .order_by(TeamInvitation.created_at.desc())
+        ).all()
+
+        result: list[dict] = []
+        for invitation in invitations:
+            _lazy_expire(session, invitation)
+            if invitation.status == INVITATION_STATUS_PENDING:
+                result.append(_serialize_invitation(invitation))
+        return result
+
+
+def _accept_invitation(
+    session: Session,
+    player_id: str,
+    invitation_id: str,
+) -> dict:
+    _ensure_player(session, player_id)
+
+    # SELECT ... FOR UPDATE в PostgreSQL; в SQLite — обычный SELECT
+    # (транзакция уже сериализует запись).
+    invitation = session.get(TeamInvitation, invitation_id)
+    if invitation is None or invitation.invited_player_id != player_id:
+        raise _mission_error(404, "Приглашение не найдено.")
+
+    _lazy_expire(session, invitation)
+    _ensure_pending(
+        invitation.status,
+        INVITATION_STATUS_PENDING,
+        "Приглашение уже обработано или просрочено.",
+    )
+
+    _ensure_not_in_active_team(session, player_id)
+    team = _get_active_team(session, invitation.team_id)
+    if _team_is_full(session, team):
+        raise _mission_error(409, "Команда заполнена.")
+
+    _activate_membership(session, team_id=team.id, player_id=player_id)
+    invitation.status = INVITATION_STATUS_ACCEPTED
+    invitation.responded_at = _utcnow()
+    _record_history(
+        session,
+        team_id=team.id,
+        player_id=player_id,
+        event_type="joined",
+        actor_player_id=player_id,
+        metadata={"via": "invitation", "invitationId": invitation.id},
+    )
+    session.flush()
+
+    return _serialize_team(session, team)
+
+
+def accept_invitation_entrypoint(player_id: str, invitation_id: str) -> dict:
+    """Точка вызова из HTTP-слоя: принять приглашение."""
+    with SessionLocal.begin() as session:
+        return _accept_invitation(session, player_id, invitation_id)
+
+
+def _reject_invitation(
+    session: Session,
+    player_id: str,
+    invitation_id: str,
+) -> None:
+    invitation = session.get(TeamInvitation, invitation_id)
+    if invitation is None or invitation.invited_player_id != player_id:
+        raise _mission_error(404, "Приглашение не найдено.")
+
+    _lazy_expire(session, invitation)
+    _ensure_pending(
+        invitation.status,
+        INVITATION_STATUS_PENDING,
+        "Приглашение уже обработано или просрочено.",
+    )
+
+    invitation.status = INVITATION_STATUS_REJECTED
+    invitation.responded_at = _utcnow()
+    session.flush()
+
+
+def reject_invitation_entrypoint(player_id: str, invitation_id: str) -> None:
+    """Точка вызова из HTTP-слоя: отклонить приглашение."""
+    with SessionLocal.begin() as session:
+        _reject_invitation(session, player_id, invitation_id)
+
+
+def _cancel_invitation(
+    session: Session,
+    leader_id: str,
+    team_id: str,
+    invitation_id: str,
+) -> None:
+    team, _membership = _require_active_team_membership(session, leader_id, team_id)
+    _ensure_leader(team, leader_id)
+
+    invitation = session.get(TeamInvitation, invitation_id)
+    if invitation is None or invitation.team_id != team.id:
+        raise _mission_error(404, "Приглашение не найдено.")
+
+    _lazy_expire(session, invitation)
+    _ensure_pending(
+        invitation.status,
+        INVITATION_STATUS_PENDING,
+        "Приглашение уже обработано или просрочено.",
+    )
+
+    invitation.status = INVITATION_STATUS_CANCELLED
+    invitation.responded_at = _utcnow()
+    session.flush()
+
+
+def cancel_invitation_entrypoint(
+    leader_id: str,
+    team_id: str,
+    invitation_id: str,
+) -> None:
+    """Точка вызова из HTTP-слоя: отозвать приглашение (только лидер)."""
+    with SessionLocal.begin() as session:
+        _cancel_invitation(session, leader_id, team_id, invitation_id)
+
+
+# ---- Заявка на вступление (инициирует игрок) ------------------------------
+def _create_join_request(
+    session: Session,
+    player_id: str,
+    team_id: str,
+    *,
+    message: str | None = None,
+) -> dict:
+    _ensure_player(session, player_id)
+    if message is not None and len(message) > JOIN_REQUEST_MESSAGE_MAX:
+        raise _mission_error(
+            400,
+            f"Сообщение заявки не может быть длиннее "
+            f"{JOIN_REQUEST_MESSAGE_MAX} символов.",
+        )
+
+    _ensure_not_in_active_team(session, player_id)
+    team = _get_active_team(session, team_id)
+
+    if team.join_policy == "open":
+        raise _mission_error(
+            409,
+            "Режим открытого набора: вступайте напрямую через "
+            f"POST /api/v1/engine/teams/{team_id}/join.",
+        )
+    if team.join_policy == "invite_only":
+        raise _mission_error(
+            409,
+            "Режим «только по приглашению»: "
+            "приглашение должен отправить лидер команды.",
+        )
+
+    duplicate = session.scalar(
+        select(TeamJoinRequest).where(
+            TeamJoinRequest.team_id == team.id,
+            TeamJoinRequest.player_id == player_id,
+            TeamJoinRequest.status == JOIN_REQUEST_STATUS_PENDING,
+        )
+    )
+    if duplicate is not None:
+        raise _mission_error(
+            409,
+            "Заявка в эту команду уже отправлена и ожидает решения.",
+        )
+
+    request = TeamJoinRequest(
+        id=_new_id("join-request"),
+        team_id=team.id,
+        player_id=player_id,
+        status=JOIN_REQUEST_STATUS_PENDING,
+        message=message,
+    )
+    session.add(request)
+    session.flush()
+
+    return _serialize_join_request(request)
+
+
+def create_join_request_entrypoint(
+    player_id: str,
+    team_id: str,
+    *,
+    message: str | None = None,
+) -> dict:
+    """Точка вызова из HTTP-слоя: подать заявку на вступление."""
+    with SessionLocal.begin() as session:
+        return _create_join_request(session, player_id, team_id, message=message)
+
+
+def get_my_join_requests(player_id: str) -> list[dict]:
+    """Все pending-заявки игрока (по всем командам)."""
+    with SessionLocal() as session:
+        requests = session.scalars(
+            select(TeamJoinRequest)
+            .where(
+                TeamJoinRequest.player_id == player_id,
+                TeamJoinRequest.status == JOIN_REQUEST_STATUS_PENDING,
+            )
+            .order_by(TeamJoinRequest.created_at.desc())
+        ).all()
+        return [_serialize_join_request(request) for request in requests]
+
+
+def _cancel_join_request(
+    session: Session,
+    player_id: str,
+    request_id: str,
+) -> None:
+    request = session.get(TeamJoinRequest, request_id)
+    if request is None or request.player_id != player_id:
+        raise _mission_error(404, "Заявка не найдена.")
+
+    _ensure_pending(
+        request.status,
+        JOIN_REQUEST_STATUS_PENDING,
+        "Заявка уже обработана.",
+    )
+
+    request.status = JOIN_REQUEST_STATUS_CANCELLED
+    request.responded_at = _utcnow()
+    session.flush()
+
+
+def cancel_join_request_entrypoint(player_id: str, request_id: str) -> None:
+    """Точка вызова из HTTP-слоя: отозвать свою заявку."""
+    with SessionLocal.begin() as session:
+        _cancel_join_request(session, player_id, request_id)
+
+
+def get_team_join_requests(
+    leader_id: str,
+    team_id: str,
+    *,
+    status: str = "pending",
+) -> list[dict]:
+    """Заявки команды (видит только лидер; по умолчанию — pending)."""
+    with SessionLocal() as session:
+        team, _membership = _require_active_team_membership(
+            session, leader_id, team_id
+        )
+        _ensure_leader(team, leader_id)
+        requests = session.scalars(
+            select(TeamJoinRequest)
+            .where(
+                TeamJoinRequest.team_id == team.id,
+                TeamJoinRequest.status == status,
+            )
+            .order_by(TeamJoinRequest.created_at.desc())
+        ).all()
+        return [_serialize_join_request(request) for request in requests]
+
+
+def _approve_join_request(
+    session: Session,
+    leader_id: str,
+    team_id: str,
+    request_id: str,
+) -> dict:
+    team, _membership = _require_active_team_membership(session, leader_id, team_id)
+    _ensure_leader(team, leader_id)
+
+    request = session.get(TeamJoinRequest, request_id)
+    if request is None or request.team_id != team.id:
+        raise _mission_error(404, "Заявка не найдена.")
+
+    _ensure_pending(
+        request.status,
+        JOIN_REQUEST_STATUS_PENDING,
+        "Заявка уже обработана.",
+    )
+
+    _ensure_not_in_active_team(session, request.player_id)
+    team = _get_active_team(session, team.id)
+    if _team_is_full(session, team):
+        raise _mission_error(409, "Команда заполнена.")
+
+    _activate_membership(session, team_id=team.id, player_id=request.player_id)
+    request.status = JOIN_REQUEST_STATUS_ACCEPTED
+    request.responded_by_player_id = leader_id
+    request.responded_at = _utcnow()
+    _record_history(
+        session,
+        team_id=team.id,
+        player_id=request.player_id,
+        event_type="joined",
+        actor_player_id=leader_id,
+        metadata={"via": "join_request", "requestId": request.id},
+    )
+    session.flush()
+
+    return _serialize_team(session, team)
+
+
+def approve_join_request_entrypoint(
+    leader_id: str,
+    team_id: str,
+    request_id: str,
+) -> dict:
+    """Точка вызова из HTTP-слоя: одобрить заявку (только лидер)."""
+    with SessionLocal.begin() as session:
+        return _approve_join_request(session, leader_id, team_id, request_id)
+
+
+def _reject_join_request(
+    session: Session,
+    leader_id: str,
+    team_id: str,
+    request_id: str,
+) -> None:
+    team, _membership = _require_active_team_membership(session, leader_id, team_id)
+    _ensure_leader(team, leader_id)
+
+    request = session.get(TeamJoinRequest, request_id)
+    if request is None or request.team_id != team.id:
+        raise _mission_error(404, "Заявка не найдена.")
+
+    _ensure_pending(
+        request.status,
+        JOIN_REQUEST_STATUS_PENDING,
+        "Заявка уже обработана.",
+    )
+
+    request.status = JOIN_REQUEST_STATUS_REJECTED
+    request.responded_by_player_id = leader_id
+    request.responded_at = _utcnow()
+    session.flush()
+
+
+def reject_join_request_entrypoint(
+    leader_id: str,
+    team_id: str,
+    request_id: str,
+) -> None:
+    """Точка вызова из HTTP-слоя: отклонить заявку (только лидер)."""
+    with SessionLocal.begin() as session:
+        _reject_join_request(session, leader_id, team_id, request_id)

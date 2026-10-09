@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
 from app.mission_engine import MissionEngineError
+from app.datetime_utils import ensure_utc
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +24,8 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 class TeamsServiceTests(unittest.TestCase):
     """6.4: командный сервис — create/me/get/update, join/leave,
     kick, transfer-leadership, disband + guard 5.3 (активная сессия).
+    6.5: приглашения (invite/accept/reject/cancel) и заявки
+    (create/cancel, approve/reject лидера, списки) + joinPolicy.
     """
 
     @classmethod
@@ -247,6 +250,68 @@ class TeamsServiceTests(unittest.TestCase):
                 .where(TeamMembershipHistory.team_id == team_id)
                 .order_by(TeamMembershipHistory.created_at)
             ).all()
+
+    def _make_invitation(
+        self,
+        team_id: str,
+        invited_player_id: str,
+        invited_by_player_id: str,
+        *,
+        message: str | None = None,
+        status: str = "pending",
+        expires_at=None,
+    ) -> str:
+        from app.models import TeamInvitation
+
+        invitation_id = f"inv-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                TeamInvitation(
+                    id=invitation_id,
+                    team_id=team_id,
+                    invited_player_id=invited_player_id,
+                    invited_by_player_id=invited_by_player_id,
+                    status=status,
+                    message=message,
+                    expires_at=expires_at,
+                )
+            )
+        return invitation_id
+
+    def _make_join_request(
+        self,
+        team_id: str,
+        player_id: str,
+        *,
+        message: str | None = None,
+        status: str = "pending",
+    ) -> str:
+        from app.models import TeamJoinRequest
+
+        request_id = f"jr-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                TeamJoinRequest(
+                    id=request_id,
+                    team_id=team_id,
+                    player_id=player_id,
+                    status=status,
+                    message=message,
+                )
+            )
+        return request_id
+
+    def _get_invitation(self, invitation_id: str):
+        from app.models import TeamInvitation
+
+        with self.SessionLocal() as session:
+            return session.get(TeamInvitation, invitation_id)
+
+    def _get_join_request(self, request_id: str):
+        from app.models import TeamJoinRequest
+
+        with self.SessionLocal() as session:
+            return session.get(TeamJoinRequest, request_id)
 
     # ---- Создание ------------------------------------------------------
     def test_create_team_creates_leader_member_and_history(self):
@@ -606,6 +671,506 @@ class TeamsServiceTests(unittest.TestCase):
 
         with self.assertRaises(MissionEngineError) as ctx:
             self.teams_service.disband_team_entrypoint(leader_id, team_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    # ---- Приглашения (шаг 6.5) ------------------------------------------
+    def test_invite_player_by_leader_succeeds(self):
+        leader_id = self._make_player()
+        target_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="by_request")
+
+        result = self.teams_service.invite_player_entrypoint(
+            leader_id,
+            team_id,
+            target_id,
+            message="Вступай!",
+        )
+
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(result["teamId"], team_id)
+        self.assertEqual(result["invitedPlayerId"], target_id)
+        self.assertEqual(result["invitedByPlayerId"], leader_id)
+        self.assertEqual(result["message"], "Вступай!")
+        self.assertIsNotNone(result["expiresAt"])
+
+        invitation = self._get_invitation(result["id"])
+        self.assertEqual(invitation.status, "pending")
+        self.assertIsNotNone(invitation.expires_at)
+        self.assertGreater(
+            ensure_utc(invitation.expires_at),
+            datetime.now(timezone.utc),
+        )
+
+    def test_invite_self_returns_409(self):
+        leader_id = self._make_player()
+        team_id = self._make_team(leader_id)
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.invite_player_entrypoint(
+                leader_id, team_id, leader_id
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_invite_player_already_in_active_team_returns_409(self):
+        leader_id = self._make_player()
+        target_id = self._make_player()
+        team_id = self._make_team(leader_id)
+        # target — лидер другой активной команды.
+        self._make_team(target_id)
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.invite_player_entrypoint(
+                leader_id, team_id, target_id
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_invite_duplicate_pending_returns_409(self):
+        leader_id = self._make_player()
+        target_id = self._make_player()
+        team_id = self._make_team(leader_id)
+
+        self.teams_service.invite_player_entrypoint(leader_id, team_id, target_id)
+
+        # uq_team_invitations_pending + явный сервисный guard.
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.invite_player_entrypoint(
+                leader_id, team_id, target_id
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_invite_by_non_leader_returns_403(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        target_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="open")
+        self.teams_service.join_team_entrypoint(member_id, team_id)
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.invite_player_entrypoint(
+                member_id, team_id, target_id
+            )
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_get_my_invitations_returns_only_pending(self):
+        leader_id = self._make_player()
+        target_id = self._make_player()
+        team_id = self._make_team(leader_id)
+        self.teams_service.invite_player_entrypoint(leader_id, team_id, target_id)
+        self._make_invitation(
+            team_id,
+            target_id,
+            leader_id,
+            status="rejected",
+        )
+
+        result = self.teams_service.get_my_invitations(target_id)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["status"], "pending")
+        self.assertEqual(result[0]["teamId"], team_id)
+
+    def test_accept_invitation_creates_membership_and_history(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="by_request")
+        invitation = self.teams_service.invite_player_entrypoint(
+            leader_id, team_id, member_id
+        )
+
+        result = self.teams_service.accept_invitation_entrypoint(
+            member_id, invitation["id"]
+        )
+        self.assertEqual(result["id"], team_id)
+        self.assertEqual(result["memberCount"], 2)
+
+        membership = self._get_membership(team_id, member_id)
+        self.assertEqual(membership.status, "active")
+        self.assertEqual(membership.role, "member")
+
+        stored = self._get_invitation(invitation["id"])
+        self.assertEqual(stored.status, "accepted")
+        self.assertIsNotNone(stored.responded_at)
+
+        history = self._get_history(team_id)
+        self.assertEqual(history[-1].event_type, "joined")
+        self.assertEqual(history[-1].player_id, member_id)
+        self.assertEqual(
+            history[-1].metadata_json["via"],
+            "invitation",
+        )
+
+    def test_accept_invitation_when_already_in_team_returns_409(self):
+        leader_one = self._make_player()
+        leader_two = self._make_player()
+        member_id = self._make_player()
+        team_one = self._make_team(leader_one, join_policy="by_request")
+        team_two = self._make_team(leader_two, join_policy="open")
+        invitation = self.teams_service.invite_player_entrypoint(
+            leader_one, team_one, member_id
+        )
+        self.teams_service.join_team_entrypoint(member_id, team_two)
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.accept_invitation_entrypoint(
+                member_id, invitation["id"]
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_accept_invitation_reactivates_left_membership(self):
+        from app.models import TeamMember
+
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="open")
+
+        self.teams_service.join_team_entrypoint(member_id, team_id)
+        self.teams_service.leave_team_entrypoint(member_id, team_id)
+
+        invitation = self.teams_service.invite_player_entrypoint(
+            leader_id, team_id, member_id
+        )
+        result = self.teams_service.accept_invitation_entrypoint(
+            member_id, invitation["id"]
+        )
+        self.assertEqual(result["memberCount"], 2)
+
+        # uq_team_members_team_player: ровно одна строка, статус снова active.
+        with self.SessionLocal() as session:
+            memberships = session.scalars(
+                select(TeamMember).where(
+                    TeamMember.team_id == team_id,
+                    TeamMember.player_id == member_id,
+                )
+            ).all()
+        self.assertEqual(len(memberships), 1)
+        self.assertEqual(memberships[0].status, "active")
+        self.assertIsNone(memberships[0].left_at)
+
+    def test_accept_invitation_for_other_player_returns_404(self):
+        leader_id = self._make_player()
+        target_id = self._make_player()
+        other_id = self._make_player()
+        team_id = self._make_team(leader_id)
+        invitation = self.teams_service.invite_player_entrypoint(
+            leader_id, team_id, target_id
+        )
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.accept_invitation_entrypoint(
+                other_id, invitation["id"]
+            )
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_accept_expired_invitation_returns_409(self):
+        leader_id = self._make_player()
+        target_id = self._make_player()
+        team_id = self._make_team(leader_id)
+        invitation_id = self._make_invitation(
+            team_id,
+            target_id,
+            leader_id,
+            expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.accept_invitation_entrypoint(
+                target_id, invitation_id
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+
+        # Ленивое протухание фиксируется при успешном чтении списка:
+        # просроченное приглашение исчезает и получает status=expired.
+        result = self.teams_service.get_my_invitations(target_id)
+        self.assertEqual(result, [])
+
+        stored = self._get_invitation(invitation_id)
+        self.assertEqual(stored.status, "expired")
+        self.assertIsNotNone(stored.responded_at)
+
+    def test_reject_invitation_succeeds(self):
+        leader_id = self._make_player()
+        target_id = self._make_player()
+        team_id = self._make_team(leader_id)
+        invitation = self.teams_service.invite_player_entrypoint(
+            leader_id, team_id, target_id
+        )
+
+        result = self.teams_service.reject_invitation_entrypoint(
+            target_id, invitation["id"]
+        )
+        self.assertIsNone(result)
+
+        stored = self._get_invitation(invitation["id"])
+        self.assertEqual(stored.status, "rejected")
+        self.assertIsNotNone(stored.responded_at)
+
+    def test_cancel_invitation_by_leader_succeeds(self):
+        leader_id = self._make_player()
+        target_id = self._make_player()
+        team_id = self._make_team(leader_id)
+        invitation = self.teams_service.invite_player_entrypoint(
+            leader_id, team_id, target_id
+        )
+
+        result = self.teams_service.cancel_invitation_entrypoint(
+            leader_id, team_id, invitation["id"]
+        )
+        self.assertIsNone(result)
+
+        stored = self._get_invitation(invitation["id"])
+        self.assertEqual(stored.status, "cancelled")
+        self.assertIsNotNone(stored.responded_at)
+
+    # ---- Заявки (шаг 6.5) -------------------------------------------------
+    def test_create_join_request_for_by_request_team_succeeds(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="by_request")
+
+        result = self.teams_service.create_join_request_entrypoint(
+            member_id,
+            team_id,
+            message="Возьмите меня",
+        )
+
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(result["teamId"], team_id)
+        self.assertEqual(result["playerId"], member_id)
+        self.assertEqual(result["message"], "Возьмите меня")
+
+        stored = self._get_join_request(result["id"])
+        self.assertEqual(stored.status, "pending")
+        self.assertEqual(stored.team_id, team_id)
+
+    def test_create_join_request_for_open_team_returns_409(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="open")
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.create_join_request_entrypoint(member_id, team_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_create_join_request_for_invite_only_team_returns_409(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="invite_only")
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.create_join_request_entrypoint(member_id, team_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_create_join_request_when_already_in_team_returns_409(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="by_request")
+        # member — лидер другой активной команды.
+        self._make_team(member_id)
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.create_join_request_entrypoint(member_id, team_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_create_duplicate_pending_request_returns_409(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="by_request")
+        self.teams_service.create_join_request_entrypoint(member_id, team_id)
+
+        # uq_team_join_requests_pending + явный сервисный guard.
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.create_join_request_entrypoint(member_id, team_id)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_get_my_join_requests_returns_only_pending(self):
+        leader_one = self._make_player()
+        leader_two = self._make_player()
+        member_id = self._make_player()
+        team_one = self._make_team(leader_one, join_policy="by_request")
+        team_two = self._make_team(leader_two, join_policy="by_request")
+        self.teams_service.create_join_request_entrypoint(member_id, team_one)
+        self._make_join_request(team_two, member_id, status="rejected")
+
+        result = self.teams_service.get_my_join_requests(member_id)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["teamId"], team_one)
+        self.assertEqual(result[0]["status"], "pending")
+
+    def test_cancel_join_request_by_author_succeeds(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="by_request")
+        request = self.teams_service.create_join_request_entrypoint(
+            member_id, team_id
+        )
+
+        result = self.teams_service.cancel_join_request_entrypoint(
+            member_id, request["id"]
+        )
+        self.assertIsNone(result)
+
+        stored = self._get_join_request(request["id"])
+        self.assertEqual(stored.status, "cancelled")
+        self.assertIsNotNone(stored.responded_at)
+
+    def test_approve_join_request_creates_membership_and_history(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="by_request")
+        request = self.teams_service.create_join_request_entrypoint(
+            member_id, team_id
+        )
+
+        result = self.teams_service.approve_join_request_entrypoint(
+            leader_id, team_id, request["id"]
+        )
+        self.assertEqual(result["id"], team_id)
+        self.assertEqual(result["memberCount"], 2)
+
+        membership = self._get_membership(team_id, member_id)
+        self.assertEqual(membership.status, "active")
+
+        stored = self._get_join_request(request["id"])
+        self.assertEqual(stored.status, "accepted")
+        self.assertEqual(stored.responded_by_player_id, leader_id)
+        self.assertIsNotNone(stored.responded_at)
+
+        history = self._get_history(team_id)
+        self.assertEqual(history[-1].event_type, "joined")
+        self.assertEqual(history[-1].player_id, member_id)
+        self.assertEqual(history[-1].actor_player_id, leader_id)
+        self.assertEqual(
+            history[-1].metadata_json["via"],
+            "join_request",
+        )
+
+    def test_approve_join_request_reactivates_left_membership(self):
+        from app.models import TeamMember
+
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        # Открытый набор → вступить и выйти, затем перевести команду
+        # в режим by_request и подать заявку.
+        team_id = self._make_team(leader_id, join_policy="open")
+        self.teams_service.join_team_entrypoint(member_id, team_id)
+        self.teams_service.leave_team_entrypoint(member_id, team_id)
+        self.teams_service.update_team_entrypoint(
+            leader_id, team_id, join_policy="by_request"
+        )
+        request = self.teams_service.create_join_request_entrypoint(
+            member_id, team_id
+        )
+
+        result = self.teams_service.approve_join_request_entrypoint(
+            leader_id, team_id, request["id"]
+        )
+        self.assertEqual(result["memberCount"], 2)
+
+        # uq_team_members_team_player: ровно одна строка, статус снова active.
+        with self.SessionLocal() as session:
+            memberships = session.scalars(
+                select(TeamMember).where(
+                    TeamMember.team_id == team_id,
+                    TeamMember.player_id == member_id,
+                )
+            ).all()
+        self.assertEqual(len(memberships), 1)
+        self.assertEqual(memberships[0].status, "active")
+        self.assertIsNone(memberships[0].left_at)
+
+    def test_reject_join_request_succeeds(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="by_request")
+        request = self.teams_service.create_join_request_entrypoint(
+            member_id, team_id
+        )
+
+        result = self.teams_service.reject_join_request_entrypoint(
+            leader_id, team_id, request["id"]
+        )
+        self.assertIsNone(result)
+
+        stored = self._get_join_request(request["id"])
+        self.assertEqual(stored.status, "rejected")
+        self.assertEqual(stored.responded_by_player_id, leader_id)
+        self.assertIsNotNone(stored.responded_at)
+
+    def test_get_team_join_requests_leader_only_and_filters(self):
+        leader_id = self._make_player()
+        member_id = self._make_player()
+        requester_one = self._make_player()
+        requester_two = self._make_player()
+        team_id = self._make_team(leader_id, join_policy="open")
+        self.teams_service.join_team_entrypoint(member_id, team_id)
+        self.teams_service.update_team_entrypoint(
+            leader_id, team_id, join_policy="by_request"
+        )
+        self.teams_service.create_join_request_entrypoint(
+            requester_one, team_id, message="первый"
+        )
+        self.teams_service.create_join_request_entrypoint(
+            requester_two, team_id, message="второй"
+        )
+
+        # Участник (не лидер) заявки не видит; для не-участника — 404.
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.get_team_join_requests(member_id, team_id)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+        result = self.teams_service.get_team_join_requests(leader_id, team_id)
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(row["status"] == "pending" for row in result))
+        self.assertCountEqual(
+            {row["message"] for row in result},
+            {"первый", "второй"},
+        )
+
+        # фильтр по не-pending статусу не возвращает pending записи.
+        processed = self.teams_service.get_team_join_requests(
+            leader_id, team_id, status="rejected"
+        )
+        self.assertEqual(processed, [])
+
+    def test_team_full_blocks_accept_and_approve(self):
+        # accept: слоты заполнились между приглашением и действием игрока.
+        leader_one = self._make_player()
+        invited_id = self._make_player()
+        filler_id = self._make_player()
+        team_open = self._make_team(
+            leader_one, join_policy="open", max_members=2
+        )
+        invitation = self.teams_service.invite_player_entrypoint(
+            leader_one, team_open, invited_id
+        )
+        self.teams_service.join_team_entrypoint(filler_id, team_open)
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.accept_invitation_entrypoint(
+                invited_id, invitation["id"]
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+
+        # approve: вторая заявка не помещается в заполненную команду.
+        leader_two = self._make_player()
+        member_one = self._make_player()
+        member_two = self._make_player()
+        team_req = self._make_team(
+            leader_two, join_policy="by_request", max_members=2
+        )
+        request_one = self.teams_service.create_join_request_entrypoint(
+            member_one, team_req
+        )
+        self.teams_service.approve_join_request_entrypoint(
+            leader_two, team_req, request_one["id"]
+        )
+        request_two = self.teams_service.create_join_request_entrypoint(
+            member_two, team_req
+        )
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.teams_service.approve_join_request_entrypoint(
+                leader_two, team_req, request_two["id"]
+            )
         self.assertEqual(ctx.exception.status_code, 409)
 
 
