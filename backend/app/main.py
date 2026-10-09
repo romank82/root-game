@@ -39,7 +39,14 @@ from app.teams_service import (
     transfer_leadership_entrypoint,
     update_team_entrypoint,
 )
-from app.team_missions_service import list_my_team_sessions_entrypoint
+from app.team_missions_service import (
+    activate_session_entrypoint,
+    create_team_session_entrypoint,
+    list_my_team_sessions_entrypoint,
+    mark_ready_entrypoint,
+    submit_answer_entrypoint,
+    submit_location_entrypoint,
+)
 from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -159,6 +166,17 @@ class InvitePayload(BaseModel):
 
 class JoinRequestPayload(BaseModel):
     message: str | None = Field(default=None, max_length=2000)
+
+class TeamSessionCreatePayload(BaseModel):
+    mission_id: str = Field(min_length=1, max_length=64)
+
+class TeamAnswerSubmitPayload(BaseModel):
+    answer: str | None = Field(default=None, max_length=2000)
+
+class LocationSubmitPayload(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    accuracy_meters: float = Field(gt=0, le=100000)
 
 def _new_player_id() -> str:
     return f"player-{uuid4().hex}"
@@ -832,7 +850,7 @@ def reject_join_request_route(
 
 
 # ============================================================================
-# Team missions (этап 7.1.a) — player-facing endpoints.
+# Team missions (этап 7.1) — player-facing endpoints.
 # /sessions/me регистрируется ДО любых /sessions/{id} (стандартная ловушка
 # FastAPI: иначе «me» сопоставится с {id}).
 # ============================================================================
@@ -844,6 +862,89 @@ def list_my_team_sessions_route(
     player_id: str = Depends(get_current_player_id),
 ):
     return list_my_team_sessions_entrypoint(player_id)
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/team-missions/sessions", status_code=201)
+def create_team_session_route(
+    request: Request,
+    payload: TeamSessionCreatePayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return create_team_session_entrypoint(player_id, payload.mission_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/team-missions/sessions/{session_id}/ready")
+def mark_ready_route(
+    request: Request,
+    session_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return mark_ready_entrypoint(player_id, session_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/team-missions/sessions/{session_id}/location")
+def submit_location_route(
+    request: Request,
+    session_id: str,
+    payload: LocationSubmitPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return submit_location_entrypoint(
+            player_id=player_id,
+            session_id=session_id,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy_meters=payload.accuracy_meters,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/team-missions/sessions/{session_id}/activate")
+def activate_session_route(
+    request: Request,
+    session_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return activate_session_entrypoint(player_id, session_id)
+
+    except MissionEngineError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail)
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/team-missions/sessions/{session_id}/submit")
+def submit_answer_route(
+    request: Request,
+    session_id: str,
+    payload: TeamAnswerSubmitPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return submit_answer_entrypoint(player_id, session_id, payload.answer)
+    except MissionEngineError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail)
 
 
 # ============================================================================

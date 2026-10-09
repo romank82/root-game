@@ -6,14 +6,23 @@ import sys
 import tempfile
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
-from app.team_missions_service import list_my_team_sessions_entrypoint
+from app.mission_engine import MissionEngineError
+from app.team_missions_service import (
+    activate_session_entrypoint,
+    create_team_session_entrypoint,
+    list_my_team_sessions_entrypoint,
+    mark_ready_entrypoint,
+    submit_answer_entrypoint,
+    submit_location_entrypoint,
+)
+from tests.test_geo_team_contract import valid_team_config
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
@@ -214,6 +223,235 @@ class TeamMissionsServiceTests(unittest.TestCase):
                 )
             )
 
+    def _make_team(
+        self,
+        leader_id: str,
+        member_ids: list[str] | None = None,
+    ) -> str:
+        """Активная команда: лидер + активные участники (status='active')."""
+        from app.models import Team, TeamMember
+
+        team_id = f"team-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                Team(
+                    id=team_id,
+                    name=f"Team-{team_id[-6:]}",
+                    leader_id=leader_id,
+                    status="active",
+                    join_policy="open",
+                )
+            )
+            session.add(
+                TeamMember(
+                    id=f"tm-{uuid.uuid4().hex}",
+                    team_id=team_id,
+                    player_id=leader_id,
+                    role="leader",
+                    status="active",
+                )
+            )
+            for member_id in member_ids or []:
+                session.add(
+                    TeamMember(
+                        id=f"tm-{uuid.uuid4().hex}",
+                        team_id=team_id,
+                        player_id=member_id,
+                        role="member",
+                        status="active",
+                    )
+                )
+        return team_id
+
+    def _make_team_mission(
+        self,
+        *,
+        mission_type: str = "team",
+        status: str = "published",
+        validation_config: dict | None = None,
+    ) -> str:
+        """Командная миссия с валидным team/geo validation_config."""
+        from app.models import Chapter, Mission, Season
+        from tests.test_geo_team_contract import valid_team_config
+
+        suffix = uuid.uuid4().hex
+        with self.SessionLocal.begin() as session:
+            season = Season(
+                id=f"season-{suffix}",
+                slug=f"season-{suffix}",
+                title="Season",
+            )
+            session.add(season)
+            session.flush()
+            chapter = Chapter(
+                id=f"chapter-{suffix}",
+                season_id=season.id,
+                slug=f"chapter-{suffix}",
+                title="Chapter",
+            )
+            session.add(chapter)
+            session.flush()
+            mission = Mission(
+                id=f"mission-{suffix}",
+                chapter_id=chapter.id,
+                slug=f"mission-{suffix}",
+                mission_type=mission_type,
+                title="Team mission",
+                status=status,
+                content={},
+                validation_config=(
+                    valid_team_config()
+                    if validation_config is None
+                    else validation_config
+                ),
+            )
+            session.add(mission)
+        return mission.id
+
+    # ---- Хелперы шага 7.1.c (кошельки/ключи — паттерны
+    #      test_mission_engine_integration.py) -----------------------------
+
+    def _make_ready_fixture(
+        self,
+        leader_id: str,
+        member_id: str,
+    ) -> tuple[str, str, str]:
+        """Команда (лидер+участник) + командная миссия с уникальным ключом.
+
+        Возвращает (mission_id, session_id, item_id). Сессия создаётся через
+        7.1.b — оба игрока в ней status='joined', конфиг валиден.
+        """
+        self._make_team(leader_id, [member_id])
+        config = valid_team_config()
+        item_id = f"item-{uuid.uuid4().hex}"
+        config["economy"]["requiredItems"] = [{"itemId": item_id, "quantity": 1}]
+        mission_id = self._make_team_mission(validation_config=config)
+        session_id = create_team_session_entrypoint(leader_id, mission_id)["id"]
+        return mission_id, session_id, item_id
+
+    def _seed_item(self, item_id: str) -> None:
+        """Published Item — без него ядро движка заблокирует списание (шаг 3)."""
+        from app.models import Item
+
+        with self.SessionLocal.begin() as session:
+            session.add(
+                Item(
+                    id=item_id,
+                    slug=f"slug-{item_id}-{uuid.uuid4().hex[:8]}",
+                    code=f"CODE-{uuid.uuid4().hex[:12]}",
+                    title="Team key",
+                    description="Team mission entry key",
+                    symbol="◇",
+                    category="key",
+                    rarity="common",
+                    is_unique=False,
+                    content={"schemaVersion": 1},
+                    status="published",
+                )
+            )
+
+    def _seed_root_wallet(self, player_id: str, amount: int) -> None:
+        """Кошелёк с кредитной проводкой — игровой ROOT на старте теста."""
+        from app.models import Wallet, WalletTransaction
+
+        with self.SessionLocal.begin() as session:
+            wallet = Wallet(
+                id=f"wallet-{uuid.uuid4().hex}",
+                player_id=player_id,
+                currency="ROOT",
+                available_balance=amount,
+                locked_balance=0,
+            )
+            session.add(wallet)
+            session.flush()
+            session.add(
+                WalletTransaction(
+                    id=f"wallet-transaction-{uuid.uuid4().hex}",
+                    wallet_id=wallet.id,
+                    amount=amount,
+                    balance_after=amount,
+                    transaction_type="credit",
+                    reason="Test seed balance",
+                    reference_type="test_seed",
+                    reference_id=f"seed-{uuid.uuid4().hex}",
+                    metadata_json={},
+                )
+            )
+
+    def _seed_key(self, player_id: str, item_id: str, quantity: int) -> None:
+        from app.models import PlayerItem
+
+        with self.SessionLocal.begin() as session:
+            session.add(
+                PlayerItem(
+                    id=f"player-item-{uuid.uuid4().hex}",
+                    player_id=player_id,
+                    item_id=item_id,
+                    quantity=quantity,
+                )
+            )
+
+    def _get_member(self, session_id: str, player_id: str):
+        from app.geo_team_runtime_models import TeamSessionMember
+
+        with self.SessionLocal() as session:
+            return session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == session_id,
+                    TeamSessionMember.player_id == player_id,
+                )
+            )
+
+    def _set_member_status(
+        self,
+        session_id: str,
+        player_id: str,
+        status: str,
+    ) -> None:
+        from app.geo_team_runtime_models import TeamSessionMember
+
+        with self.SessionLocal.begin() as session:
+            member = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == session_id,
+                    TeamSessionMember.player_id == player_id,
+                )
+            )
+            member.status = status
+
+    def _set_team_member_status(self, player_id: str, status: str) -> None:
+        from app.models import TeamMember
+
+        with self.SessionLocal.begin() as session:
+            team_member = session.scalar(
+                select(TeamMember).where(TeamMember.player_id == player_id)
+            )
+            team_member.status = status
+
+    def _root_balance(self, player_id: str) -> int:
+        from app.models import Wallet
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(
+                    Wallet.player_id == player_id,
+                    Wallet.currency == "ROOT",
+                )
+            )
+            return wallet.available_balance if wallet is not None else 0
+
+    def _key_quantity(self, player_id: str, item_id: str) -> int:
+        from app.models import PlayerItem
+
+        with self.SessionLocal() as session:
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == player_id,
+                    PlayerItem.item_id == item_id,
+                )
+            )
+            return player_item.quantity if player_item is not None else 0
+
     # ---- Тесты ---------------------------------------------------------
     def test_list_returns_empty_when_no_sessions(self) -> None:
         player_id = self._make_player()
@@ -299,6 +537,690 @@ class TeamMissionsServiceTests(unittest.TestCase):
             datetime.fromisoformat(item["createdAt"]) for item in result["sessions"]
         ]
         self.assertEqual(created, sorted(created, reverse=True))
+
+
+    def test_create_session_by_leader_succeeds(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        self._make_team(leader, [member])
+        mission_id = self._make_team_mission()
+
+        result = create_team_session_entrypoint(leader, mission_id)
+
+        self.assertEqual(result["status"], "collecting")
+        self.assertEqual(result["mission_id"], mission_id)
+        self.assertEqual(result["memberCount"], 2)
+        self.assertEqual(result["myStatus"], "joined")
+
+        from app.geo_team_runtime_models import TeamSessionMember
+
+        with self.SessionLocal.begin() as session:
+            rows = session.scalars(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == result["id"],
+                )
+            ).all()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row.player_id for row in rows}, {leader, member})
+
+    def test_create_session_requires_leader(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        self._make_team(leader, [member])
+        mission_id = self._make_team_mission()
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(member, mission_id)
+
+        self.assertEqual(captured.exception.status_code, 403)
+        self.assertEqual(
+            captured.exception.detail,
+            "Создать командную сессию может только лидер.",
+        )
+
+    def test_create_session_requires_team(self) -> None:
+        player_id = self._make_player()
+        mission_id = self._make_team_mission()
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(player_id, mission_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Вы не состоите в команде.")
+
+    def test_create_session_unknown_mission_returns_404(self) -> None:
+        player_id = self._make_player()
+        self._make_team(player_id)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(player_id, f"mission-{uuid.uuid4().hex}")
+
+        self.assertEqual(captured.exception.status_code, 404)
+
+    def test_create_session_wrong_mission_type_returns_409(self) -> None:
+        player_id = self._make_player()
+        self._make_team(player_id)
+        mission_id = self._make_team_mission(mission_type="solo")
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(player_id, mission_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Эта миссия не командная.")
+
+    def test_create_session_second_active_blocked_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        self._make_team(leader, [member])
+        mission_id = self._make_team_mission()
+        create_team_session_entrypoint(leader, mission_id)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(leader, mission_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "У команды уже есть активная командная миссия.",
+        )
+
+    def test_create_session_below_min_members_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        self._make_team(leader, [member])
+        config = valid_team_config()
+        config["team"]["minMembers"] = 3  # активных всего 2
+        mission_id = self._make_team_mission(validation_config=config)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(leader, mission_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "Недостаточно участников для этой миссии.",
+        )
+
+    def test_create_session_above_max_members_returns_409(self) -> None:
+        leader = self._make_player()
+        member_a = self._make_player()
+        member_b = self._make_player()
+        self._make_team(leader, [member_a, member_b])
+        config = valid_team_config()
+        config["team"]["maxMembers"] = 2  # активных 3
+        mission_id = self._make_team_mission(validation_config=config)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(leader, mission_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "Слишком много участников для этой миссии.",
+        )
+
+
+
+    def _seed_geo_zone(
+        self,
+        *,
+        slug: str | None = None,
+        latitude: float = 55.7558,
+        longitude: float = 37.6173,
+        radius_meters: int = 500,
+    ) -> str:
+        from app.models import GeoZone
+
+
+        zone_slug = slug or f"zone-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GeoZone(
+                    id=f"geo-zone-{uuid.uuid4().hex}",
+                    slug=zone_slug,
+                    title="Central Park",
+                    description="Test geo zone",
+                    zone_type="radius",
+                    status="published",
+                    sort_order=0,
+                    latitude=latitude,
+                    longitude=longitude,
+                    radius_meters=radius_meters,
+                    polygon_coordinates=None,
+                    timezone="UTC",
+                    starts_at=None,
+                    ends_at=None,
+                    max_location_accuracy_meters=None,
+                    minimum_presence_seconds=0,
+                )
+            )
+        return zone_slug
+
+    def _make_location_fixture(
+        self,
+        leader_id: str,
+        member_id: str,
+    ) -> tuple[str, str]:
+        self._make_team(leader_id, [member_id])
+        zone_id = self._seed_geo_zone()
+        config = valid_team_config()
+        config["geo"]["zoneId"] = zone_id
+        mission_id = self._make_team_mission(validation_config=config)
+        session_id = create_team_session_entrypoint(leader_id, mission_id)["id"]
+        return session_id, zone_id
+
+    def _make_activation_fixture(
+        self,
+        leader_id: str,
+        member_id: str,
+    ) -> tuple[str, str]:
+        """Готовит ready_to_start-сессию с verified proof у обоих участников.
+
+        Возвращает (session_id, zone_id): оба игрока 'ready' (7.1.c),
+        у каждого свежий verified LocationProof (7.1.d). Зона из конфига.
+        """
+        mission_id, session_id, item_id = self._make_ready_fixture(
+            leader_id, member_id
+        )
+        self._seed_item(item_id)
+        self._seed_root_wallet(leader_id, 100)
+        self._seed_key(leader_id, item_id, 1)
+        self._seed_root_wallet(member_id, 100)
+        self._seed_key(member_id, item_id, 1)
+
+        mark_ready_entrypoint(leader_id, session_id)
+        mark_ready_entrypoint(member_id, session_id)  # -> ready_to_start
+
+        from app.geo_team_runtime_models import LocationProof, TeamSession
+        from app.models import Mission
+
+        with self.SessionLocal.begin() as session:
+            team_session = session.get(TeamSession, session_id)
+            mission = session.get(Mission, team_session.mission_id)
+            config = mission.validation_config
+            zone_id = config["geo"]["zoneId"]
+            freshness = config["geo"]["proofFreshnessSeconds"]
+            now = datetime.now(timezone.utc)
+            for proof_player_id in (leader_id, member_id):
+                session.add(
+                    LocationProof(
+                        id=f"location-proof-{uuid.uuid4().hex}",
+                        player_id=proof_player_id,
+                        provider="dev_mock",
+                        status="verified",
+                        zone_id=zone_id,
+                        verifier_reference=None,
+                        issued_at=now,
+                        expires_at=now + timedelta(seconds=freshness),
+                    )
+                )
+        return session_id, zone_id
+
+    def _make_active_session_fixture(
+        self,
+        leader_id: str,
+        member_id: str,
+    ) -> str:
+        """Активированная сессия с готовыми MissionRun у обоих участников.
+
+        Переиспользует _make_activation_fixture (ready_to_start + verified
+        proofs), затем активирует сессию лидером — status='active'.
+        """
+        session_id, _ = self._make_activation_fixture(leader_id, member_id)
+        activate_session_entrypoint(leader_id, session_id)
+        return session_id
+
+
+    # ---- 7.1.c: mark_ready ---------------------------------------------
+
+    def test_ready_marks_member_and_debits_root_and_item(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, item_id = self._make_ready_fixture(leader, member)
+        self._seed_item(item_id)
+        self._seed_root_wallet(leader, 100)
+        self._seed_key(leader, item_id, 2)
+
+        result = mark_ready_entrypoint(leader, session_id)
+
+        self.assertEqual(result["myStatus"], "ready")
+        self.assertIsNotNone(result["myReadyAt"])
+        # Второй участник ещё 'joined' — сессия остаётся в состоянии сбора.
+        self.assertEqual(result["status"], "collecting")
+        # entryFeeRootAtomic=25 списан, ключ quantity=1 списан.
+        self.assertEqual(self._root_balance(leader), 75)
+        self.assertEqual(self._key_quantity(leader, item_id), 1)
+
+        member_row = self._get_member(session_id, leader)
+        self.assertEqual(member_row.status, "ready")
+        self.assertIsNotNone(member_row.ready_at)
+
+    def test_ready_unknown_session_returns_404(self) -> None:
+        player_id = self._make_player()
+
+        with self.assertRaises(MissionEngineError) as captured:
+            mark_ready_entrypoint(player_id, f"session-{uuid.uuid4().hex}")
+
+        self.assertEqual(captured.exception.status_code, 404)
+        self.assertEqual(captured.exception.detail, "Командная сессия не найдена.")
+
+    def test_ready_not_a_member_returns_404(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        outsider = self._make_player()
+        _, session_id, _ = self._make_ready_fixture(leader, member)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            mark_ready_entrypoint(outsider, session_id)
+
+        self.assertEqual(captured.exception.status_code, 404)
+        self.assertEqual(captured.exception.detail, "Вы не участник этой сессии.")
+
+    def test_ready_already_ready_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, _ = self._make_ready_fixture(leader, member)
+        self._set_member_status(session_id, leader, "ready")
+
+        with self.assertRaises(MissionEngineError) as captured:
+            mark_ready_entrypoint(leader, session_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Вы уже отметились готовым.")
+
+    def test_ready_insufficient_root_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, _ = self._make_ready_fixture(leader, member)
+        self._seed_root_wallet(leader, 10)  # entryFeeRootAtomic = 25
+
+        with self.assertRaises(MissionEngineError) as captured:
+            mark_ready_entrypoint(leader, session_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "Недостаточно ROOT для взятия миссии.",
+        )
+
+    def test_ready_missing_required_item_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, _ = self._make_ready_fixture(leader, member)
+        self._seed_root_wallet(leader, 100)  # ключа нет → 409
+
+        with self.assertRaises(MissionEngineError) as captured:
+            mark_ready_entrypoint(leader, session_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "Недостаточно ключей для взятия миссии.",
+        )
+
+    def test_ready_first_of_two_stays_collecting(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, item_id = self._make_ready_fixture(leader, member)
+        self._seed_item(item_id)
+        self._seed_root_wallet(leader, 100)
+        self._seed_key(leader, item_id, 1)
+
+        result = mark_ready_entrypoint(leader, session_id)
+
+        self.assertEqual(result["status"], "collecting")
+
+    def test_ready_last_member_transitions_to_ready_to_start(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, item_id = self._make_ready_fixture(leader, member)
+        self._seed_item(item_id)
+        self._seed_root_wallet(leader, 100)
+        self._seed_key(leader, item_id, 1)
+        self._seed_root_wallet(member, 100)
+        self._seed_key(member, item_id, 1)
+
+        mark_ready_entrypoint(leader, session_id)
+        result = mark_ready_entrypoint(member, session_id)
+
+        self.assertEqual(result["status"], "ready_to_start")
+
+    def test_ready_after_leaving_team_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, _ = self._make_ready_fixture(leader, member)
+        self._set_team_member_status(leader, "left")
+
+        with self.assertRaises(MissionEngineError) as captured:
+            mark_ready_entrypoint(leader, session_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Вы больше не в команде.")
+
+
+    # ---- 7.1.e: activate ------------------------------------------------
+    def test_activate_by_leader_succeeds(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id, _ = self._make_activation_fixture(leader, member)
+
+        result = activate_session_entrypoint(leader, session_id)
+
+        self.assertEqual(result["status"], "active")
+        self.assertIsNotNone(result["started_at"])
+
+        from app.geo_team_runtime_models import TeamSession
+
+        with self.SessionLocal() as session:
+            team_session = session.get(TeamSession, session_id)
+            self.assertEqual(team_session.status, "active")
+            self.assertIsNotNone(team_session.started_at)
+
+    def test_activate_by_non_leader_returns_403(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id, _ = self._make_activation_fixture(leader, member)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            activate_session_entrypoint(member, session_id)
+
+        self.assertEqual(captured.exception.status_code, 403)
+        self.assertEqual(
+            captured.exception.detail, "Активировать сессию может только лидер."
+        )
+
+    def test_activate_not_ready_to_start_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, _ = self._make_ready_fixture(leader, member)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            activate_session_entrypoint(leader, session_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail, "Сессия ещё не готова к старту."
+        )
+
+    def test_activate_without_fresh_proof_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, item_id = self._make_ready_fixture(leader, member)
+        self._seed_item(item_id)
+        self._seed_root_wallet(leader, 100)
+        self._seed_key(leader, item_id, 1)
+        self._seed_root_wallet(member, 100)
+        self._seed_key(member, item_id, 1)
+
+        mark_ready_entrypoint(leader, session_id)
+        mark_ready_entrypoint(member, session_id)  # -> ready_to_start
+
+        # Verified proof только у лидера; у участника proof'а нет -> 409.
+        from app.geo_team_runtime_models import LocationProof, TeamSession
+        from app.models import Mission
+
+        with self.SessionLocal.begin() as session:
+            team_session = session.get(TeamSession, session_id)
+            mission = session.get(Mission, team_session.mission_id)
+            config = mission.validation_config
+            zone_id = config["geo"]["zoneId"]
+            freshness = config["geo"]["proofFreshnessSeconds"]
+            session.add(
+                LocationProof(
+                    id=f"location-proof-{uuid.uuid4().hex}",
+                    player_id=leader,
+                    provider="dev_mock",
+                    status="verified",
+                    zone_id=zone_id,
+                    verifier_reference=None,
+                    issued_at=datetime.now(timezone.utc),
+                    expires_at=(
+                        datetime.now(timezone.utc)
+                        + timedelta(seconds=freshness)
+                    ),
+                )
+            )
+
+        with self.assertRaises(MissionEngineError) as captured:
+            activate_session_entrypoint(leader, session_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "Не у всех участников свежая отметка присутствия.",
+        )
+
+    def test_activate_with_expired_proof_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id, zone_id = self._make_activation_fixture(leader, member)
+
+        # Протухаем proof участника - expires_at в прошлом.
+        from app.geo_team_runtime_models import LocationProof
+
+        with self.SessionLocal.begin() as session:
+            proof = session.scalar(
+                select(LocationProof).where(
+                    LocationProof.player_id == member,
+                    LocationProof.zone_id == zone_id,
+                ))
+            proof.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            activate_session_entrypoint(leader, session_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "Не у всех участников свежая отметка присутствия.",
+        )
+
+    def test_submit_location_inside_zone_creates_verified_proof(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id, zone_id = self._make_location_fixture(leader, member)
+
+        result = submit_location_entrypoint(
+            leader, session_id, 55.7558, 37.6173, 10.0,
+        )
+
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["sessionId"], session_id)
+        self.assertEqual(result["zoneId"], zone_id)
+        self.assertIsNotNone(result["expiresAt"])
+
+        from app.geo_team_runtime_models import LocationProof
+
+        with self.SessionLocal() as session:
+
+            proof = session.scalar(
+                select(LocationProof).where(
+                    LocationProof.player_id == leader,
+                    LocationProof.zone_id == zone_id,
+                ))
+
+            self.assertEqual(proof.status, "verified")
+            self.assertEqual(proof.provider, "dev_mock")
+            self.assertIsNone(proof.verifier_reference)
+            self.assertIsNotNone(proof.expires_at)
+
+        # Session/member status stays unchanged (? 7.1.e).
+        member_row = self._get_member(session_id, leader)
+        self.assertEqual(member_row.status, "joined")
+
+
+    def test_submit_location_outside_zone_creates_rejected_proof(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id, zone_id = self._make_location_fixture(leader, member)
+
+        result = submit_location_entrypoint(
+            leader, session_id, 65.7558, 37.6173, 10.0,
+        )
+
+        self.assertFalse(result["verified"])
+
+        from app.geo_team_runtime_models import LocationProof
+
+        with self.SessionLocal() as session:
+
+            proof = session.scalar(
+                select(LocationProof).where(
+                    LocationProof.player_id == leader,
+                ))
+            self.assertEqual(proof.status, "rejected")
+            self.assertEqual(proof.zone_id, zone_id)
+
+    def test_submit_location_not_member_returns_404(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id, _ = self._make_location_fixture(leader, member)
+        outsider = self._make_player()
+
+        with self.assertRaises(MissionEngineError) as captured:
+            submit_location_entrypoint(outsider, session_id, 55.7558, 37.6173, 10.0)
+
+        self.assertEqual(captured.exception.status_code, 404)
+        self.assertEqual(captured.exception.detail, "Вы не участник этой сессии.")
+
+    def test_submit_location_after_left_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id, _ = self._make_location_fixture(leader, member)
+        self._set_member_status(session_id, leader, "left")
+
+        with self.assertRaises(MissionEngineError) as captured:
+            submit_location_entrypoint(leader, session_id, 55.7558, 37.6173, 10.0)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Вы больше не в сессии.")
+
+    def test_submit_location_unknown_zone_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        self._make_team(leader, [member])
+        config = valid_team_config()
+        config["geo"]["zoneId"] = "zone-does-not-exist"
+        mission_id = self._make_team_mission(validation_config=config)
+        session_id = create_team_session_entrypoint(leader, mission_id)["id"]
+
+        with self.assertRaises(MissionEngineError) as captured:
+            submit_location_entrypoint(leader, session_id, 55.7558, 37.6173, 10.0)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Геозона недоступна.")
+
+    def test_submit_location_unknown_session_returns_404(self) -> None:
+        player_id = self._make_player()
+
+        with self.assertRaises(MissionEngineError) as captured:
+            submit_location_entrypoint(player_id, f"session-{uuid.uuid4().hex}", 55.7558, 37.6173, 10.0)
+
+        self.assertEqual(captured.exception.status_code, 404)
+        self.assertEqual(captured.exception.detail, "Командная сессия не найдена.")
+
+
+    # ---- 7.1.f-1: submit_answer (MVP, без валидации и наград) -----------
+
+    def test_submit_answer_marks_mission_run_succeeded(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id = self._make_active_session_fixture(leader, member)
+
+        result = submit_answer_entrypoint(leader, session_id, "test-answer")
+
+        self.assertEqual(result["sessionId"], session_id)
+        self.assertIsNotNone(result["missionRunId"])
+        self.assertEqual(result["status"], "succeeded")
+        self.assertIsNotNone(result["terminalAt"])
+
+        from app.geo_team_runtime_models import MissionRun
+
+        member_row = self._get_member(session_id, leader)
+        with self.SessionLocal() as session:
+            mission_run = session.get(MissionRun, member_row.mission_run_id)
+            self.assertEqual(mission_run.status, "succeeded")
+            self.assertIsNotNone(mission_run.terminal_at)
+
+    def test_submit_answer_unknown_session_returns_404(self) -> None:
+        player_id = self._make_player()
+
+        with self.assertRaises(MissionEngineError) as captured:
+            submit_answer_entrypoint(
+                player_id, f"session-{uuid.uuid4().hex}", "test-answer"
+            )
+
+        self.assertEqual(captured.exception.status_code, 404)
+        self.assertEqual(captured.exception.detail, "Командная сессия не найдена.")
+
+    def test_submit_answer_not_member_returns_404(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        outsider = self._make_player()
+        session_id = self._make_active_session_fixture(leader, member)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            submit_answer_entrypoint(outsider, session_id, "test-answer")
+
+        self.assertEqual(captured.exception.status_code, 404)
+        self.assertEqual(captured.exception.detail, "Вы не участник этой сессии.")
+
+    def test_submit_answer_session_not_active_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        _, session_id, _ = self._make_ready_fixture(leader, member)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            submit_answer_entrypoint(leader, session_id, "test-answer")
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Сессия не активна.")
+
+    def test_submit_answer_already_terminal_returns_409(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id = self._make_active_session_fixture(leader, member)
+
+        from app.geo_team_runtime_models import MissionRun
+
+        member_row = self._get_member(session_id, leader)
+        with self.SessionLocal.begin() as session:
+            mission_run = session.get(MissionRun, member_row.mission_run_id)
+            mission_run.status = "succeeded"
+
+        with self.assertRaises(MissionEngineError) as captured:
+            submit_answer_entrypoint(leader, session_id, "test-answer")
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Вы уже завершили миссию.")
+
+
+class OpenAPIContractTests(unittest.TestCase):
+    """Защита: OpenAPI строится без PydanticUserError.
+
+    Ловит отсутствующие Pydantic-схемы, на которые ссылаются роуты,
+    но которые забыли определить (from __future__ import annotations
+    маскирует это на этапе ast.parse).
+    """
+
+    def test_openapi_schema_builds_without_errors(self) -> None:
+        from app.main import app
+
+        schema = app.openapi()
+        self.assertIn("paths", schema)
+
+        # Дополнительно: ключевые team-missions роуты присутствуют в схеме.
+        paths = schema["paths"]
+        for expected in (
+            "/api/v1/engine/team-missions/sessions",
+            "/api/v1/engine/team-missions/sessions/me",
+            "/api/v1/engine/team-missions/sessions/{session_id}/ready",
+            "/api/v1/engine/team-missions/sessions/{session_id}/location",
+            "/api/v1/engine/team-missions/sessions/{session_id}/activate",
+            "/api/v1/engine/team-missions/sessions/{session_id}/submit",
+        ):
+            message = "роут отсутствует в OpenAPI: {0}".format(expected)
+            self.assertIn(expected, paths, message)
 
 
 if __name__ == "__main__":

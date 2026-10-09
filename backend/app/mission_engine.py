@@ -493,33 +493,53 @@ def _award_mission_rewards(
     }
 
 
-def _consume_entry_resources(
+def _apply_entry_debit(
     session: Session,
+    *,
     player_id: str,
     mission: Mission,
-    player_mission: PlayerMission,
+    root_debit: int,
+    requirements: list[dict],
+    reference_id: str,
+    mission_run_id: str | None = None,
 ) -> None:
-    """Атомарно списать ROOT-взнос и расходуемые ключи при взятии миссии.
+    """Ядро списания entry-ресурсов (ROOT + расходуемые ключи).
 
-    - Нет published policy (legacy-миссия) — вернуться без действий и логов.
-    - Порядок: 1) баланс ROOT, 2) наличие/количество PlayerItem,
-      3) Item.status == published, 4) debit ROOT, 5) списание ключей.
-    - amount в WalletTransaction всегда положительный, направление задаёт
-      transaction_type ("debit"). balance_after = баланс после списания.
-    - Идемпотентность: повторный вход видит существующий WalletTransaction
-      (миссия уже оплачена) или InventoryEvent (ключ уже списан) и не пишет
-      дубликат; на гонки работает уникальный индекс + retry-цикл submit_mission.
-    - player_mission зарезервирован под Stage 5 (snapshot/run) и в v1 не читается.
-    - Любая ошибка всплывает MissionEngineError → транзакция откатывается целиком.
+    Источник правил — вызывающий код:
+    - solo-путь: _consume_entry_resources читает policy;
+    - team-путь: team_missions_service читает validation_config.economy.
+
+    Идемпотентность:
+    - ROOT: unique (wallet_id, reference_type=ENTRY_DEBIT_REFERENCE_TYPE,
+      reference_id=reference_id);
+    - Ключи: unique (player_item_id, event_type=ENTRY_ITEM_EVENT_TYPE,
+      reference_type=ENTRY_ITEM_REFERENCE_TYPE, reference_id=reference_id).
+
+    reference_id:
+    - solo → mission.id
+    - team → team_session.id
+
+    Порядок: 1) баланс ROOT, 2) наличие/количество PlayerItem,
+    3) Item.status == published, 4) debit ROOT, 5) списание ключей.
+    amount в WalletTransaction всегда положительный, направление задаёт
+    transaction_type ("debit"). balance_after = баланс после списания.
+    Любая ошибка всплывает MissionEngineError → транзакция откатывается целиком.
+
+    policy (если есть) ищется только для audit-метаданных
+    (policyId/policyVersion); правила списания приходят от вызывающего кода.
     """
-    policy = _get_published_runtime_policy(session, mission.id)
-    if policy is None:
-        return
-
-    requirements = policy.required_items_json.get("items", [])
-    root_debit = policy.entry_root_atomic
-
     wallet = _get_or_create_root_wallet(session, player_id)
+
+    metadata: dict = {
+        "missionId": mission.id,
+        "missionSlug": mission.slug,
+    }
+    policy = _get_published_runtime_policy(session, mission.id)
+    if policy is not None:
+        metadata["policyId"] = policy.id
+        metadata["policyVersion"] = policy.version
+    if mission_run_id is not None:
+        metadata["missionRunId"] = mission_run_id
 
     # 1. ROOT: вход запрещён, пока не хватает баланса.
     if root_debit > 0 and wallet.available_balance < root_debit:
@@ -556,7 +576,7 @@ def _consume_entry_resources(
             select(WalletTransaction.id).where(
                 WalletTransaction.wallet_id == wallet.id,
                 WalletTransaction.reference_type == ENTRY_DEBIT_REFERENCE_TYPE,
-                WalletTransaction.reference_id == mission.id,
+                WalletTransaction.reference_id == reference_id,
             )
         )
         if existing_debit is None:
@@ -570,13 +590,8 @@ def _consume_entry_resources(
                     transaction_type="debit",
                     reason=f"Mission entry debit: {mission.slug}",
                     reference_type=ENTRY_DEBIT_REFERENCE_TYPE,
-                    reference_id=mission.id,
-                    metadata_json={
-                        "missionId": mission.id,
-                        "missionSlug": mission.slug,
-                        "policyId": policy.id,
-                        "policyVersion": policy.version,
-                    },
+                    reference_id=reference_id,
+                    metadata_json=metadata,
                 )
             )
 
@@ -599,7 +614,7 @@ def _consume_entry_resources(
                 InventoryEvent.player_item_id == player_item.id,
                 InventoryEvent.event_type == ENTRY_ITEM_EVENT_TYPE,
                 InventoryEvent.reference_type == ENTRY_ITEM_REFERENCE_TYPE,
-                InventoryEvent.reference_id == mission.id,
+                InventoryEvent.reference_id == reference_id,
             )
         )
         if existing_event is not None:
@@ -610,18 +625,14 @@ def _consume_entry_resources(
             InventoryEvent(
                 id=_new_id("inventory-event"),
                 player_item_id=player_item.id,
-                # Stage 5: ссылка на MissionRun появится вместе с run-таблицами.
-                mission_run_id=None,
+                mission_run_id=mission_run_id,
                 event_type=ENTRY_ITEM_EVENT_TYPE,
                 quantity_delta=-required_quantity,
                 reference_type=ENTRY_ITEM_REFERENCE_TYPE,
-                reference_id=mission.id,
+                reference_id=reference_id,
                 metadata_json={
-                    "missionId": mission.id,
-                    "missionSlug": mission.slug,
+                    **metadata,
                     "itemId": item_id,
-                    "policyId": policy.id,
-                    "policyVersion": policy.version,
                 },
             )
         )
@@ -629,6 +640,31 @@ def _consume_entry_resources(
     # Явный flush: поверхность ошибок идемпотентности до commit,
     # чтобы retry-цикл submit_mission увидел IntegrityError без частичных записей.
     session.flush()
+
+
+def _consume_entry_resources(
+    session: Session,
+    player_id: str,
+    mission: Mission,
+    player_mission: PlayerMission,
+) -> None:
+    """Solo-обёртка над _apply_entry_debit (источник — runtime policy)."""
+    policy = _get_published_runtime_policy(session, mission.id)
+    if policy is None:
+        return
+
+    requirements = policy.required_items_json.get("items", [])
+    root_debit = policy.entry_root_atomic
+
+    _apply_entry_debit(
+        session,
+        player_id=player_id,
+        mission=mission,
+        root_debit=root_debit,
+        requirements=requirements,
+        reference_id=mission.id,
+        mission_run_id=None,
+    )
 
 
 def _submit_mission_once(
