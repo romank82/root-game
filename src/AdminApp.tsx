@@ -23,6 +23,7 @@ import {
   updateAdminMission,
   updateKeyRule,
   updateSystemSetting,
+  upsertMissionRuntimePolicy,
   PERMISSION_CATALOG,
   type AdminMission,
   type AdminMissionPayload,
@@ -206,6 +207,11 @@ function AdminApp() {
   const [loadingKeyItems, setLoadingKeyItems] = useState(false)
   const [missionPolicy, setMissionPolicy] = useState<MissionRuntimePolicy | null>(null)
   const [loadingMissionPolicy, setLoadingMissionPolicy] = useState(false)
+  const [policyFee, setPolicyFee] = useState('0')
+  const [policyItems, setPolicyItems] = useState<Array<{ itemId: string; quantity: string }>>([])
+  const [savingPolicy, setSavingPolicy] = useState(false)
+  const [policyError, setPolicyError] = useState<string | null>(null)
+  const [policyNotice, setPolicyNotice] = useState<string | null>(null)
   const [selectedKeyRuleId, setSelectedKeyRuleId] = useState<string | null>(null)
   const [loadingKeyRules, setLoadingKeyRules] = useState(false)
   const [keyRulesError, setKeyRulesError] = useState<string | null>(null)
@@ -421,13 +427,29 @@ function AdminApp() {
   useEffect(() => {
     if (selectedId === null) {
       setMissionPolicy(null)
+      setPolicyFee('0')
+      setPolicyItems([])
+      setPolicyError(null)
+      setPolicyNotice(null)
       return
     }
     let cancelled = false
     setLoadingMissionPolicy(true)
     getMissionRuntimePolicyByMission(selectedId)
       .then((p) => {
-        if (!cancelled) setMissionPolicy(p)
+        if (!cancelled) {
+          setMissionPolicy(p)
+          if (p) {
+            setPolicyFee(String(p.entryRootAtomic))
+            const items = ((p.requiredItemsJson as { items?: Array<{ itemId: string; quantity: number }> }).items ?? [])
+            setPolicyItems(items.map((it) => ({ itemId: it.itemId, quantity: String(it.quantity) })))
+          } else {
+            setPolicyFee('0')
+            setPolicyItems([])
+          }
+          setPolicyError(null)
+          setPolicyNotice(null)
+        }
       })
       .catch(() => {
         if (!cancelled) setMissionPolicy(null)
@@ -534,6 +556,46 @@ function AdminApp() {
       setSavingKeyError((err as Error).message)
     } finally {
       setSavingKey(false)
+    }
+  }
+
+  async function handleSavePolicy() {
+    if (selectedId === null) return
+    const fee = Number.parseInt(policyFee, 10)
+    if (!Number.isFinite(fee) || fee < 0) {
+      setPolicyError('Цена входа должна быть неотрицательным целым.')
+      return
+    }
+    const items: Array<{ itemId: string; quantity: number }> = []
+    const seen = new Set<string>()
+    for (const raw of policyItems) {
+      if (!raw.itemId) continue
+      if (seen.has(raw.itemId)) {
+        setPolicyError('Ключи не должны повторяться.')
+        return
+      }
+      const q = Number.parseInt(raw.quantity, 10)
+      if (!Number.isFinite(q) || q < 1) {
+        setPolicyError('Количество ключа — целое число ≥ 1.')
+        return
+      }
+      seen.add(raw.itemId)
+      items.push({ itemId: raw.itemId, quantity: q })
+    }
+    setSavingPolicy(true)
+    setPolicyError(null)
+    setPolicyNotice(null)
+    try {
+      const saved = await upsertMissionRuntimePolicy(selectedId, {
+        entry_root_atomic: fee,
+        required_items_json: { schemaVersion: 1, items },
+      })
+      setMissionPolicy(saved)
+      setPolicyNotice('Сохранено.')
+    } catch (err) {
+      setPolicyError((err as Error).message)
+    } finally {
+      setSavingPolicy(false)
     }
   }
 
@@ -1162,52 +1224,93 @@ function AdminApp() {
               <p className="admin-muted">Загрузка правил…</p>
             )}
 
-            {!loadingMissionPolicy && missionPolicy === null && (
-              <p className="admin-muted">
-                Правила входа не настроены. Миссия бесплатная.
-                Редактирование — в шаге 2b-2.
-              </p>
-            )}
-
-            {!loadingMissionPolicy && missionPolicy !== null && (
+            {!loadingMissionPolicy && (
               <>
-                <p className="admin-muted">
-                  <b>Цена входа:</b>{' '}
-                  {missionPolicy.entryRootAtomic} ROOT
-                </p>
+                {policyError && <p className="admin-alert admin-error">{policyError}</p>}
+                {policyNotice && <p className="admin-alert admin-notice">{policyNotice}</p>}
 
-                <p className="admin-muted">
-                  <b>Требуемые ключи:</b>
-                </p>
-                {(() => {
-                  const items =
-                    (missionPolicy.requiredItemsJson as { items?: Array<{
-                      itemId: string; quantity: number }> })
-                      .items ?? []
-                  if (items.length === 0) {
-                    return <p className="admin-muted">Не требуются.</p>
-                  }
-                  return (
-                    <ul className="admin-required-items">
-                      {items.map((it, idx) => {
-                        const key = keyItems.find((k) => k.id === it.itemId)
-                        return (
-                          <li key={idx}>
-                            {key
-                              ? `${key.symbol ?? ''} ${key.title} · ${key.code}`
-                              : `(не найден: ${it.itemId})`}
-                            {' × '}
-                            {it.quantity}
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )
-                })()}
+                {missionPolicy !== null && (
+                  <p className="admin-muted" style={{ marginBottom: 10 }}>
+                    Правила входа уже сохранены для этой миссии.
+                  </p>
+                )}
 
-                <p className="admin-muted" style={{ marginTop: 12 }}>
-                  Редактирование — в шаге 2b-2.
-                </p>
+                <label className="admin-field">
+                  <span>Цена входа (ROOT)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={policyFee}
+                    onChange={(e) => setPolicyFee(e.target.value)}
+                    disabled={savingPolicy}
+                  />
+                </label>
+
+                <label className="admin-field">
+                  <span>Требуемые ключи</span>
+                </label>
+
+                <div className="admin-required-items-edit">
+                  {policyItems.map((row, idx) => (
+                    <div className="admin-required-item-row" key={idx}>
+                      <select
+                        value={row.itemId}
+                        onChange={(e) => {
+                          const next = [...policyItems]
+                          next[idx] = { ...next[idx], itemId: e.target.value }
+                          setPolicyItems(next)
+                        }}
+                        disabled={savingPolicy}
+                      >
+                        <option value="">— выберите ключ —</option>
+                        {keyItems.map((k) => (
+                          <option key={k.id} value={k.id}>
+                            {k.symbol ? `${k.symbol} ` : ''}{k.title} · {k.code}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min={1}
+                        value={row.quantity}
+                        onChange={(e) => {
+                          const next = [...policyItems]
+                          next[idx] = { ...next[idx], quantity: e.target.value }
+                          setPolicyItems(next)
+                        }}
+                        disabled={savingPolicy}
+                        placeholder="шт"
+                      />
+                      <button
+                        type="button"
+                        className="admin-multiplier-remove"
+                        onClick={() => setPolicyItems(policyItems.filter((_, i) => i !== idx))}
+                        disabled={savingPolicy}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    className="admin-multiplier-add"
+                    onClick={() => setPolicyItems([...policyItems, { itemId: '', quantity: '1' }])}
+                    disabled={savingPolicy || keyItems.length === 0}
+                  >
+                    + Добавить ключ
+                  </button>
+                </div>
+
+                <div className="admin-actions" style={{ marginTop: 16 }}>
+                  <button
+                    className="admin-primary"
+                    onClick={handleSavePolicy}
+                    disabled={savingPolicy}
+                  >
+                    {savingPolicy ? 'Сохранение…' : 'Сохранить'}
+                  </button>
+                </div>
               </>
             )}
           </section>

@@ -614,3 +614,28 @@
   color: rgba(223, 248, 235, 0.85);
   font-size: 13px;
 }
+.admin-required-items-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.admin-required-item-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-required-item-row select {
+  flex: 1;
+  background: rgba(7, 16, 15, 0.6);
+  border: 1px solid rgba(190, 255, 226, 0.16);
+  color: #dff8eb;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.admin-required-item-row input[type="number"] {
+  width: 80px;
+}
