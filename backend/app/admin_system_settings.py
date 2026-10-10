@@ -318,6 +318,8 @@ def update_non_sensitive_system_setting(
 
     Sensitive changes intentionally use a dedicated approval-backed executor,
     implemented separately. This endpoint never creates or executes approvals.
+    Sensitive settings: super-admin updates directly (with audit);
+    other admins must use the approval workflow.
     """
     definition = get_definition(key)
     if definition is None:
@@ -326,7 +328,7 @@ def update_non_sensitive_system_setting(
             detail="Системная настройка не найдена в утверждённом каталоге.",
         )
 
-    if definition.is_sensitive:
+    if definition.is_sensitive and not actor.is_super_admin:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
