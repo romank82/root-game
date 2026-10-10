@@ -17,6 +17,7 @@ from app.geo_team_contract import (
     GeoTeamConfigurationError,
     validate_team_mission_validation_config,
 )
+from app.mission_categories import is_valid_category
 from app.models import (
     AdminAuditLog,
     AdminUser,
@@ -59,6 +60,15 @@ def _validate_team_mission_config(validation_config: Any) -> None:
         ) from exc
 
 
+def _validate_mission_category(value: str) -> None:
+    """Reject an unknown participation category before it reaches the model."""
+    if not is_valid_category(value):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Неизвестная категория миссии.",
+        )
+
+
 class AdminMissionRewardPayload(BaseModel):
     reward_type: str = Field(min_length=1, max_length=64)
     amount: int | None = Field(default=None, ge=1, le=1_000_000)
@@ -73,6 +83,7 @@ class AdminMissionCreatePayload(BaseModel):
     story_node_id: str | None = Field(default=None, max_length=64)
     slug: str = Field(min_length=3, max_length=128)
     mission_type: str = Field(min_length=1, max_length=64)
+    mission_category: str = Field(default="solo", min_length=1, max_length=32)
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
     content: dict[str, Any] = Field(default_factory=dict)
@@ -86,6 +97,7 @@ class AdminMissionUpdatePayload(BaseModel):
     story_node_id: str | None = Field(default=None, max_length=64)
     slug: str | None = Field(default=None, min_length=3, max_length=128)
     mission_type: str | None = Field(default=None, min_length=1, max_length=64)
+    mission_category: str | None = Field(default=None, max_length=32)
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
     content: dict[str, Any] | None = None
@@ -131,6 +143,7 @@ def _serialize_mission(
         "storyNodeId": mission.story_node_id,
         "slug": mission.slug,
         "missionType": mission.mission_type,
+        "missionCategory": mission.mission_category,
         "title": mission.title,
         "description": mission.description,
         "content": mission.content,
@@ -420,6 +433,7 @@ def create_admin_mission(
             story_node_id=payload.story_node_id,
         )
         _validate_rewards(session, payload.rewards)
+        _validate_mission_category(payload.mission_category)
 
         mission = Mission(
             id=_new_id("mission"),
@@ -427,6 +441,7 @@ def create_admin_mission(
             story_node_id=payload.story_node_id,
             slug=slug,
             mission_type=payload.mission_type.strip(),
+            mission_category=payload.mission_category,
             title=payload.title.strip(),
             description=payload.description.strip() if payload.description else None,
             content=payload.content,
@@ -512,6 +527,13 @@ def update_admin_mission(
             chapter_id=mission.chapter_id,
             story_node_id=mission.story_node_id,
         )
+
+        if "mission_category" in updates:
+            category_value = updates["mission_category"]
+            if category_value is not None:
+                _validate_mission_category(category_value)
+                mission.mission_category = category_value
+                changed_fields.append("missionCategory")
 
         scalar_fields = {
             "mission_type": "missionType",

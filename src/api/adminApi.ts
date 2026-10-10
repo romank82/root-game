@@ -25,6 +25,7 @@ export type AdminMission = {
   storyNodeId: string | null
   slug: string
   missionType: string
+  missionCategory: string
   title: string
   description: string | null
   content: Record<string, unknown>
@@ -41,6 +42,7 @@ export type AdminMissionPayload = {
   story_node_id?: string | null
   slug: string
   mission_type: string
+  mission_category?: string
   title: string
   description?: string | null
   content?: Record<string, unknown>

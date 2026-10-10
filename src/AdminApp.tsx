@@ -47,6 +47,7 @@ type MissionForm = {
   storyNodeId: string
   slug: string
   missionType: string
+  missionCategory: string
   title: string
   description: string
   content: string
@@ -69,6 +70,7 @@ const emptyForm = (): MissionForm => ({
   storyNodeId: '',
   slug: '',
   missionType: 'text_answer',
+  missionCategory: 'solo',
   title: '',
   description: '',
   content: '{}',
@@ -88,6 +90,7 @@ function formFromMission(mission: AdminMission): MissionForm {
     storyNodeId: mission.storyNodeId ?? '',
     slug: mission.slug,
     missionType: mission.missionType,
+    missionCategory: mission.missionCategory ?? 'solo',
     title: mission.title,
     description: mission.description ?? '',
     content: prettyJson(mission.content),
@@ -135,6 +138,7 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     story_node_id: form.storyNodeId.trim() || null,
     slug: form.slug.trim(),
     mission_type: form.missionType.trim(),
+    mission_category: form.missionCategory,
     title: form.title.trim(),
     description: form.description.trim() || null,
     content: parseObject(form.content, 'Content'),
@@ -1029,14 +1033,39 @@ function AdminApp() {
             </label>
 
             <label>
-              Тип миссии *
-              <input
+              Формат (как решает игрок)
+              <select
                 value={form.missionType}
                 disabled={!canWrite}
                 onChange={(event) =>
                   setForm({ ...form, missionType: event.target.value })
                 }
-              />
+              >
+                <option value="text_answer">
+                  text_answer — текстовый ответ
+                </option>
+                <option value="code_repair">
+                  code_repair — восстановить код
+                </option>
+                <option value="cipher">cipher — расшифровка (командные)</option>
+                <option value="team">team — командная миссия</option>
+              </select>
+            </label>
+
+            <label>
+              Категория (кто участвует)
+              <select
+                value={form.missionCategory}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, missionCategory: event.target.value })
+                }
+              >
+                <option value="solo">solo — один игрок</option>
+                <option value="team">team — команда</option>
+                <option value="race">race — гонка (первый победил)</option>
+                <option value="co-op">co-op — кооператив</option>
+              </select>
             </label>
 
             <label className="admin-span-2">
