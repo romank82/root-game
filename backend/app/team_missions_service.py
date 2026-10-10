@@ -686,10 +686,11 @@ def _submit_answer(
     session_id: str,
     answer: str | None,
 ) -> dict:
-    """MVP: игрок отправляет ответ → MissionRun.status='succeeded'.
+    """Игрок отправляет ответ → MissionRun.status='succeeded' + награды.
 
-    Без валидации (валидация — отдельный шаг, cipher).
-    Без наград (награды — 7.1.f-2).
+    Без валидации ответа (валидация — отдельный шаг, cipher).
+    Награды начисляются по MissionReward миссии, идемпотентная привязка
+    проводок — team_session.id (один раз на сессию на игрока).
     """
     from app.geo_team_contract import (
         GeoTeamConfigurationError,
@@ -746,12 +747,22 @@ def _submit_answer(
     except GeoTeamConfigurationError:
         raise _mission_error(409, "Конфигурация командной миссии невалидна.")
 
-    # Действие (MVP): переход MissionRun в 'succeeded'.
+    # Действие: переход MissionRun в 'succeeded' + награды за сессию.
     # НЕ трогаем TeamSession.status (переход сессии — 7.1.g).
-    # НЕ начисляем награды (7.1.f-2).
-    # НЕ валидируем answer (он принимается в API, но пока игнорируется).
+    # НЕ валидируем answer (валидация — отдельный шаг, cipher).
+    from app.mission_engine import _award_mission_rewards
+
     mission_run.status = "succeeded"
     mission_run.terminal_at = _utcnow()
+    session.flush()
+
+    awarded = _award_mission_rewards(
+        session,
+        player_id,
+        mission,
+        reference_id=team_session.id,
+        mission_run_id=mission_run.id,
+    )
     session.flush()
 
     return {
@@ -759,6 +770,7 @@ def _submit_answer(
         "missionRunId": mission_run.id,
         "status": "succeeded",
         "terminalAt": mission_run.terminal_at.isoformat(),
+        "awarded": awarded,
     }
 
 

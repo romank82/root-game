@@ -384,13 +384,26 @@ def _award_mission_rewards(
     session: Session,
     player_id: str,
     mission: Mission,
+    *,
+    reference_id: str | None = None,
+    mission_run_id: str | None = None,
 ) -> dict:
     """
     Выдаёт награды в той же транзакции, что и completion миссии.
 
     ROOT защищён на уровне БД уникальным индексом:
     wallet_id + reference_type + reference_id.
+
+    reference_id — чем помечаем проводку: для solo это миссия
+    (mission.id), для team — сессия (team_session.id), чтобы одну
+    командную миссию можно было награждать в каждой новой сессии.
+    По умолчанию mission.id (solo, поведение не меняется).
+
+    mission_run_id — линк на MissionRun (для team), для solo None;
+    при непустом значении попадает в metadata_json credit-проводки.
     """
+    if reference_id is None:
+        reference_id = mission.id
     rewards = session.scalars(
         select(MissionReward)
         .where(MissionReward.mission_id == mission.id)
@@ -413,7 +426,7 @@ def _award_mission_rewards(
                 select(WalletTransaction).where(
                     WalletTransaction.wallet_id == wallet.id,
                     WalletTransaction.reference_type == "mission_reward",
-                    WalletTransaction.reference_id == mission.id,
+                    WalletTransaction.reference_id == reference_id,
                 )
             )
 
@@ -422,6 +435,14 @@ def _award_mission_rewards(
 
             wallet.available_balance += reward.amount
             awarded_root += reward.amount
+
+            metadata_json: dict = {
+                "missionId": mission.id,
+                "missionSlug": mission.slug,
+                "rewardId": reward.id,
+            }
+            if mission_run_id is not None:
+                metadata_json["missionRunId"] = mission_run_id
 
             session.add(
                 WalletTransaction(
@@ -432,12 +453,8 @@ def _award_mission_rewards(
                     transaction_type="credit",
                     reason=f"Mission reward: {mission.slug}",
                     reference_type="mission_reward",
-                    reference_id=mission.id,
-                    metadata_json={
-                        "missionId": mission.id,
-                        "missionSlug": mission.slug,
-                        "rewardId": reward.id,
-                    },
+                    reference_id=reference_id,
+                    metadata_json=metadata_json,
                 )
             )
 
@@ -466,7 +483,7 @@ def _award_mission_rewards(
                     item_id=reward.item_id,
                     quantity=quantity,
                     obtained_from_type="mission",
-                    obtained_from_id=mission.id,
+                    obtained_from_id=reference_id,
                 )
                 session.add(player_item)
             else:

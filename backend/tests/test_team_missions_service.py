@@ -770,6 +770,72 @@ class TeamMissionsServiceTests(unittest.TestCase):
         activate_session_entrypoint(leader_id, session_id)
         return session_id
 
+    def _make_team_mission_with_rewards(
+        self,
+        session_id: str,
+        *,
+        root_amount: int = 10,
+        item_amount: int = 1,
+    ) -> str:
+        """Key-item + MissionReward (ROOT currency + item) на миссию сессии.
+
+        Item/KeyRules создаются как полноценный CMS-ключ; награды вешаются
+        на миссию, к которой привязана активная командная сессия.
+        Возвращает item_id награждаемого ключа.
+        """
+        from app.geo_team_runtime_models import TeamSession
+        from app.models import Item, KeyRules, MissionReward
+
+        item_id = f"item-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            team_session = session.get(TeamSession, session_id)
+            session.add(
+                Item(
+                    id=item_id,
+                    slug=f"slug-{item_id}-{uuid.uuid4().hex[:8]}",
+                    code=f"CODE-{uuid.uuid4().hex[:12]}",
+                    title="Team reward key",
+                    description="Team mission reward key",
+                    symbol="★",
+                    category="key",
+                    rarity="epic",
+                    is_unique=False,
+                    content={"schemaVersion": 1},
+                    status="published",
+                )
+            )
+            session.add(
+                KeyRules(
+                    id=f"key-rules-{uuid.uuid4().hex}",
+                    item_id=item_id,
+                    is_consumable=True,
+                )
+            )
+            session.flush()
+            mission_id = team_session.mission_id
+            session.add(
+                MissionReward(
+                    id=f"reward-{uuid.uuid4().hex}",
+                    mission_id=mission_id,
+                    reward_type="currency",
+                    amount=root_amount,
+                    reward_value={"currency": "ROOT"},
+                    sort_order=1,
+                )
+            )
+            session.add(
+                MissionReward(
+                    id=f"reward-{uuid.uuid4().hex}",
+                    mission_id=mission_id,
+                    reward_type="item",
+                    item_id=item_id,
+                    amount=item_amount,
+                    reward_value={},
+                    sort_order=2,
+                )
+            )
+        return item_id
+
 
     # ---- 7.1.c: mark_ready ---------------------------------------------
 
@@ -1193,6 +1259,70 @@ class TeamMissionsServiceTests(unittest.TestCase):
 
         self.assertEqual(captured.exception.status_code, 409)
         self.assertEqual(captured.exception.detail, "Вы уже завершили миссию.")
+
+    def test_submit_answer_awards_root_and_item(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id = self._make_active_session_fixture(leader, member)
+
+        balance_before = self._root_balance(leader)
+        reward_item_id = self._make_team_mission_with_rewards(
+            session_id, root_amount=10, item_amount=1
+        )
+
+        result = submit_answer_entrypoint(leader, session_id, "test-answer")
+
+        self.assertEqual(result["status"], "succeeded")
+        awarded = result["awarded"]
+        self.assertGreater(awarded["root"], 0)
+        self.assertTrue(awarded["items"])
+        self.assertEqual(awarded["items"][0]["id"], reward_item_id)
+
+        # Кошелёк увеличен ровно на amount награды.
+        self.assertEqual(self._root_balance(leader), balance_before + 10)
+        # В инвентаре появился новый key-item.
+        self.assertEqual(self._key_quantity(leader, reward_item_id), 1)
+
+        # Проводка привязана к сессии (reference_id), а не к миссии —
+        # ту же команду можно пройти в другой сессии с новой наградой.
+        from app.models import Wallet, WalletTransaction
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == leader)
+            )
+            transactions = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_reward",
+                )
+            ).all()
+            self.assertEqual(len(transactions), 1)
+            self.assertEqual(transactions[0].reference_id, session_id)
+
+    def test_submit_answer_reward_idempotent_within_session(self) -> None:
+        leader = self._make_player()
+        member = self._make_player()
+        session_id = self._make_active_session_fixture(leader, member)
+
+        balance_before = self._root_balance(leader)
+        reward_item_id = self._make_team_mission_with_rewards(
+            session_id, root_amount=10, item_amount=1
+        )
+
+        first = submit_answer_entrypoint(leader, session_id, "test-answer")
+        self.assertEqual(first["status"], "succeeded")
+        self.assertEqual(self._root_balance(leader), balance_before + 10)
+
+        # Повторный submit в той же сессии — MissionRun уже succeeded.
+        with self.assertRaises(MissionEngineError) as captured:
+            submit_answer_entrypoint(leader, session_id, "test-answer")
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Вы уже завершили миссию.")
+        # Второй раз не начисляем ни ROOT, ни ключи.
+        self.assertEqual(self._root_balance(leader), balance_before + 10)
+        self.assertEqual(self._key_quantity(leader, reward_item_id), 1)
 
 
 class OpenAPIContractTests(unittest.TestCase):
