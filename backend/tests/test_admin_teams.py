@@ -357,6 +357,7 @@ class AdminTeamsTests(unittest.TestCase):
                 chapter_id=chapter.id,
                 slug=f"mission-{suffix}",
                 mission_type="team",
+                mission_category="team",
                 title="Team mission",
                 status="published",
                 content={},

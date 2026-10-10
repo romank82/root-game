@@ -169,7 +169,7 @@ def _validate_policy_via_contract(
     """
     try:
         return validate_runtime_policy(
-            mission_type=mission.mission_type,
+            mission_category=mission.mission_category,
             entry_root_atomic=entry_root_atomic,
             max_attempts=max_attempts,
             attempt_deadline_seconds=attempt_deadline_seconds,

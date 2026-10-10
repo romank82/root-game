@@ -26,7 +26,7 @@ from app.runtime_policy_contract import (
 
 def _policy(**overrides):
     policy = {
-        "mission_type": "solo",
+        "mission_category": "solo",
         "entry_root_atomic": 0,
         "max_attempts": 3,
         "attempt_deadline_seconds": 300,
@@ -73,6 +73,19 @@ class RuntimePolicyContractTests(unittest.TestCase):
         self.assertEqual(snapshot["fallbackPolicy"], None)
         self.assertEqual(snapshot["featureFlags"], {})
 
+    def test_all_known_mission_categories_accepted(self):
+        for category in ("solo", "team", "race", "co-op"):
+            with self.subTest(mission_category=category):
+                snapshot = validate_runtime_policy(**_policy(mission_category=category))
+                self.assertEqual(snapshot["missionType"], "solo")
+                self.assertEqual(snapshot["maxAttempts"], 3)
+
+    def test_missing_mission_category_is_legacy_allowed(self):
+        # Callers that predate the participation category do not pass it; the
+        # policy is still validated (mission_type no longer gates anything).
+        snapshot = validate_runtime_policy(**_policy(mission_category=None))
+        self.assertEqual(snapshot["missionType"], "solo")
+
     def test_validation_does_not_mutate_input(self):
         policy = _policy()
         original = copy.deepcopy(policy)
@@ -95,7 +108,8 @@ class RuntimePolicyContractTests(unittest.TestCase):
                 validate_runtime_policy(**_policy(**overrides))
 
         rejected = (
-            {"mission_type": "team"},
+            {"mission_category": "unknown"},
+            {"mission_category": 5},
             {"entry_root_atomic": -1},
             {"entry_root_atomic": 2_147_483_648},
             {"entry_root_atomic": True},

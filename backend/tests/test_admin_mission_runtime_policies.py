@@ -155,8 +155,8 @@ class MissionRuntimePolicySchemaTests(unittest.TestCase):
 class ContractViaRouterValidationTests(unittest.TestCase):
     """The router delegates full structural validation to the contract."""
 
-    def _validate(self, mission_type="solo", **overrides):
-        mission = SimpleNamespace(id="mission-1", mission_type=mission_type)
+    def _validate(self, mission_category="solo", **overrides):
+        mission = SimpleNamespace(id="mission-1", mission_category=mission_category)
         payload = _policy_dict(**overrides)
         return _validate_policy_via_contract(
             mission,
@@ -212,10 +212,18 @@ class ContractViaRouterValidationTests(unittest.TestCase):
             self._validate(reward_policy_json=reward)
         self.assertEqual(context.exception.status_code, 422)
 
-    def test_non_solo_mission_type_rejected(self):
+    def test_unknown_mission_category_rejected(self):
         with self.assertRaises(HTTPException) as context:
-            self._validate(mission_type="team")
+            self._validate(mission_category="unknown")
         self.assertEqual(context.exception.status_code, 422)
+        self.assertIn("missionCategory", str(context.exception.detail))
+
+    def test_team_category_policy_is_accepted(self):
+        # A team-category mission may carry the same entry/challenge policy:
+        # members complete the format individually. mission_type no longer gates.
+        normalized = self._validate(mission_category="team")
+        self.assertEqual(normalized["missionType"], "solo")
+        self.assertEqual(normalized["maxAttempts"], 3)
 class PublishDependencyValidationTests(unittest.TestCase):
     """Publish-time DB-backed item checks."""
 
@@ -224,7 +232,7 @@ class PublishDependencyValidationTests(unittest.TestCase):
 
         payload = _policy_dict()
         return validate_runtime_policy(
-            mission_type="solo",
+            mission_category="solo",
             entry_root_atomic=payload["entry_root_atomic"],
             max_attempts=payload["max_attempts"],
             attempt_deadline_seconds=payload["attempt_deadline_seconds"],
@@ -356,7 +364,9 @@ class MissionRuntimePolicyLifecycleIntegrationTests(unittest.TestCase):
         cls.engine.dispose()
         cls._temporary_directory.cleanup()
 
-    def _fixture(self, *, mission_type="solo", item_status="published"):
+    def _fixture(
+        self, *, mission_type="text_answer", mission_category="solo", item_status="published"
+    ):
         from app.models import AdminUser, Chapter, Item, Mission, Season
 
         suffix = uuid.uuid4().hex
@@ -398,6 +408,7 @@ class MissionRuntimePolicyLifecycleIntegrationTests(unittest.TestCase):
                     chapter_id=ids["chapter"],
                     slug=f"mission-{suffix}",
                     mission_type=mission_type,
+                    mission_category=mission_category,
                     title="Solo mission",
                     description="Isolated integration fixture",
                     content={"schemaVersion": 1},
@@ -581,17 +592,19 @@ class MissionRuntimePolicyLifecycleIntegrationTests(unittest.TestCase):
             ).all()
         self.assertEqual(len(published), 1)
 
-    def test_integration_create_for_non_solo_mission_rejected(self):
-        ids = self._fixture(mission_type="text_answer")
+    def test_integration_create_succeeds_for_text_answer_mission(self):
+        # mission_type no longer gates policy creation: a text-answer (solo)
+        # mission carries the runtime policy for its entry flow.
+        ids = self._fixture(mission_type="text_answer", mission_category="solo")
         admin = self._admin(ids["admin"])
         payload = AdminMissionRuntimePolicyCreatePayload(**self._payload_for(ids))
 
-        with self.assertRaises(HTTPException) as context:
-            create_admin_mission_runtime_policy(
-                payload, request=None, admin=admin
-            )
-        self.assertEqual(context.exception.status_code, 422)
-        self.assertIn("missionType", str(context.exception.detail))
+        created = create_admin_mission_runtime_policy(
+            payload, request=None, admin=admin
+        )["missionRuntimePolicy"]
+        self.assertEqual(created["missionId"], ids["mission"])
+        self.assertEqual(created["status"], "draft")
+        self.assertEqual(created["version"], 1)
 
 
 if __name__ == "__main__":

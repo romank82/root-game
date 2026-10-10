@@ -156,6 +156,14 @@ class Mission(TimestampMixin, Base):
     )
     slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     mission_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    mission_category: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="solo",
+        index=True,
+        comment=("Категория участия: solo / team / race / co-op. "
+                 "Определяет флоу прохождения."),
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -173,6 +181,13 @@ class Mission(TimestampMixin, Base):
         default="draft",
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        CheckConstraint(
+            "mission_category IN ('solo', 'team', 'race', 'co-op')",
+            name="ck_missions_mission_category",
+        ),
+    )
 
     segment_links: Mapped[list["SegmentMission"]] = relationship(
         "SegmentMission",

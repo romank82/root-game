@@ -29,6 +29,8 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+from app.mission_categories import is_valid_category
+
 __all__ = [
     "RuntimePolicyValidationError",
     "multiplier_scale_factor",
@@ -447,7 +449,7 @@ def validate_feature_flags(value: Any) -> dict[str, Any]:
 
 def validate_runtime_policy(
     *,
-    mission_type: Any,
+    mission_category: str | None = None,
     entry_root_atomic: Any,
     max_attempts: Any,
     attempt_deadline_seconds: Any,
@@ -458,13 +460,19 @@ def validate_runtime_policy(
     fallback_policy_json: Any,
     feature_flags_json: Any,
 ) -> dict[str, Any]:
-    """Validate one full solo policy and return its normalized snapshot form.
+    """Validate one full policy and return its normalized snapshot form.
+
+    ``mission_category`` is the participation category (solo / team / race /
+    co-op) that the policy is attached to. Every known category may carry the
+    same entry/challenge policy: team/co-op use it in individual completion,
+    solo — directly. ``None`` is accepted for legacy callers that predate the
+    category (no gate).
 
     The result uses camelCase keys, contains no database identifier, and carries
     no lifecycle state. Row status and version belong to the admin API layer.
     """
-    if mission_type != SOLO_MISSION_TYPE:
-        _fail("missionType", "policy is allowed only for mission_type = solo")
+    if mission_category is not None and not is_valid_category(mission_category):
+        _fail("missionCategory", "unknown mission_category")
 
     entry_root = _integer(
         entry_root_atomic,
