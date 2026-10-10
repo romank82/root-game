@@ -537,3 +537,95 @@ export async function createKeyItem(
   const body = (await response.json()) as { keyRule: KeyRule }
   return body.keyRule
 }
+export type MissionRuntimePolicy = {
+  id: string
+  missionId: string
+  version: number
+  status: string
+  entryRootAtomic: number
+  maxAttempts: number
+  attemptDeadlineSeconds: number
+  repeatabilityPolicy: string
+  requiredItemsJson: Record<string, unknown>
+  challengePolicyJson: Record<string, unknown>
+  rewardPolicyJson: Record<string, unknown>
+  fallbackPolicyJson: Record<string, unknown> | null
+  featureFlagsJson: Record<string, unknown>
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type CreateMissionRuntimePolicyPayload = {
+  mission_id: string
+  entry_root_atomic: number
+  max_attempts: number
+  attempt_deadline_seconds: number
+  repeatability_policy: string
+  required_items_json: Record<string, unknown>
+  challenge_policy_json: Record<string, unknown>
+  reward_policy_json: Record<string, unknown>
+  fallback_policy_json?: Record<string, unknown> | null
+  feature_flags_json?: Record<string, unknown>
+}
+
+export type UpdateMissionRuntimePolicyPayload = Partial<
+  Omit<CreateMissionRuntimePolicyPayload, 'mission_id'>
+>
+
+export async function listMissionRuntimePolicies(): Promise<
+  MissionRuntimePolicy[]
+> {
+  const response = await adminFetch('/api/v1/admin/mission-runtime-policies')
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    missionRuntimePolicies: MissionRuntimePolicy[]
+  }
+  return body.missionRuntimePolicies
+}
+
+export async function getMissionRuntimePolicy(
+  policyId: string,
+): Promise<MissionRuntimePolicy> {
+  const response = await adminFetch(
+    `/api/v1/admin/mission-runtime-policies/${encodeURIComponent(policyId)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    missionRuntimePolicy: MissionRuntimePolicy
+  }
+  return body.missionRuntimePolicy
+}
+
+export async function createMissionRuntimePolicy(
+  payload: CreateMissionRuntimePolicyPayload,
+): Promise<MissionRuntimePolicy> {
+  const response = await adminFetch('/api/v1/admin/mission-runtime-policies', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    missionRuntimePolicy: MissionRuntimePolicy
+  }
+  return body.missionRuntimePolicy
+}
+
+export async function updateMissionRuntimePolicy(
+  policyId: string,
+  payload: UpdateMissionRuntimePolicyPayload,
+): Promise<MissionRuntimePolicy> {
+  const response = await adminFetch(
+    `/api/v1/admin/mission-runtime-policies/${encodeURIComponent(policyId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    missionRuntimePolicy: MissionRuntimePolicy
+  }
+  return body.missionRuntimePolicy
+}

@@ -74,6 +74,7 @@ from app.admin_geo_zones import router as admin_geo_zones_router
 from app.admin_ar_objects import router as admin_ar_objects_router
 from app.admin_mission_runtime_policies import (
     router as admin_mission_runtime_policies_router,
+    router_missions as admin_mission_runtime_policies_missions_router,
 )
 from app.admin_system_settings import router as admin_system_settings_router
 from app.admin_players import router as admin_players_router
@@ -1037,6 +1038,7 @@ app.include_router(admin_reward_pools_router)
 app.include_router(admin_geo_zones_router)
 app.include_router(admin_ar_objects_router)
 app.include_router(admin_mission_runtime_policies_router)
+app.include_router(admin_mission_runtime_policies_missions_router)
 app.include_router(admin_system_settings_router)
 app.include_router(admin_players_router)
 app.include_router(admin_player_wallet_router)

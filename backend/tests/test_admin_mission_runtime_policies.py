@@ -27,6 +27,7 @@ from sqlalchemy.orm import sessionmaker
 from app.admin_mission_runtime_policies import (
     AdminMissionRuntimePolicyCreatePayload,
     AdminMissionRuntimePolicyUpdatePayload,
+    MissionRuntimePolicyUpsertPayload,
     _policy_arguments,
     _serialize_policy,
     _validate_policy_via_contract,
@@ -34,10 +35,12 @@ from app.admin_mission_runtime_policies import (
     archive_admin_mission_runtime_policy,
     create_admin_mission_runtime_policy,
     get_admin_mission_runtime_policy,
+    get_mission_runtime_policy,
     list_admin_mission_runtime_policies,
     publish_admin_mission_runtime_policy,
     unpublish_admin_mission_runtime_policy,
     update_admin_mission_runtime_policy,
+    upsert_mission_runtime_policy,
 )
 from app.models import Item
 
@@ -605,6 +608,121 @@ class MissionRuntimePolicyLifecycleIntegrationTests(unittest.TestCase):
         self.assertEqual(created["missionId"], ids["mission"])
         self.assertEqual(created["status"], "draft")
         self.assertEqual(created["version"], 1)
+
+    def test_get_policy_returns_null_when_missing(self):
+        ids = self._fixture(mission_type="text_answer", mission_category="solo")
+        admin = self._admin(ids["admin"])
+        result = get_mission_runtime_policy(ids["mission"], _actor=admin)
+        self.assertEqual(result, {"runtimePolicy": None})
+
+    def test_get_policy_404_for_unknown_mission(self):
+        ids = self._fixture()
+        admin = self._admin(ids["admin"])
+        with self.assertRaises(HTTPException) as context:
+            get_mission_runtime_policy("mission-does-not-exist", _actor=admin)
+        self.assertEqual(context.exception.status_code, 404)
+
+    def test_put_creates_policy_for_solo_mission(self):
+        ids = self._fixture(mission_type="text_answer", mission_category="solo")
+        admin = self._admin(ids["admin"])
+
+        first = upsert_mission_runtime_policy(
+            ids["mission"],
+            MissionRuntimePolicyUpsertPayload(entry_root_atomic=50),
+            request=None,
+            actor=admin,
+        )["runtimePolicy"]
+        self.assertEqual(first["entryRootAtomic"], 50)
+        self.assertEqual(first["version"], 1)
+        self.assertEqual(first["status"], "draft")
+
+        # Умный PUT: draft существует — обновляем его на месте, id и version
+        # не меняются, содержимое меняется.
+        second = upsert_mission_runtime_policy(
+            ids["mission"],
+            MissionRuntimePolicyUpsertPayload(entry_root_atomic=100),
+            request=None,
+            actor=admin,
+        )["runtimePolicy"]
+        self.assertEqual(second["id"], first["id"])
+        self.assertEqual(second["version"], 1)
+        self.assertEqual(second["status"], "draft")
+        self.assertEqual(second["entryRootAtomic"], 100)
+
+    def test_put_new_version_after_publish(self):
+        ids = self._fixture(mission_type="text_answer", mission_category="solo")
+        admin = self._admin(ids["admin"])
+
+        first = upsert_mission_runtime_policy(
+            ids["mission"],
+            MissionRuntimePolicyUpsertPayload(entry_root_atomic=50),
+            request=None,
+            actor=admin,
+        )["runtimePolicy"]
+        published = publish_admin_mission_runtime_policy(
+            first["id"], request=None, admin=admin
+        )["missionRuntimePolicy"]
+        self.assertEqual(published["status"], "published")
+
+        # После публикации draft нет — PUT создаёт новую draft-версию,
+        # опубликованная policy не трогается.
+        second = upsert_mission_runtime_policy(
+            ids["mission"],
+            MissionRuntimePolicyUpsertPayload(entry_root_atomic=100),
+            request=None,
+            actor=admin,
+        )["runtimePolicy"]
+        self.assertEqual(second["version"], 2)
+        self.assertEqual(second["status"], "draft")
+        self.assertEqual(second["entryRootAtomic"], 100)
+        self.assertNotEqual(second["id"], first["id"])
+
+        # Старая published-версия на месте и по-прежнему обслуживается GET.
+        stored = get_mission_runtime_policy(ids["mission"], _actor=admin)[
+            "runtimePolicy"
+        ]
+        self.assertEqual(stored["id"], first["id"])
+        self.assertEqual(stored["version"], 1)
+        self.assertEqual(stored["status"], "published")
+        self.assertEqual(stored["entryRootAtomic"], 50)
+
+        # Всего две версии: published v1 и новая draft v2.
+        with self.SessionLocal.begin() as session:
+            from app.geo_team_runtime_models import MissionRuntimePolicy
+
+            rows = session.scalars(
+                select(MissionRuntimePolicy)
+                .where(MissionRuntimePolicy.mission_id == ids["mission"])
+                .order_by(MissionRuntimePolicy.version)
+            ).all()
+        self.assertEqual(
+            [(row.version, row.status, row.entry_root_atomic) for row in rows],
+            [(1, "published", 50), (2, "draft", 100)],
+        )
+
+    def test_put_validates_required_items(self):
+        ids = self._fixture(mission_type="text_answer", mission_category="solo")
+        admin = self._admin(ids["admin"])
+        payload = MissionRuntimePolicyUpsertPayload(
+            entry_root_atomic=50,
+            required_items_json={"items": [{"itemId": "item-x", "quantity": 1}]},
+        )
+        with self.assertRaises(HTTPException) as context:
+            upsert_mission_runtime_policy(
+                ids["mission"], payload, request=None, actor=admin
+            )
+        self.assertEqual(context.exception.status_code, 422)
+
+    def test_put_team_mission_requires_challenge(self):
+        ids = self._fixture(mission_type="text_answer", mission_category="team")
+        admin = self._admin(ids["admin"])
+        payload = MissionRuntimePolicyUpsertPayload(entry_root_atomic=50)
+        with self.assertRaises(HTTPException) as context:
+            upsert_mission_runtime_policy(
+                ids["mission"], payload, request=None, actor=admin
+            )
+        self.assertEqual(context.exception.status_code, 422)
+        self.assertIn("challengePolicy", str(context.exception.detail))
 
 
 if __name__ == "__main__":

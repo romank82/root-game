@@ -364,6 +364,41 @@ class RuntimePolicyContractTests(unittest.TestCase):
         with self.assertRaises(RuntimePolicyValidationError):
             multiplier_scale_factor(Decimal("0.1234567"))
 
+    def test_challenge_optional_for_solo(self):
+        # Solo / race / co-op missions may omit the cipher challenge entirely;
+        # the normalized snapshot then stores challengePolicy: None.
+        for category in ("solo", "race", "co-op"):
+            with self.subTest(mission_category=category):
+                snapshot = validate_runtime_policy(
+                    **_policy(mission_category=category, challenge_policy_json=None)
+                )
+                self.assertIsNone(snapshot["challengePolicy"])
+                self.assertIsNone(
+                    validate_runtime_policy(
+                        **_policy(
+                            mission_category=category,
+                            challenge_policy_json={},
+                        )
+                    )["challengePolicy"]
+                )
+
+    def test_challenge_required_for_team(self):
+        for value in (None, {}):
+            with self.subTest(challenge_policy_json=value):
+                with self.assertRaises(RuntimePolicyValidationError):
+                    validate_runtime_policy(
+                        **_policy(
+                            mission_category="team",
+                            challenge_policy_json=value,
+                        )
+                    )
+
+        # A non-empty challenge for a team mission is still validated normally.
+        snapshot = validate_runtime_policy(
+            **_policy(mission_category="team")
+        )
+        self.assertEqual(snapshot["challengePolicy"]["challengeType"], "cipher")
+
 
 if __name__ == "__main__":
     unittest.main()

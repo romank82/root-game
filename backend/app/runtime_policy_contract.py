@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
-from app.mission_categories import is_valid_category
+from app.mission_categories import MISSION_CATEGORY_TEAM, is_valid_category
 
 __all__ = [
     "RuntimePolicyValidationError",
@@ -447,6 +447,27 @@ def validate_feature_flags(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _normalize_challenge_policy(
+    challenge_policy_json: Any,
+    *,
+    required: bool,
+) -> Any:
+    """Validate and normalize challenge_policy_json for the entry flow.
+
+    Team missions must carry a cipher challenge, so a missing/empty value is
+    rejected with an explicit "required" message. Solo / race / co-op missions
+    may omit it entirely; the normalized snapshot then stores
+    ``challengePolicy: None``. A non-empty object is always validated against
+    the cipher scheme so existing callers that still pass a challenge keep
+    working unchanged.
+    """
+    if challenge_policy_json is None or challenge_policy_json == {}:
+        if required:
+            _fail("challengePolicy", "challengePolicyJson required for team")
+        return None
+    return validate_challenge_policy(challenge_policy_json)
+
+
 def validate_runtime_policy(
     *,
     mission_category: str | None = None,
@@ -455,7 +476,7 @@ def validate_runtime_policy(
     attempt_deadline_seconds: Any,
     repeatability_policy: Any,
     required_items_json: Any,
-    challenge_policy_json: Any,
+    challenge_policy_json: Any = None,
     reward_policy_json: Any,
     fallback_policy_json: Any,
     feature_flags_json: Any,
@@ -467,6 +488,12 @@ def validate_runtime_policy(
     same entry/challenge policy: team/co-op use it in individual completion,
     solo — directly. ``None`` is accepted for legacy callers that predate the
     category (no gate).
+
+    ``challenge_policy_json`` is optional: for solo / race / co-op missions it
+    may be omitted (None) or an empty object, in which case the normalized
+    snapshot stores ``challengePolicy: None``. Team missions still require a
+    cipher challenge. A non-empty object is always validated against the cipher
+    scheme.
 
     The result uses camelCase keys, contains no database identifier, and carries
     no lifecycle state. Row status and version belong to the admin API layer.
@@ -513,7 +540,10 @@ def validate_runtime_policy(
         "attemptDeadlineSeconds": deadline,
         "repeatabilityPolicy": repeatability,
         "requiredItems": validate_required_items(required_items_json),
-        "challengePolicy": validate_challenge_policy(challenge_policy_json),
+        "challengePolicy": _normalize_challenge_policy(
+            challenge_policy_json,
+            required=mission_category == MISSION_CATEGORY_TEAM,
+        ),
         "rewardPolicy": validate_reward_policy(
             reward_policy_json,
             max_attempts=attempts,

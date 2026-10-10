@@ -25,6 +25,11 @@ router = APIRouter(
     tags=["admin-mission-runtime-policies"],
 )
 
+router_missions = APIRouter(
+    prefix="/api/v1/admin/missions",
+    tags=["admin-missions-runtime-policy"],
+)
+
 # Option A: policy is mission configuration, so the mission permission pair is
 # reused. Switching to dedicated codes is a migration-only change (see plan 2.1).
 POLICY_READ_PERMISSION = "missions.read"
@@ -77,6 +82,30 @@ class AdminMissionRuntimePolicyUpdatePayload(BaseModel):
     challenge_policy_json: dict[str, Any] | None = None
     reward_policy_json: dict[str, Any] | None = None
     fallback_policy_json: dict[str, Any] | None = None
+
+
+class MissionRuntimePolicyUpsertPayload(BaseModel):
+    """Minimal mission-scoped payload for the runtime policy upsert.
+
+    Only the fields the admin UI edits are exposed. The contract-only fields
+    (reward policy, fallback, feature flags) keep their defaults and are built
+    by the endpoint. ``challenge_policy_json`` stays optional in the schema so
+    team missions can supply their required cipher challenge, while solo /
+    race / co-op missions may omit it.
+    """
+
+    entry_root_atomic: int = Field(ge=0, le=ENTRY_ROOT_ATOMIC_MAX)
+    required_items_json: dict[str, Any] = Field(
+        default_factory=lambda: {"schemaVersion": 1, "items": []}
+    )
+    max_attempts: int = Field(default=3, ge=1, le=MAX_ATTEMPTS_MAX)
+    attempt_deadline_seconds: int = Field(
+        default=3600, ge=1, le=DEADLINE_SECONDS_MAX
+    )
+    repeatability_policy: str = Field(default="after_terminal", max_length=64)
+    challenge_policy_json: dict[str, Any] | None = None
+
+
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex}"
 
@@ -545,3 +574,157 @@ def archive_admin_mission_runtime_policy(
 
         return {"missionRuntimePolicy": _serialize_policy(policy)}
     feature_flags_json: dict[str, Any] | None = None
+
+
+@router_missions.get("/{mission_id}/runtime-policy")
+def get_mission_runtime_policy(
+    mission_id: str,
+    _actor: AdminUser = Depends(require_permission(POLICY_READ_PERMISSION)),
+):
+    """Runtime policy миссии (published если есть, иначе последняя draft).
+
+    Возвращает ``{"runtimePolicy": null}`` если policy нет и 404 если миссии
+    нет. Ключ ``runtimePolicy`` намеренно отличается от ``missionRuntimePolicy``
+    (роутер mission-runtime-policies): endpoint смотрит на миссию, а не на
+    отдельную версию policy.
+    """
+    with SessionLocal.begin() as session:
+        mission = session.get(Mission, mission_id)
+        if mission is None:
+            raise HTTPException(status_code=404, detail="Миссия не найдена.")
+
+        policy = session.scalar(
+            select(MissionRuntimePolicy)
+            .where(
+                MissionRuntimePolicy.mission_id == mission_id,
+                MissionRuntimePolicy.status == "published",
+            )
+            .order_by(
+                MissionRuntimePolicy.version.desc(),
+                MissionRuntimePolicy.id.desc(),
+            )
+        )
+        if policy is None:
+            policy = session.scalar(
+                select(MissionRuntimePolicy)
+                .where(
+                    MissionRuntimePolicy.mission_id == mission_id,
+                    MissionRuntimePolicy.status == "draft",
+                )
+                .order_by(
+                    MissionRuntimePolicy.version.desc(),
+                    MissionRuntimePolicy.id.desc(),
+                )
+            )
+
+        return {"runtimePolicy": _serialize_policy(policy) if policy else None}
+
+
+@router_missions.put("/{mission_id}/runtime-policy")
+def upsert_mission_runtime_policy(
+    mission_id: str,
+    payload: MissionRuntimePolicyUpsertPayload,
+    request: Request,
+    actor: AdminUser = Depends(require_permission(POLICY_MANAGE_PERMISSION)),
+):
+    """Создать или обновить runtime policy миссии через mission_id (умный PUT).
+
+    Если у миссии уже есть черновик (status='draft') — он обновляется на
+    месте: id и version не меняются, меняется содержимое. Если черновика нет,
+    но есть published — создаётся новая draft-версия (version = max + 1).
+    Если policy ещё нет — создаётся version 1. Возвращает 404 если миссии нет.
+
+    Опубликованная policy никогда не меняется, archive не перезаписывается.
+    Скрытые поля (reward policy, fallback, feature flags) пересобираются из
+    новых значений: reward строится под переданный ``max_attempts``, challenge
+    обязателен только для команды (mission_category == 'team') — иначе None.
+    """
+    with SessionLocal.begin() as session:
+        mission = session.get(Mission, mission_id)
+        if mission is None:
+            raise HTTPException(status_code=404, detail="Миссия не найдена.")
+
+        stored_challenge = payload.challenge_policy_json or {}
+        policy_values = {
+            "entry_root_atomic": payload.entry_root_atomic,
+            "required_items_json": payload.required_items_json,
+            "max_attempts": payload.max_attempts,
+            "attempt_deadline_seconds": payload.attempt_deadline_seconds,
+            "repeatability_policy": payload.repeatability_policy,
+            "challenge_policy_json": stored_challenge,
+            "reward_policy_json": {
+                "schemaVersion": 1,
+                "attemptMultipliers": [1.0] * payload.max_attempts,
+                "rewards": [],
+            },
+            "fallback_policy_json": None,
+            "feature_flags_json": {},
+        }
+
+        _validate_policy_via_contract(
+            mission, **_policy_arguments(mission_id=mission_id, **policy_values)
+        )
+
+        # Умный PUT: если у миссии уже есть черновик, обновляем его на месте
+        # (id и version не меняются). Unique-constraint на (mission_id,
+        # status='draft') в БД нет — есть только один published и уникальные
+        # version, — поэтому «один draft» гарантируем логикой: берём самый
+        # свежий (max version).
+        draft = session.scalar(
+            select(MissionRuntimePolicy)
+            .where(
+                MissionRuntimePolicy.mission_id == mission_id,
+                MissionRuntimePolicy.status == "draft",
+            )
+            .order_by(
+                MissionRuntimePolicy.version.desc(),
+                MissionRuntimePolicy.id.desc(),
+            )
+            .limit(1)
+        )
+
+        if draft is not None:
+            for field_name, value in policy_values.items():
+                setattr(draft, field_name, value)
+            session.flush()
+
+            _audit(
+                session,
+                admin=actor,
+                action="mission_runtime_policy.upserted",
+                policy=draft,
+                metadata={
+                    "missionId": draft.mission_id,
+                    "version": draft.version,
+                    "status": draft.status,
+                },
+                request=request,
+            )
+
+            return {"runtimePolicy": _serialize_policy(draft)}
+
+        version = _next_version(session, mission_id)
+        policy = MissionRuntimePolicy(
+            id=_new_id("mission-runtime-policy"),
+            version=version,
+            status="draft",
+            mission_id=mission_id,
+            **policy_values,
+        )
+        session.add(policy)
+        session.flush()
+
+        _audit(
+            session,
+            admin=actor,
+            action="mission_runtime_policy.upserted",
+            policy=policy,
+            metadata={
+                "missionId": policy.mission_id,
+                "version": policy.version,
+                "status": policy.status,
+            },
+            request=request,
+        )
+
+        return {"runtimePolicy": _serialize_policy(policy)}
