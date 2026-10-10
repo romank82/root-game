@@ -299,6 +299,44 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
 
 ---
 
+## Admin Key Rules API (раздел «Ключи»)
+
+Управление каталогом ключей и их правилами. Каждый ключ = Item
+(category=KEY) + KeyRules (правила использования).
+
+### Endpoints
+- `GET /api/v1/admin/key-rules` — список правил ключей
+  (включает метаданные Item: itemTitle, itemCode, itemSymbol, itemStatus).
+- `GET /api/v1/admin/key-rules/{key_rule_id}` — карточка правила.
+- `POST /api/v1/admin/key-rules` — создать правило для существующего
+  Item(category=KEY).
+- `PATCH /api/v1/admin/key-rules/{key_rule_id}` — обновить правила
+  (item_id не меняется).
+- `GET /api/v1/admin/key-rules/items?status=published|draft|archived|all`
+  — список ключей (Item category=KEY) для dropdown в редакторе миссии.
+- `POST /api/v1/admin/key-rules/items` — создать новый ключ одним
+  запросом: создаёт Item(category=KEY, status=published) + KeyRules.
+
+### Permissions
+- `key_rules.read` — все GET.
+- `key_rules.manage` — POST/PATCH.
+
+### Payload (create key item)
+```json
+{
+  "title": "КЛЮЧ B-02",
+  "code": "KEY_B02",
+  "symbol": "🔑",
+  "is_consumable": true,
+  "stack_limit": 1,
+  "transfer_forbidden": true,
+  "sale_forbidden": true,
+  "trade_forbidden": true
+}
+```
+
+---
+
 ## Admin Teams API (этап 6.7.a)
 
 Модерация команд: просмотр, состав, история, принудительное

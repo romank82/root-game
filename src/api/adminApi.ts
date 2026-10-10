@@ -409,3 +409,131 @@ export async function createAdmin(
   const body = (await response.json()) as { admin: AdminUserFull }
   return body.admin
 }
+export type KeyRule = {
+  id: string
+  itemId: string
+  itemTitle: string
+  itemCode: string
+  itemSymbol: string | null
+  itemStatus: string
+  isConsumable: boolean
+  stackLimit: number
+  sortOrder: number
+  transferForbidden: boolean
+  saleForbidden: boolean
+  tradeForbidden: boolean
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type KeyItem = {
+  id: string
+  code: string
+  title: string
+  symbol: string | null
+  status: string
+}
+
+export async function listKeyRules(): Promise<KeyRule[]> {
+  const response = await adminFetch('/api/v1/admin/key-rules')
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { keyRules: KeyRule[] }
+  return body.keyRules
+}
+
+export async function getKeyRule(keyRuleId: string): Promise<KeyRule> {
+  const response = await adminFetch(
+    `/api/v1/admin/key-rules/${encodeURIComponent(keyRuleId)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { keyRule: KeyRule }
+  return body.keyRule
+}
+
+export type CreateKeyRulePayload = {
+  item_id: string
+  is_consumable?: boolean
+  stack_limit?: number
+  sort_order?: number
+  transfer_forbidden?: boolean
+  sale_forbidden?: boolean
+  trade_forbidden?: boolean
+}
+
+export async function createKeyRule(
+  payload: CreateKeyRulePayload,
+): Promise<KeyRule> {
+  const response = await adminFetch('/api/v1/admin/key-rules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { keyRule: KeyRule }
+  return body.keyRule
+}
+
+export type UpdateKeyRulePayload = {
+  is_consumable?: boolean
+  stack_limit?: number
+  sort_order?: number
+  transfer_forbidden?: boolean
+  sale_forbidden?: boolean
+  trade_forbidden?: boolean
+}
+
+export async function updateKeyRule(
+  keyRuleId: string,
+  payload: UpdateKeyRulePayload,
+): Promise<KeyRule> {
+  const response = await adminFetch(
+    `/api/v1/admin/key-rules/${encodeURIComponent(keyRuleId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { keyRule: KeyRule }
+  return body.keyRule
+}
+
+export async function listKeyItems(
+  status: string = 'published',
+): Promise<KeyItem[]> {
+  const params = new URLSearchParams({ status })
+  const response = await adminFetch(
+    `/api/v1/admin/key-rules/items?${params.toString()}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { items: KeyItem[] }
+  return body.items
+}
+
+export type CreateKeyItemPayload = {
+  title: string
+  code: string
+  symbol?: string | null
+  description?: string | null
+  rarity?: string
+  is_consumable?: boolean
+  stack_limit?: number
+  sort_order?: number
+  transfer_forbidden?: boolean
+  sale_forbidden?: boolean
+  trade_forbidden?: boolean
+}
+
+export async function createKeyItem(
+  payload: CreateKeyItemPayload,
+): Promise<KeyRule> {
+  const response = await adminFetch('/api/v1/admin/key-rules/items', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { keyRule: KeyRule }
+  return body.keyRule
+}
