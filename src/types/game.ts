@@ -1,4 +1,10 @@
-export type Screen = 'briefing' | 'terminal' | 'archive' | 'inventory' | 'scanner'
+export type Screen =
+  | 'briefing'
+  | 'terminal'
+  | 'archive'
+  | 'inventory'
+  | 'scanner'
+  | 'shop'
 
 export type AuthStatus = 'checking' | 'authenticated' | 'unavailable' | 'error'
 export type ApiStatus = 'checking' | 'online' | 'offline'

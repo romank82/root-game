@@ -23,6 +23,8 @@ export function Sidebar({ echo, apiStatus, onScreenChange }: SidebarProps) {
 
       <button onClick={() => onScreenChange('scanner')}>◌ Сканер</button>
 
+      <button onClick={() => onScreenChange('shop')}>⊕ Магазин</button>
+
       <div className="echo-card">
         <span>РЕСУРС</span>
         <strong>{echo} ROOT</strong>

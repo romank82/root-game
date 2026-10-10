@@ -100,6 +100,41 @@ export type TelegramAuthResult = {
   }
 }
 
+export type FallbackOfferItem = {
+  id: string
+  slug: string
+  code: string
+  title: string
+  symbol: string | null
+  category: string
+  rarity: string
+}
+
+export type FallbackOffer = {
+  missionId: string
+  entitlementId: string
+  missionSlug: string
+  missionTitle: string
+  offerId: string
+  priceRoot: number
+  quotaLimit: number
+  consumedCount: number
+  remainingQuota: number
+  status: 'available' | 'disabled' | 'exhausted'
+  item: FallbackOfferItem | null
+}
+
+export type FallbackPurchaseResult = {
+  purchased: boolean
+  entitlementId: string
+  consumedCount: number
+  remainingQuota: number
+  status: string
+  priceRoot: number
+  rootBalance: number
+  item: FallbackOfferItem | null
+}
+
 type SubmitPayload = {
   answer?: string
   sequence?: string[]
@@ -174,4 +209,34 @@ export async function submitEngineMission(
   }
 
   return response.json() as Promise<MissionSubmission>
+}
+
+export async function listFallbackOffers(): Promise<FallbackOffer[]> {
+  const response = await apiFetch('/api/v1/engine/fallback-offers')
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  const body = (await response.json()) as { offers: FallbackOffer[] }
+  return body.offers
+}
+
+export async function purchaseFallbackOffer(
+  entitlementId: string,
+): Promise<FallbackPurchaseResult> {
+  const response = await apiFetch(
+    `/api/v1/engine/fallback-offers/${encodeURIComponent(
+      entitlementId,
+    )}/purchases`,
+    {
+      method: 'POST',
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<FallbackPurchaseResult>
 }

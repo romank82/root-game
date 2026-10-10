@@ -39,6 +39,14 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         <span>◈</span>
         Вещи
       </button>
+
+      <button
+        className={screen === 'shop' ? 'active' : ''}
+        onClick={() => onScreenChange('shop')}
+      >
+        <span>⊕</span>
+        Магазин
+      </button>
     </nav>
   )
 }

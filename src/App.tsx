@@ -9,6 +9,7 @@ import { TerminalScreen } from './components/screens/TerminalScreen'
 import { ArchiveScreen } from './components/screens/ArchiveScreen'
 import { InventoryScreen } from './components/screens/InventoryScreen'
 import { ScannerScreen } from './components/screens/ScannerScreen'
+import { ShopScreen } from './components/screens/ShopScreen'
 
 function App() {
   const {
@@ -120,6 +121,10 @@ function App() {
           onScreenChange={setScreen}
           onSubmitMission={submitMission}
         />
+      )}
+
+      {screen === 'shop' && (
+        <ShopScreen onScreenChange={setScreen} />
       )}
 
       {accepted && screen !== 'briefing' && (
