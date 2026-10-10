@@ -631,3 +631,44 @@ export async function updateMissionRuntimePolicy(
   }
   return body.missionRuntimePolicy
 }
+
+export async function getMissionRuntimePolicyByMission(
+  missionId: string,
+): Promise<MissionRuntimePolicy | null> {
+  const response = await adminFetch(
+    `/api/v1/admin/missions/${encodeURIComponent(missionId)}/runtime-policy`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    runtimePolicy: MissionRuntimePolicy | null
+  }
+  return body.runtimePolicy
+}
+
+export type MissionRuntimePolicyUpsertPayload = {
+  entry_root_atomic: number
+  required_items_json: Record<string, unknown>
+  max_attempts?: number
+  attempt_deadline_seconds?: number
+  repeatability_policy?: string
+  challenge_policy_json?: Record<string, unknown> | null
+}
+
+export async function upsertMissionRuntimePolicy(
+  missionId: string,
+  payload: MissionRuntimePolicyUpsertPayload,
+): Promise<MissionRuntimePolicy> {
+  const response = await adminFetch(
+    `/api/v1/admin/missions/${encodeURIComponent(missionId)}/runtime-policy`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    runtimePolicy: MissionRuntimePolicy
+  }
+  return body.runtimePolicy
+}

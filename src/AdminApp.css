@@ -600,3 +600,17 @@
   color: #ffc841;
   border: 1px solid rgba(255, 200, 65, 0.4);
 }
+
+.admin-runtime-policy {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid rgba(190, 255, 226, 0.08);
+  border-radius: 6px;
+}
+
+.admin-required-items {
+  margin: 4px 0 0 20px;
+  padding: 0;
+  color: rgba(223, 248, 235, 0.85);
+  font-size: 13px;
+}

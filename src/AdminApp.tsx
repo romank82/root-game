@@ -7,6 +7,7 @@ import {
   createKeyItem,
   deactivateAdmin,
   getAdminMe,
+  getMissionRuntimePolicyByMission,
   grantPermission,
   listAdminMissions,
   listAdmins,
@@ -30,6 +31,7 @@ import {
   type AdminUserFull,
   type KeyItem,
   type KeyRule,
+  type MissionRuntimePolicy,
   type PermissionCatalogEntry,
 } from './api/adminApi'
 
@@ -202,6 +204,8 @@ function AdminApp() {
   const [keyRules, setKeyRules] = useState<KeyRule[]>([])
   const [keyItems, setKeyItems] = useState<KeyItem[]>([])
   const [loadingKeyItems, setLoadingKeyItems] = useState(false)
+  const [missionPolicy, setMissionPolicy] = useState<MissionRuntimePolicy | null>(null)
+  const [loadingMissionPolicy, setLoadingMissionPolicy] = useState(false)
   const [selectedKeyRuleId, setSelectedKeyRuleId] = useState<string | null>(null)
   const [loadingKeyRules, setLoadingKeyRules] = useState(false)
   const [keyRulesError, setKeyRulesError] = useState<string | null>(null)
@@ -413,6 +417,28 @@ function AdminApp() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (selectedId === null) {
+      setMissionPolicy(null)
+      return
+    }
+    let cancelled = false
+    setLoadingMissionPolicy(true)
+    getMissionRuntimePolicyByMission(selectedId)
+      .then((p) => {
+        if (!cancelled) setMissionPolicy(p)
+      })
+      .catch(() => {
+        if (!cancelled) setMissionPolicy(null)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMissionPolicy(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId])
 
   const groupedSettings = useMemo(() => {
     const groups = new Map<string, AdminSystemSetting[]>()
@@ -1126,6 +1152,65 @@ function AdminApp() {
               }
             />
           </label>
+
+          <section className="admin-runtime-policy">
+            <div className="admin-section-heading">
+              <h3>Взятие миссии</h3>
+            </div>
+
+            {loadingMissionPolicy && (
+              <p className="admin-muted">Загрузка правил…</p>
+            )}
+
+            {!loadingMissionPolicy && missionPolicy === null && (
+              <p className="admin-muted">
+                Правила входа не настроены. Миссия бесплатная.
+                Редактирование — в шаге 2b-2.
+              </p>
+            )}
+
+            {!loadingMissionPolicy && missionPolicy !== null && (
+              <>
+                <p className="admin-muted">
+                  <b>Цена входа:</b>{' '}
+                  {missionPolicy.entryRootAtomic} ROOT
+                </p>
+
+                <p className="admin-muted">
+                  <b>Требуемые ключи:</b>
+                </p>
+                {(() => {
+                  const items =
+                    (missionPolicy.requiredItemsJson as { items?: Array<{
+                      itemId: string; quantity: number }> })
+                      .items ?? []
+                  if (items.length === 0) {
+                    return <p className="admin-muted">Не требуются.</p>
+                  }
+                  return (
+                    <ul className="admin-required-items">
+                      {items.map((it, idx) => {
+                        const key = keyItems.find((k) => k.id === it.itemId)
+                        return (
+                          <li key={idx}>
+                            {key
+                              ? `${key.symbol ?? ''} ${key.title} · ${key.code}`
+                              : `(не найден: ${it.itemId})`}
+                            {' × '}
+                            {it.quantity}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )
+                })()}
+
+                <p className="admin-muted" style={{ marginTop: 12 }}>
+                  Редактирование — в шаге 2b-2.
+                </p>
+              </>
+            )}
+          </section>
 
           <section className="admin-rewards">
             <div className="admin-section-heading">
