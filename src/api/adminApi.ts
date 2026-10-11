@@ -672,3 +672,17 @@ export async function upsertMissionRuntimePolicy(
   }
   return body.runtimePolicy
 }
+
+export async function publishMissionRuntimePolicy(
+  policyId: string,
+): Promise<MissionRuntimePolicy> {
+  const response = await adminFetch(
+    `/api/v1/admin/mission-runtime-policies/${encodeURIComponent(policyId)}/publish`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    missionRuntimePolicy: MissionRuntimePolicy
+  }
+  return body.missionRuntimePolicy
+}

@@ -17,6 +17,7 @@ import {
   loginAdmin,
   logoutAdmin,
   publishAdminMission,
+  publishMissionRuntimePolicy,
   reactivateAdmin,
   revokePermission,
   unpublishAdminMission,
@@ -212,6 +213,7 @@ function AdminApp() {
   const [savingPolicy, setSavingPolicy] = useState(false)
   const [policyError, setPolicyError] = useState<string | null>(null)
   const [policyNotice, setPolicyNotice] = useState<string | null>(null)
+  const [publishingPolicy, setPublishingPolicy] = useState(false)
   const [selectedKeyRuleId, setSelectedKeyRuleId] = useState<string | null>(null)
   const [loadingKeyRules, setLoadingKeyRules] = useState(false)
   const [keyRulesError, setKeyRulesError] = useState<string | null>(null)
@@ -596,6 +598,22 @@ function AdminApp() {
       setPolicyError((err as Error).message)
     } finally {
       setSavingPolicy(false)
+    }
+  }
+
+  async function handlePublishPolicy() {
+    if (missionPolicy === null) return
+    setPublishingPolicy(true)
+    setPolicyError(null)
+    setPolicyNotice(null)
+    try {
+      const published = await publishMissionRuntimePolicy(missionPolicy.id)
+      setMissionPolicy(published)
+      setPolicyNotice('Опубликовано. Правила входа активны для игроков.')
+    } catch (err) {
+      setPolicyError((err as Error).message)
+    } finally {
+      setPublishingPolicy(false)
     }
   }
 
@@ -1231,6 +1249,15 @@ function AdminApp() {
 
                 {missionPolicy !== null && (
                   <p className="admin-muted" style={{ marginBottom: 10 }}>
+                    Статус правил: <b>{missionPolicy.status}</b>
+                    {missionPolicy.version > 0 && ` · v${missionPolicy.version}`}
+                    {missionPolicy.status === 'draft' && ' — не активны для игроков'}
+                    {missionPolicy.status === 'published' && ' — активны для игроков'}
+                  </p>
+                )}
+
+                {missionPolicy !== null && (
+                  <p className="admin-muted" style={{ marginBottom: 10 }}>
                     Правила входа уже сохранены для этой миссии.
                   </p>
                 )}
@@ -1310,6 +1337,16 @@ function AdminApp() {
                   >
                     {savingPolicy ? 'Сохранение…' : 'Сохранить'}
                   </button>
+
+                  {missionPolicy !== null && missionPolicy.status === 'draft' && (
+                    <button
+                      className="admin-secondary"
+                      onClick={handlePublishPolicy}
+                      disabled={publishingPolicy || savingPolicy}
+                    >
+                      {publishingPolicy ? 'Публикация…' : 'Опубликовать'}
+                    </button>
+                  )}
                 </div>
               </>
             )}
