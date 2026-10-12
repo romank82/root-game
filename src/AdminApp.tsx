@@ -60,6 +60,11 @@ type MissionForm = {
   contentInputPlaceholder: string
   contentSuccessTitle: string
   contentSuccessText: string
+  contentInstruction: string
+  contentBlocks: string[]
+  contentLineNumber: string
+  contentPlaceholder: string
+  contentWrongAnswerText: string
   validationConfig: string
   validationValidator: string
   validationAcceptedAnswers: string[]
@@ -91,6 +96,11 @@ const emptyForm = (): MissionForm => ({
   contentInputPlaceholder: '',
   contentSuccessTitle: '',
   contentSuccessText: '',
+  contentInstruction: '',
+  contentBlocks: [''],
+  contentLineNumber: '',
+  contentPlaceholder: '',
+  contentWrongAnswerText: '',
   validationConfig:
     '{"validator":"normalized_text_match","acceptedAnswers":[]}',
   validationValidator: 'normalized_text_match',
@@ -106,8 +116,9 @@ function prettyJson(value: Record<string, unknown>): string {
 
 function formFromMission(mission: AdminMission): MissionForm {
   const isTextAnswer = mission.missionType === 'text_answer'
+  const isCodeRepair = mission.missionType === 'code_repair'
   const hasContentObject =
-    isTextAnswer &&
+    (isTextAnswer || isCodeRepair) &&
     mission.content !== null &&
     typeof mission.content === 'object'
   const ui =
@@ -123,6 +134,11 @@ function formFromMission(mission: AdminMission): MissionForm {
     const value = ui[key]
     return typeof value === 'string' ? value : ''
   }
+
+  const blocksRaw = isCodeRepair && Array.isArray(ui.blocks) ? ui.blocks : []
+  const cleanBlocks = blocksRaw.filter(
+    (b): b is string => typeof b === 'string' && b.trim().length > 0,
+  )
 
   const isStructuredValidation =
     mission.missionType === 'text_answer' ||
@@ -179,12 +195,19 @@ function formFromMission(mission: AdminMission): MissionForm {
     missionCategory: mission.missionCategory ?? 'solo',
     title: mission.title,
     description: mission.description ?? '',
-    content: isTextAnswer ? '{}' : prettyJson(mission.content),
+    content:
+      isTextAnswer || isCodeRepair ? '{}' : prettyJson(mission.content),
     contentLabel: uiEntry('label'),
     contentQuestion: uiEntry('question'),
     contentInputPlaceholder: uiEntry('inputPlaceholder'),
     contentSuccessTitle: uiEntry('successTitle'),
     contentSuccessText: uiEntry('successText'),
+    contentInstruction: isCodeRepair ? uiEntry('instruction') : '',
+    contentBlocks:
+      isCodeRepair && cleanBlocks.length > 0 ? cleanBlocks : [''],
+    contentLineNumber: isCodeRepair ? uiEntry('lineNumber') : '',
+    contentPlaceholder: isCodeRepair ? uiEntry('placeholder') : '',
+    contentWrongAnswerText: isCodeRepair ? uiEntry('wrongAnswerText') : '',
     validationConfig,
     validationValidator,
     validationAcceptedAnswers,
@@ -237,6 +260,22 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
         inputPlaceholder: form.contentInputPlaceholder.trim(),
         successTitle: form.contentSuccessTitle.trim(),
         successText: form.contentSuccessText.trim(),
+      },
+    }
+  } else if (form.missionType === 'code_repair') {
+    const cleanBlocks = form.contentBlocks
+      .map((b) => b.trim())
+      .filter((b) => b.length > 0)
+    content = {
+      schemaVersion: 1,
+      ui: {
+        label: form.contentLabel.trim(),
+        instruction: form.contentInstruction.trim(),
+        blocks: cleanBlocks,
+        maxBlocks: cleanBlocks.length,
+        lineNumber: form.contentLineNumber.trim(),
+        placeholder: form.contentPlaceholder.trim(),
+        wrongAnswerText: form.contentWrongAnswerText.trim(),
       },
     }
   } else {
@@ -970,6 +1009,29 @@ function AdminApp() {
     }))
   }
 
+  function changeContentBlock(index: number, value: string) {
+    setForm((current) => ({
+      ...current,
+      contentBlocks: current.contentBlocks.map((b, i) =>
+        i === index ? value : b,
+      ),
+    }))
+  }
+
+  function addContentBlock() {
+    setForm((current) => ({
+      ...current,
+      contentBlocks: [...current.contentBlocks, ''],
+    }))
+  }
+
+  function removeContentBlock(index: number) {
+    setForm((current) => ({
+      ...current,
+      contentBlocks: current.contentBlocks.filter((_, i) => i !== index),
+    }))
+  }
+
   async function saveMission() {
     setError('')
     setNotice('')
@@ -1446,6 +1508,98 @@ function AdminApp() {
                     setForm({
                       ...form,
                       contentSuccessText: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            </>
+          ) : form.missionType === 'code_repair' ? (
+            <>
+              <label className="admin-span-2">
+                Текст на кнопке (label)
+                <input
+                  value={form.contentLabel}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({ ...form, contentLabel: event.target.value })
+                  }
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Инструкция
+                <textarea
+                  value={form.contentInstruction}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({ ...form, contentInstruction: event.target.value })
+                  }
+                />
+              </label>
+
+              <div className="admin-validation-list">
+                <div className="admin-section-heading">
+                  <h4>Блоки кода (публичные)</h4>
+                  <button
+                    className="admin-secondary"
+                    onClick={addContentBlock}
+                    disabled={!canWrite}
+                  >
+                    + Добавить блок
+                  </button>
+                </div>
+
+                {form.contentBlocks.map((block, index) => (
+                  <div className="admin-validation-row" key={index}>
+                    <input
+                      value={block}
+                      disabled={!canWrite}
+                      onChange={(event) =>
+                        changeContentBlock(index, event.target.value)
+                      }
+                    />
+                    <button
+                      className="admin-danger"
+                      onClick={() => removeContentBlock(index)}
+                      disabled={!canWrite || form.contentBlocks.length <= 1}
+                    >
+                      Удалить
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <label>
+                Номер строки (lineNumber)
+                <input
+                  value={form.contentLineNumber}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({ ...form, contentLineNumber: event.target.value })
+                  }
+                />
+              </label>
+
+              <label>
+                Placeholder окна кода
+                <input
+                  value={form.contentPlaceholder}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({ ...form, contentPlaceholder: event.target.value })
+                  }
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Текст при неверной сборке
+                <textarea
+                  value={form.contentWrongAnswerText}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      contentWrongAnswerText: event.target.value,
                     })
                   }
                 />
