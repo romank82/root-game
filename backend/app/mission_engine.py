@@ -211,6 +211,35 @@ def _load_mission_for_accept(session: Session, mission_id: str) -> Mission:
     return mission
 
 
+def _extract_spawn_for_bootstrap(
+    player_mission: PlayerMission,
+) -> dict[str, Any] | None:
+    """
+    Возвращает spawn-координаты для bootstrap, если они есть и миссия in_progress.
+
+    Для draft/available/completed/cancelled — None (spawn не нужен).
+    Формат ответа — camelCase, как в _serialize_accept_response.
+    """
+    if player_mission.status != "in_progress":
+        return None
+    progress = player_mission.progress or {}
+    spawn_record = progress.get("spawn")
+    if not isinstance(spawn_record, dict):
+        return None
+    try:
+        return {
+            "latitude": spawn_record["latitude"],
+            "longitude": spawn_record["longitude"],
+            "searchRadiusMeters": spawn_record["search_radius_m"],
+            "zoneRadiusMeters": spawn_record.get("zone_radius_m"),
+            "arObjectId": spawn_record.get("ar_object_id"),
+            "generatedAt": spawn_record["generated_at"],
+        }
+    except KeyError:
+        # Битые данные в progress — не роняем bootstrap
+        return None
+
+
 def _serialize_item(player_item: PlayerItem, item: Item) -> dict:
     return {
         "id": item.id,
@@ -309,6 +338,7 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "content": mission.content,
                 "geoZoneId": mission.geo_zone_id,
                 "arObjectId": mission.ar_object_id,
+                "spawn": _extract_spawn_for_bootstrap(progress[mission.id]),
                 "status": progress[mission.id].status,
                 "attemptCount": progress[mission.id].attempt_count,
                 "startedAt": (
