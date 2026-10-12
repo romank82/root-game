@@ -11,6 +11,8 @@ export type EngineMission = {
   title: string
   description: string
   content: Record<string, unknown>
+  geoZoneId: string | null
+  arObjectId: string | null
   status: EngineMissionStatus
   attemptCount: number
   startedAt: string | null

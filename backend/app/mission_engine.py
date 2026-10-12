@@ -283,6 +283,8 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "title": mission.title,
                 "description": mission.description,
                 "content": mission.content,
+                "geoZoneId": mission.geo_zone_id,
+                "arObjectId": mission.ar_object_id,
                 "status": progress[mission.id].status,
                 "attemptCount": progress[mission.id].attempt_count,
                 "startedAt": (
