@@ -814,6 +814,7 @@ export type AdminGeoZone = {
   longitude: number | null
   radiusMeters: number | null
   searchRadiusMeters: number | null
+  locationConstraints: Record<string, boolean>
   polygonCoordinates: unknown[] | null
   timezone: string
   startsAt: string | null
@@ -834,6 +835,7 @@ export type CreateGeoZonePayload = {
   longitude?: number | null
   radius_meters?: number | null
   search_radius_meters?: number | null
+  location_constraints?: Record<string, boolean>
   polygon_coordinates?: unknown[] | null
   timezone?: string
   starts_at?: string | null
@@ -853,6 +855,7 @@ export type UpdateGeoZonePayload = {
   longitude?: number | null
   radius_meters?: number | null
   search_radius_meters?: number | null
+  location_constraints?: Record<string, boolean>
   polygon_coordinates?: unknown[] | null
   timezone?: string
   starts_at?: string | null
@@ -905,4 +908,114 @@ export async function updateGeoZone(
   if (!response.ok) throw new Error(await readError(response))
   const body = (await response.json()) as { geoZone: AdminGeoZone }
   return body.geoZone
+}
+export type AdminARObject = {
+  id: string
+  slug: string
+  title: string
+  description: string | null
+  status: string
+  sortOrder: number
+  geoZoneId: string
+  objectType: string
+  assetUri: string
+  assetMimeType: string | null
+  scenePreset: string | null
+  scaleMeters: number
+  orientation: string
+  discoveryScenario: Record<string, unknown>
+  minigameConfig: Record<string, unknown>
+  instructionText: string | null
+  validationConfig: Record<string, unknown>
+  startsAt: string | null
+  endsAt: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type CreateARObjectPayload = {
+  slug: string
+  title: string
+  description?: string | null
+  sort_order?: number
+  geo_zone_id: string
+  object_type: string
+  asset_uri: string
+  asset_mime_type?: string | null
+  scene_preset?: string | null
+  scale_meters?: number
+  orientation?: string
+  discovery_scenario?: Record<string, unknown>
+  minigame_config?: Record<string, unknown>
+  instruction_text?: string | null
+  validation_config?: Record<string, unknown>
+  starts_at?: string | null
+  ends_at?: string | null
+}
+
+export type UpdateARObjectPayload = {
+  slug?: string
+  title?: string
+  description?: string | null
+  status?: string
+  sort_order?: number
+  geo_zone_id?: string
+  object_type?: string
+  asset_uri?: string
+  asset_mime_type?: string | null
+  scene_preset?: string | null
+  scale_meters?: number
+  orientation?: string
+  discovery_scenario?: Record<string, unknown>
+  minigame_config?: Record<string, unknown>
+  instruction_text?: string | null
+  validation_config?: Record<string, unknown>
+  starts_at?: string | null
+  ends_at?: string | null
+}
+
+export async function listARObjects(): Promise<AdminARObject[]> {
+  const response = await adminFetch('/api/v1/admin/ar-objects')
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { arObjects: AdminARObject[] }
+  return body.arObjects
+}
+
+export async function getARObject(arObjectId: string): Promise<AdminARObject> {
+  const response = await adminFetch(
+    `/api/v1/admin/ar-objects/${encodeURIComponent(arObjectId)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { arObject: AdminARObject }
+  return body.arObject
+}
+
+export async function createARObject(
+  payload: CreateARObjectPayload,
+): Promise<AdminARObject> {
+  const response = await adminFetch('/api/v1/admin/ar-objects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { arObject: AdminARObject }
+  return body.arObject
+}
+
+export async function updateARObject(
+  arObjectId: string,
+  payload: UpdateARObjectPayload,
+): Promise<AdminARObject> {
+  const response = await adminFetch(
+    `/api/v1/admin/ar-objects/${encodeURIComponent(arObjectId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { arObject: AdminARObject }
+  return body.arObject
 }
