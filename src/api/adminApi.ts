@@ -686,3 +686,119 @@ export async function publishMissionRuntimePolicy(
   }
   return body.missionRuntimePolicy
 }
+
+export type AdminSegmentLink = {
+  id: string
+  missionId: string
+  sortOrder: number
+}
+
+export type AdminSegment = {
+  id: string
+  chapterId: string
+  slug: string
+  title: string
+  description: string | null
+  content: Record<string, unknown>
+  status: string
+  sortOrder: number
+  linkedMissions: AdminSegmentLink[]
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type CreateSegmentPayload = {
+  chapter_id: string
+  slug: string
+  title: string
+  description?: string | null
+  content?: Record<string, unknown>
+  sort_order?: number
+  linked_missions?: Array<{ mission_id: string; sort_order: number }>
+}
+
+export type UpdateSegmentPayload = {
+  chapter_id?: string
+  slug?: string
+  title?: string
+  description?: string | null
+  content?: Record<string, unknown>
+  sort_order?: number
+  linked_missions?: Array<{ mission_id: string; sort_order: number }>
+}
+
+export async function listSegments(): Promise<AdminSegment[]> {
+  const response = await adminFetch('/api/v1/admin/segments')
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { segments: AdminSegment[] }
+  return body.segments
+}
+
+export async function getSegment(segmentId: string): Promise<AdminSegment> {
+  const response = await adminFetch(
+    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { segment: AdminSegment }
+  return body.segment
+}
+
+export async function createSegment(
+  payload: CreateSegmentPayload,
+): Promise<AdminSegment> {
+  const response = await adminFetch('/api/v1/admin/segments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { segment: AdminSegment }
+  return body.segment
+}
+
+export async function updateSegment(
+  segmentId: string,
+  payload: UpdateSegmentPayload,
+): Promise<AdminSegment> {
+  const response = await adminFetch(
+    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { segment: AdminSegment }
+  return body.segment
+}
+
+export async function publishSegment(segmentId: string): Promise<AdminSegment> {
+  const response = await adminFetch(
+    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}/publish`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { segment: AdminSegment }
+  return body.segment
+}
+
+export async function unpublishSegment(segmentId: string): Promise<AdminSegment> {
+  const response = await adminFetch(
+    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}/unpublish`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { segment: AdminSegment }
+  return body.segment
+}
+
+export async function archiveSegment(segmentId: string): Promise<AdminSegment> {
+  const response = await adminFetch(
+    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}/archive`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { segment: AdminSegment }
+  return body.segment
+}
