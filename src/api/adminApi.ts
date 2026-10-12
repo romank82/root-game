@@ -802,3 +802,104 @@ export async function archiveSegment(segmentId: string): Promise<AdminSegment> {
   const body = (await response.json()) as { segment: AdminSegment }
   return body.segment
 }
+export type AdminGeoZone = {
+  id: string
+  slug: string
+  title: string
+  description: string | null
+  zoneType: string
+  status: string
+  sortOrder: number
+  latitude: number | null
+  longitude: number | null
+  radiusMeters: number | null
+  polygonCoordinates: unknown[] | null
+  timezone: string
+  startsAt: string | null
+  endsAt: string | null
+  maxLocationAccuracyMeters: number | null
+  minimumPresenceSeconds: number
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type CreateGeoZonePayload = {
+  slug: string
+  title: string
+  description?: string | null
+  zone_type?: string
+  sort_order?: number
+  latitude?: number | null
+  longitude?: number | null
+  radius_meters?: number | null
+  polygon_coordinates?: unknown[] | null
+  timezone?: string
+  starts_at?: string | null
+  ends_at?: string | null
+  max_location_accuracy_meters?: number | null
+  minimum_presence_seconds?: number
+}
+
+export type UpdateGeoZonePayload = {
+  slug?: string
+  title?: string
+  description?: string | null
+  zone_type?: string
+  status?: string
+  sort_order?: number
+  latitude?: number | null
+  longitude?: number | null
+  radius_meters?: number | null
+  polygon_coordinates?: unknown[] | null
+  timezone?: string
+  starts_at?: string | null
+  ends_at?: string | null
+  max_location_accuracy_meters?: number | null
+  minimum_presence_seconds?: number
+}
+
+export async function listGeoZones(): Promise<AdminGeoZone[]> {
+  const response = await adminFetch('/api/v1/admin/geo-zones')
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { geoZones: AdminGeoZone[] }
+  return body.geoZones
+}
+
+export async function getGeoZone(zoneId: string): Promise<AdminGeoZone> {
+  const response = await adminFetch(
+    `/api/v1/admin/geo-zones/${encodeURIComponent(zoneId)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { geoZone: AdminGeoZone }
+  return body.geoZone
+}
+
+export async function createGeoZone(
+  payload: CreateGeoZonePayload,
+): Promise<AdminGeoZone> {
+  const response = await adminFetch('/api/v1/admin/geo-zones', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { geoZone: AdminGeoZone }
+  return body.geoZone
+}
+
+export async function updateGeoZone(
+  zoneId: string,
+  payload: UpdateGeoZonePayload,
+): Promise<AdminGeoZone> {
+  const response = await adminFetch(
+    `/api/v1/admin/geo-zones/${encodeURIComponent(zoneId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { geoZone: AdminGeoZone }
+  return body.geoZone
+}

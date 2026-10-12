@@ -13,6 +13,7 @@ import {
   grantPermission,
   listAdminMissions,
   listAdmins,
+  listGeoZones,
   listKeyItems,
   listKeyRules,
   listSegments,
@@ -32,6 +33,7 @@ import {
   updateSystemSetting,
   upsertMissionRuntimePolicy,
   PERMISSION_CATALOG,
+  type AdminGeoZone,
   type AdminMission,
   type AdminMissionPayload,
   type AdminSegment,
@@ -383,6 +385,12 @@ function AdminApp() {
   const [loadingSegments, setLoadingSegments] = useState(false)
   const [segmentsError, setSegmentsError] = useState<string | null>(null)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
+  const [contentTab, setContentTab] = useState<'segments' | 'geozones'>('segments')
+
+  const [geoZones, setGeoZones] = useState<AdminGeoZone[]>([])
+  const [loadingGeoZones, setLoadingGeoZones] = useState(false)
+  const [geoZonesError, setGeoZonesError] = useState<string | null>(null)
+  const [selectedGeoZoneId, setSelectedGeoZoneId] = useState<string | null>(null)
   const [segmentTitle, setSegmentTitle] = useState('')
   const [segmentSlug, setSegmentSlug] = useState('')
   const [segmentDescription, setSegmentDescription] = useState('')
@@ -543,6 +551,29 @@ function AdminApp() {
       cancelled = true
     }
   }, [section])
+
+  useEffect(() => {
+    if (section !== 'content') return
+    if (contentTab !== 'geozones') return
+    let cancelled = false
+    setLoadingGeoZones(true)
+    setGeoZonesError(null)
+    listGeoZones()
+      .then((data) => {
+        if (cancelled) return
+        setGeoZones(data)
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setGeoZonesError(err.message)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingGeoZones(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [section, contentTab])
 
   useEffect(() => {
     setShowCreateKey(false)
@@ -3107,276 +3138,364 @@ function AdminApp() {
       {section === 'content' && (
         <div className="admin-layout">
           <aside className="admin-sidebar">
-            <button
-              className="admin-primary"
-              onClick={handleShowCreateSegment}
-              disabled={!canWrite}
-            >
-              + Новый сегмент
-            </button>
-            <button
-              className="admin-refresh"
-              onClick={() => {
-                setLoadingSegments(true)
-                setSegmentsError(null)
-                listSegments()
-                  .then((data) => setSegments(data))
-                  .catch((err: Error) => setSegmentsError(err.message))
-                  .finally(() => setLoadingSegments(false))
-              }}
-            >
-              ↻ Обновить список
-            </button>
+            {contentTab === 'segments' && (
+              <>
+                <button
+                  className="admin-primary"
+                  onClick={handleShowCreateSegment}
+                  disabled={!canWrite}
+                >
+                  + Новый сегмент
+                </button>
+                <button
+                  className="admin-secondary"
+                  onClick={() => {
+                    setLoadingSegments(true)
+                    setSegmentsError(null)
+                    listSegments()
+                      .then((data) => setSegments(data))
+                      .catch((err: Error) => setSegmentsError(err.message))
+                      .finally(() => setLoadingSegments(false))
+                  }}
+                >
+                  ↻ Обновить список
+                </button>
 
-            {segmentsError && (
-              <p className="admin-alert admin-error">{segmentsError}</p>
+                {segmentsError && (
+                  <p className="admin-alert admin-error">{segmentsError}</p>
+                )}
+
+                <div className="admin-mission-list">
+                  {segments.map((segment) => (
+                    <button
+                      key={segment.id}
+                      className={selectedSegmentId === segment.id ? 'is-active' : ''}
+                      onClick={() => setSelectedSegmentId(segment.id)}
+                    >
+                      <strong>{segment.title}</strong>
+                      <small>{segment.slug}</small>
+                      <span className={`admin-status admin-status-${segment.status}`}>
+                        {segment.status}
+                      </span>
+                    </button>
+                  ))}
+                  {!loadingSegments && segments.length === 0 && !segmentsError && (
+                    <p className="admin-muted">Сегментов нет.</p>
+                  )}
+                </div>
+              </>
             )}
 
-            <div className="admin-mission-list">
-              {segments.map((segment) => (
+            {contentTab === 'geozones' && (
+              <>
                 <button
-                  key={segment.id}
-                  className={selectedSegmentId === segment.id ? 'is-active' : ''}
-                  onClick={() => setSelectedSegmentId(segment.id)}
+                  className="admin-primary"
+                  disabled
+                  title="Создание геозон — следующий шаг"
                 >
-                  <strong>{segment.title}</strong>
-                  <small>{segment.slug}</small>
-                  <span className={`admin-status admin-status-${segment.status}`}>
-                    {segment.status}
-                  </span>
+                  + Новая геозона
                 </button>
-              ))}
-              {!loadingSegments && segments.length === 0 && !segmentsError && (
-                <p className="admin-muted">Сегментов нет.</p>
-              )}
-            </div>
+                <button
+                  className="admin-secondary"
+                  onClick={() => {
+                    setLoadingGeoZones(true)
+                    setGeoZonesError(null)
+                    listGeoZones()
+                      .then((data) => setGeoZones(data))
+                      .catch((err: Error) => setGeoZonesError(err.message))
+                      .finally(() => setLoadingGeoZones(false))
+                  }}
+                >
+                  ↻ Обновить список
+                </button>
+
+                {geoZonesError && (
+                  <p className="admin-alert admin-error">{geoZonesError}</p>
+                )}
+
+                <div className="admin-mission-list">
+                  {geoZones.map((zone) => (
+                    <button
+                      key={zone.id}
+                      className={selectedGeoZoneId === zone.id ? 'is-active' : ''}
+                      onClick={() => setSelectedGeoZoneId(zone.id)}
+                    >
+                      <strong>{zone.title}</strong>
+                      <small>{zone.slug} · {zone.zoneType}</small>
+                      <span className={`admin-status admin-status-${zone.status}`}>
+                        {zone.status}
+                      </span>
+                    </button>
+                  ))}
+                  {!loadingGeoZones && geoZones.length === 0 && !geoZonesError && (
+                    <p className="admin-muted">Геозон нет.</p>
+                  )}
+                </div>
+              </>
+            )}
           </aside>
 
           <section className="admin-editor">
             <div className="admin-editor-title">
               <div>
-                <p className="admin-kicker">
-                  {showCreateSegment
-                    ? 'НОВЫЙ СЕГМЕНТ'
-                    : selectedSegment() ? selectedSegment()!.id : '—'}
-                </p>
-                <h2>
-                  {showCreateSegment
-                    ? 'Создание сегмента'
-                    : selectedSegment() ? 'Редактирование сегмента' : 'Редактор сегмента'}
-                </h2>
-                {selectedSegment() && !showCreateSegment && (
-                  <span
-                    className={`admin-status admin-status-${selectedSegment()!.status}`}
-                  >
-                    {selectedSegment()!.status}
-                  </span>
-                )}
+                <p className="admin-kicker">КОНТЕНТ</p>
+                <h2>Управление контентом</h2>
               </div>
             </div>
 
-            {segmentError && (
-              <p className="admin-alert admin-error">{segmentError}</p>
-            )}
-            {segmentNotice && (
-              <p className="admin-alert admin-notice">{segmentNotice}</p>
-            )}
+            <nav className="admin-nav" style={{ marginBottom: '1rem' }}>
+              <button
+                className={contentTab === 'segments' ? 'is-active' : ''}
+                onClick={() => setContentTab('segments')}
+              >
+                Сегменты
+              </button>
+              <button
+                className={contentTab === 'geozones' ? 'is-active' : ''}
+                onClick={() => setContentTab('geozones')}
+              >
+                Геозоны
+              </button>
+            </nav>
 
-            {(!showCreateSegment && selectedSegment() === null) ? (
-              <p className="admin-muted">
-                Выберите сегмент слева или создайте новый.
-              </p>
-            ) : (
+            {contentTab === 'segments' && (
               <>
-                <label className="admin-field">
-                  <span>Название сегмента</span>
-                  <input
-                    type="text"
-                    value={segmentTitle}
-                    onChange={(e) => setSegmentTitle(e.target.value)}
-                    disabled={!canWrite}
-                  />
-                </label>
-                <label className="admin-field">
-                  <span>Slug</span>
-                  <input
-                    type="text"
-                    value={segmentSlug}
-                    onChange={(e) => setSegmentSlug(e.target.value)}
-                    disabled={!canWrite}
-                  />
-                </label>
-                <label className="admin-field">
-                  <span>Chapter ID</span>
-                  <input
-                    type="text"
-                    value={segmentChapterId}
-                    onChange={(e) => setSegmentChapterId(e.target.value)}
-                    disabled={!canWrite}
-                  />
-                </label>
-                <label className="admin-field">
-                  <span>Описание</span>
-                  <textarea
-                    rows={3}
-                    value={segmentDescription}
-                    onChange={(e) => setSegmentDescription(e.target.value)}
-                    disabled={!canWrite}
-                  />
-                </label>
-                <label className="admin-field">
-                  <span>Порядок сортировки (меньше = выше)</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={segmentSortOrder}
-                    onChange={(e) => setSegmentSortOrder(e.target.value)}
-                    disabled={!canWrite}
-                  />
-                </label>
-                <label className="admin-field">
-                  <span>Content (JSON)</span>
-                  <textarea
-                    rows={8}
-                    className="admin-code"
-                    value={segmentContentJson}
-                    onChange={(e) => setSegmentContentJson(e.target.value)}
-                    disabled={!canWrite}
-                    spellCheck={false}
-                  />
-                </label>
-
-                <section>
-                  <h3 style={{ marginTop: 24 }}>Привязанные миссии</h3>
-
-                  {loadingMissionsForLink && (
-                    <p className="admin-muted">Загрузка миссий…</p>
-                  )}
-                  {missionsForLinkError && (
-                    <p className="admin-alert admin-error">
-                      {missionsForLinkError}
+                <div className="admin-editor-title">
+                  <div>
+                    <p className="admin-kicker">
+                      {showCreateSegment
+                        ? 'НОВЫЙ СЕГМЕНТ'
+                        : selectedSegment() ? selectedSegment()!.id : '—'}
                     </p>
-                  )}
-
-                  <button
-                    className="admin-secondary"
-                    onClick={addSegmentMissionLink}
-                    disabled={!canWrite}
-                  >
-                    + Добавить миссию
-                  </button>
-
-                  {segmentMissions.map((link, index) => (
-                    <div key={index} className="admin-link-row">
-                      <select
-                        value={link.missionId}
-                        disabled={!canWrite}
-                        onChange={(e) =>
-                          changeSegmentMissionLink(index, e.target.value)
-                        }
+                    <h2>
+                      {showCreateSegment
+                        ? 'Создание сегмента'
+                        : selectedSegment() ? 'Редактирование сегмента' : 'Редактор сегмента'}
+                    </h2>
+                    {selectedSegment() && !showCreateSegment && (
+                      <span
+                        className={`admin-status admin-status-${selectedSegment()!.status}`}
                       >
-                        {link.missionId === '' && (
-                          <option value="" disabled>
-                            Выберите миссию…
-                          </option>
-                        )}
-                        {missionsForLink.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.title} · {m.slug} [{m.status}]
-                          </option>
-                        ))}
-                      </select>
+                        {selectedSegment()!.status}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {segmentError && (
+                  <p className="admin-alert admin-error">{segmentError}</p>
+                )}
+                {segmentNotice && (
+                  <p className="admin-alert admin-notice">{segmentNotice}</p>
+                )}
+
+                {(!showCreateSegment && selectedSegment() === null) ? (
+                  <p className="admin-muted">
+                    Выберите сегмент слева или создайте новый.
+                  </p>
+                ) : (
+                  <>
+                    <label className="admin-field">
+                      <span>Название сегмента</span>
+                      <input
+                        type="text"
+                        value={segmentTitle}
+                        onChange={(e) => setSegmentTitle(e.target.value)}
+                        disabled={!canWrite}
+                      />
+                    </label>
+                    <label className="admin-field">
+                      <span>Slug</span>
+                      <input
+                        type="text"
+                        value={segmentSlug}
+                        onChange={(e) => setSegmentSlug(e.target.value)}
+                        disabled={!canWrite}
+                      />
+                    </label>
+                    <label className="admin-field">
+                      <span>Chapter ID</span>
+                      <input
+                        type="text"
+                        value={segmentChapterId}
+                        onChange={(e) => setSegmentChapterId(e.target.value)}
+                        disabled={!canWrite}
+                      />
+                    </label>
+                    <label className="admin-field">
+                      <span>Описание</span>
+                      <textarea
+                        rows={3}
+                        value={segmentDescription}
+                        onChange={(e) => setSegmentDescription(e.target.value)}
+                        disabled={!canWrite}
+                      />
+                    </label>
+                    <label className="admin-field">
+                      <span>Порядок сортировки (меньше = выше)</span>
                       <input
                         type="number"
-                        value={link.sortOrder}
+                        min={0}
+                        value={segmentSortOrder}
+                        onChange={(e) => setSegmentSortOrder(e.target.value)}
                         disabled={!canWrite}
-                        onChange={(e) =>
-                          changeSegmentMissionSort(index, e.target.value)
-                        }
                       />
-                      <button
-                        className="admin-danger"
-                        onClick={() => removeSegmentMissionLink(index)}
+                    </label>
+                    <label className="admin-field">
+                      <span>Content (JSON)</span>
+                      <textarea
+                        rows={8}
+                        className="admin-code"
+                        value={segmentContentJson}
+                        onChange={(e) => setSegmentContentJson(e.target.value)}
                         disabled={!canWrite}
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  ))}
+                        spellCheck={false}
+                      />
+                    </label>
 
-                  {segmentMissions.length === 0 && (
-                    <p className="admin-muted">
-                      Миссии не привязаны. Публикация требует ≥1 published
-                      миссии той же главы.
-                    </p>
-                  )}
-                </section>
 
-                <div className="admin-actions">
-                  {showCreateSegment ? (
-                    <>
-                      <button
-                        className="admin-primary"
-                        onClick={handleCreateSegment}
-                        disabled={!canWrite || savingSegment}
-                      >
-                        {savingSegment ? 'Создание…' : 'Создать'}
-                      </button>
+                    <section>
+                      <h3 style={{ marginTop: 24 }}>Привязанные миссии</h3>
+
+                      {loadingMissionsForLink && (
+                        <p className="admin-muted">Загрузка миссий…</p>
+                      )}
+                      {missionsForLinkError && (
+                        <p className="admin-alert admin-error">
+                          {missionsForLinkError}
+                        </p>
+                      )}
+
                       <button
                         className="admin-secondary"
-                        onClick={() => setShowCreateSegment(false)}
-                        disabled={savingSegment}
+                        onClick={addSegmentMissionLink}
+                        disabled={!canWrite}
                       >
-                        Отмена
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        className="admin-primary"
-                        onClick={handleSaveSegment}
-                        disabled={!canWrite || savingSegment}
-                      >
-                        {savingSegment ? 'Сохранение…' : 'Сохранить'}
+                        + Добавить миссию
                       </button>
 
-                      {selectedSegment()?.status === 'draft' && (
-                        <button
-                          className="admin-publish"
-                          onClick={handlePublishSegment}
-                          disabled={!canWrite || publishingSegment}
-                        >
-                          {publishingSegment ? 'Публикация…' : 'Опубликовать'}
-                        </button>
-                      )}
+                      {segmentMissions.map((link, index) => (
+                        <div key={index} className="admin-link-row">
+                          <select
+                            value={link.missionId}
+                            disabled={!canWrite}
+                            onChange={(e) =>
+                              changeSegmentMissionLink(index, e.target.value)
+                            }
+                          >
+                            {link.missionId === '' && (
+                              <option value="" disabled>
+                                Выберите миссию…
+                              </option>
+                            )}
+                            {missionsForLink.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.title} · {m.slug} [{m.status}]
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            value={link.sortOrder}
+                            disabled={!canWrite}
+                            onChange={(e) =>
+                              changeSegmentMissionSort(index, e.target.value)
+                            }
+                          />
+                          <button
+                            className="admin-danger"
+                            onClick={() => removeSegmentMissionLink(index)}
+                            disabled={!canWrite}
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      ))}
 
-                      {selectedSegment()?.status === 'published' && (
-                        <button
-                          className="admin-secondary"
-                          onClick={handleUnpublishSegment}
-                          disabled={!canWrite || publishingSegment}
-                        >
-                          Снять с публикации
-                        </button>
+                      {segmentMissions.length === 0 && (
+                        <p className="admin-muted">
+                          Миссии не привязаны. Публикация требует ≥1 published
+                          миссии той же главы.
+                        </p>
                       )}
+                    </section>
 
-                      {selectedSegment()?.status === 'published' && (
-                        <button
-                          className="admin-danger"
-                          onClick={handleArchiveSegment}
-                          disabled={!canWrite || publishingSegment}
-                        >
-                          Архивировать
-                        </button>
+                    <div className="admin-actions">
+                      {showCreateSegment ? (
+                        <>
+                          <button
+                            className="admin-primary"
+                            onClick={handleCreateSegment}
+                            disabled={!canWrite || savingSegment}
+                          >
+                            {savingSegment ? 'Создание…' : 'Создать'}
+                          </button>
+                          <button
+                            className="admin-secondary"
+                            onClick={() => setShowCreateSegment(false)}
+                            disabled={savingSegment}
+                          >
+                            Отмена
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="admin-primary"
+                            onClick={handleSaveSegment}
+                            disabled={!canWrite || savingSegment}
+                          >
+                            {savingSegment ? 'Сохранение…' : 'Сохранить'}
+                          </button>
+
+                          {selectedSegment()?.status === 'draft' && (
+                            <button
+                              className="admin-publish"
+                              onClick={handlePublishSegment}
+                              disabled={!canWrite || publishingSegment}
+                            >
+                              {publishingSegment ? 'Публикация…' : 'Опубликовать'}
+                            </button>
+                          )}
+
+                          {selectedSegment()?.status === 'published' && (
+                            <button
+                              className="admin-secondary"
+                              onClick={handleUnpublishSegment}
+                              disabled={!canWrite || publishingSegment}
+                            >
+                              Снять с публикации
+                            </button>
+                          )}
+
+                          {selectedSegment()?.status === 'published' && (
+                            <button
+                              className="admin-danger"
+                              onClick={handleArchiveSegment}
+                              disabled={!canWrite || publishingSegment}
+                            >
+                              Архивировать
+                            </button>
+                          )}
+                        </>
                       )}
-                    </>
-                  )}
-                </div>
+                    </div>
+                  </>
+                )}
               </>
+            )}
+
+            {contentTab === 'geozones' && (
+              <p className="admin-muted">
+                {selectedGeoZoneId
+                  ? 'Редактор геозоны будет добавлен следующим шагом.'
+                  : 'Выберите геозону слева или создайте новую.'}
+              </p>
             )}
           </section>
         </div>
       )}
+
     </main>
   )
 }
