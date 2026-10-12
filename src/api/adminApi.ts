@@ -813,6 +813,7 @@ export type AdminGeoZone = {
   latitude: number | null
   longitude: number | null
   radiusMeters: number | null
+  searchRadiusMeters: number | null
   polygonCoordinates: unknown[] | null
   timezone: string
   startsAt: string | null
@@ -832,6 +833,7 @@ export type CreateGeoZonePayload = {
   latitude?: number | null
   longitude?: number | null
   radius_meters?: number | null
+  search_radius_meters?: number | null
   polygon_coordinates?: unknown[] | null
   timezone?: string
   starts_at?: string | null
@@ -850,6 +852,7 @@ export type UpdateGeoZonePayload = {
   latitude?: number | null
   longitude?: number | null
   radius_meters?: number | null
+  search_radius_meters?: number | null
   polygon_coordinates?: unknown[] | null
   timezone?: string
   starts_at?: string | null

@@ -5,6 +5,7 @@ import {
   archiveSegment,
   createAdmin,
   createAdminMission,
+  createGeoZone,
   createKeyItem,
   createSegment,
   deactivateAdmin,
@@ -28,6 +29,7 @@ import {
   unpublishAdminMission,
   unpublishSegment,
   updateAdminMission,
+  updateGeoZone,
   updateKeyRule,
   updateSegment,
   updateSystemSetting,
@@ -391,6 +393,19 @@ function AdminApp() {
   const [loadingGeoZones, setLoadingGeoZones] = useState(false)
   const [geoZonesError, setGeoZonesError] = useState<string | null>(null)
   const [selectedGeoZoneId, setSelectedGeoZoneId] = useState<string | null>(null)
+  const [geoZoneSlug, setGeoZoneSlug] = useState('')
+  const [geoZoneTitle, setGeoZoneTitle] = useState('')
+  const [geoZoneDescription, setGeoZoneDescription] = useState('')
+  const [geoZoneSortOrder, setGeoZoneSortOrder] = useState('0')
+  const [geoZoneRadiusMeters, setGeoZoneRadiusMeters] = useState('')
+  const [geoZoneSearchRadiusMeters, setGeoZoneSearchRadiusMeters] = useState('')
+  const [geoZoneMaxAccuracy, setGeoZoneMaxAccuracy] = useState('')
+  const [geoZoneMinPresence, setGeoZoneMinPresence] = useState('0')
+  const [geoZoneStatus, setGeoZoneStatus] = useState('draft')
+  const [savingGeoZone, setSavingGeoZone] = useState(false)
+  const [geoZoneError, setGeoZoneError] = useState<string | null>(null)
+  const [geoZoneNotice, setGeoZoneNotice] = useState<string | null>(null)
+  const [showCreateGeoZone, setShowCreateGeoZone] = useState(false)
   const [segmentTitle, setSegmentTitle] = useState('')
   const [segmentSlug, setSegmentSlug] = useState('')
   const [segmentDescription, setSegmentDescription] = useState('')
@@ -622,9 +637,35 @@ function AdminApp() {
   }, [selectedSegmentId, segments])
 
   useEffect(() => {
+    const z = selectedGeoZone()
+    if (!z) {
+      setGeoZoneError(null)
+      setGeoZoneNotice(null)
+      return
+    }
+    setGeoZoneSlug(z.slug)
+    setGeoZoneTitle(z.title)
+    setGeoZoneDescription(z.description ?? '')
+    setGeoZoneSortOrder(String(z.sortOrder))
+    setGeoZoneRadiusMeters(z.radiusMeters === null ? '' : String(z.radiusMeters))
+    setGeoZoneSearchRadiusMeters(z.searchRadiusMeters === null ? '' : String(z.searchRadiusMeters))
+    setGeoZoneMaxAccuracy(z.maxLocationAccuracyMeters === null ? '' : String(z.maxLocationAccuracyMeters))
+    setGeoZoneMinPresence(String(z.minimumPresenceSeconds))
+    setGeoZoneStatus(z.status)
+    setGeoZoneError(null)
+    setGeoZoneNotice(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGeoZoneId, geoZones])
+
+  useEffect(() => {
     setShowCreateSegment(false)
     setSegmentError(null)
   }, [selectedSegmentId, section])
+
+  useEffect(() => {
+    setShowCreateGeoZone(false)
+    setGeoZoneError(null)
+  }, [selectedGeoZoneId, section, contentTab])
 
   useEffect(() => {
     if (section !== 'content') return
@@ -798,6 +839,11 @@ function AdminApp() {
   function selectedSegment(): AdminSegment | null {
     if (selectedSegmentId === null) return null
     return segments.find((s) => s.id === selectedSegmentId) ?? null
+  }
+
+  function selectedGeoZone(): AdminGeoZone | null {
+    if (selectedGeoZoneId === null) return null
+    return geoZones.find((z) => z.id === selectedGeoZoneId) ?? null
   }
 
   async function handleCreateKey() {
@@ -993,6 +1039,104 @@ function AdminApp() {
       setSegmentNotice('Сегмент архивирован.')
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setPublishingSegment(false) }
+  }
+
+  function buildGeoZonePayloadCommon() {
+    const slug = geoZoneSlug.trim()
+    const title = geoZoneTitle.trim()
+    if (slug.length < 3) throw new Error('Slug минимум 3 символа.')
+    if (title.length < 1) throw new Error('Название обязательно.')
+
+    const sortOrder = Number.parseInt(geoZoneSortOrder, 10)
+    if (!Number.isFinite(sortOrder) || sortOrder < 0) {
+      throw new Error('Порядок сортировки — целое ≥ 0.')
+    }
+
+    const radius = Number.parseInt(geoZoneRadiusMeters, 10)
+    if (!Number.isFinite(radius) || radius <= 0) {
+      throw new Error('Размер зоны (radius) — целое > 0.')
+    }
+
+    const searchRadius = Number.parseInt(geoZoneSearchRadiusMeters, 10)
+    if (!Number.isFinite(searchRadius) || searchRadius <= 0) {
+      throw new Error('Радиус поиска — целое > 0.')
+    }
+
+    const minPresence = Number.parseInt(geoZoneMinPresence, 10)
+    if (!Number.isFinite(minPresence) || minPresence < 0) {
+      throw new Error('Минимальное время присутствия — целое ≥ 0.')
+    }
+
+    const maxAccRaw = geoZoneMaxAccuracy.trim()
+    const maxAcc = maxAccRaw === '' ? null : Number.parseInt(maxAccRaw, 10)
+    if (maxAcc !== null && (!Number.isFinite(maxAcc) || maxAcc < 0)) {
+      throw new Error('Точность GPS — целое ≥ 0 или пусто.')
+    }
+
+    return { slug, title, sortOrder, radius, searchRadius, minPresence, maxAcc }
+  }
+
+  async function handleCreateGeoZone() {
+    setSavingGeoZone(true); setGeoZoneError(null); setGeoZoneNotice(null)
+    try {
+      const p = buildGeoZonePayloadCommon()
+      const created = await createGeoZone({
+        slug: p.slug,
+        title: p.title,
+        description: geoZoneDescription.trim() || null,
+        zone_type: 'radius',
+        sort_order: p.sortOrder,
+        radius_meters: p.radius,
+        search_radius_meters: p.searchRadius,
+        minimum_presence_seconds: p.minPresence,
+        max_location_accuracy_meters: p.maxAcc,
+      })
+      setGeoZones((prev) => [...prev, created])
+      setSelectedGeoZoneId(created.id)
+      setShowCreateGeoZone(false)
+      setGeoZoneNotice('Шаблон создан.')
+    } catch (err) { setGeoZoneError((err as Error).message) }
+    finally { setSavingGeoZone(false) }
+  }
+
+  async function handleSaveGeoZone() {
+    const z = selectedGeoZone()
+    if (!z) return
+    setSavingGeoZone(true); setGeoZoneError(null); setGeoZoneNotice(null)
+    try {
+      const p = buildGeoZonePayloadCommon()
+      const updated = await updateGeoZone(z.id, {
+        slug: p.slug,
+        title: p.title,
+        description: geoZoneDescription.trim() || null,
+        zone_type: 'radius',
+        status: geoZoneStatus,
+        sort_order: p.sortOrder,
+        radius_meters: p.radius,
+        search_radius_meters: p.searchRadius,
+        minimum_presence_seconds: p.minPresence,
+        max_location_accuracy_meters: p.maxAcc,
+      })
+      setGeoZones((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+      setGeoZoneNotice('Сохранено.')
+    } catch (err) { setGeoZoneError((err as Error).message) }
+    finally { setSavingGeoZone(false) }
+  }
+
+  function handleShowCreateGeoZone() {
+    setShowCreateGeoZone(true)
+    setGeoZoneSlug('')
+    setGeoZoneTitle('')
+    setGeoZoneDescription('')
+    setGeoZoneSortOrder('0')
+    setGeoZoneRadiusMeters('')
+    setGeoZoneSearchRadiusMeters('')
+    setGeoZoneMaxAccuracy('')
+    setGeoZoneMinPresence('0')
+    setGeoZoneStatus('draft')
+    setGeoZoneError(null)
+    setGeoZoneNotice(null)
+    setSelectedGeoZoneId(null)
   }
 
   function addSegmentMissionLink() {
@@ -3190,8 +3334,8 @@ function AdminApp() {
               <>
                 <button
                   className="admin-primary"
-                  disabled
-                  title="Создание геозон — следующий шаг"
+                  onClick={handleShowCreateGeoZone}
+                  disabled={!canWrite}
                 >
                   + Новая геозона
                 </button>
@@ -3486,11 +3630,180 @@ function AdminApp() {
             )}
 
             {contentTab === 'geozones' && (
-              <p className="admin-muted">
-                {selectedGeoZoneId
-                  ? 'Редактор геозоны будет добавлен следующим шагом.'
-                  : 'Выберите геозону слева или создайте новую.'}
-              </p>
+              <>
+                <div className="admin-editor-title">
+                  <div>
+                    <p className="admin-kicker">
+                      {showCreateGeoZone
+                        ? 'НОВЫЙ ШАБЛОН'
+                        : selectedGeoZone() ? selectedGeoZone()!.id : '—'}
+                    </p>
+                    <h3>
+                      {showCreateGeoZone
+                        ? 'Создание шаблона зоны'
+                        : selectedGeoZone() ? 'Редактирование шаблона' : 'Редактор шаблона зоны'}
+                    </h3>
+                  </div>
+                  {selectedGeoZone() && !showCreateGeoZone && (
+                    <span className={`admin-status admin-status-${selectedGeoZone()!.status}`}>
+                      {selectedGeoZone()!.status}
+                    </span>
+                  )}
+                </div>
+
+                {geoZoneError && <p className="admin-alert admin-error">{geoZoneError}</p>}
+                {geoZoneNotice && <p className="admin-alert">{geoZoneNotice}</p>}
+
+                {!showCreateGeoZone && selectedGeoZone() === null ? (
+                  <p className="admin-muted">
+                    Выберите шаблон слева или создайте новый.
+                    Координаты генерирует сервер в момент взятия миссии.
+                  </p>
+                ) : (
+                  <>
+                    <p className="admin-muted">
+                      Координаты места генерирует сервер при взятии миссии игроком:
+                      в радиусе поиска от фактической точки игрока появляется зона
+                      заданного размера.
+                    </p>
+
+                    <div className="admin-grid">
+                      <label className="admin-span-2">
+                        Название *
+                        <input
+                          value={geoZoneTitle}
+                          disabled={!canWrite}
+                          onChange={(e) => setGeoZoneTitle(e.target.value)}
+                        />
+                      </label>
+
+                      <label>
+                        Slug *
+                        <input
+                          value={geoZoneSlug}
+                          disabled={!canWrite}
+                          onChange={(e) => setGeoZoneSlug(e.target.value)}
+                        />
+                      </label>
+
+                      <label>
+                        Порядок сортировки
+                        <input
+                          type="number"
+                          value={geoZoneSortOrder}
+                          disabled={!canWrite}
+                          onChange={(e) => setGeoZoneSortOrder(e.target.value)}
+                        />
+                      </label>
+
+                      <label className="admin-span-2">
+                        Описание
+                        <textarea
+                          value={geoZoneDescription}
+                          disabled={!canWrite}
+                          onChange={(e) => setGeoZoneDescription(e.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <div className="admin-grid">
+                      <label>
+                        Радиус поиска * (метры)
+                        <input
+                          type="number"
+                          value={geoZoneSearchRadiusMeters}
+                          disabled={!canWrite}
+                          onChange={(e) => setGeoZoneSearchRadiusMeters(e.target.value)}
+                        />
+                        <small className="admin-muted">
+                          Игрок видит этот радиус как область на карте
+                        </small>
+                      </label>
+
+                      <label>
+                        Размер зоны * (метры)
+                        <input
+                          type="number"
+                          value={geoZoneRadiusMeters}
+                          disabled={!canWrite}
+                          onChange={(e) => setGeoZoneRadiusMeters(e.target.value)}
+                        />
+                        <small className="admin-muted">
+                          Игрок не видит размер до момента поиска
+                        </small>
+                      </label>
+
+                      <label>
+                        Точность GPS (метры)
+                        <input
+                          type="number"
+                          value={geoZoneMaxAccuracy}
+                          disabled={!canWrite}
+                          onChange={(e) => setGeoZoneMaxAccuracy(e.target.value)}
+                        />
+                        <small className="admin-muted">
+                          Пусто — без ограничений
+                        </small>
+                      </label>
+
+                      <label>
+                        Время присутствия (секунды)
+                        <input
+                          type="number"
+                          value={geoZoneMinPresence}
+                          disabled={!canWrite}
+                          onChange={(e) => setGeoZoneMinPresence(e.target.value)}
+                        />
+                      </label>
+                    </div>
+
+                    {!showCreateGeoZone && (
+                      <div className="admin-grid">
+                        <label>
+                          Статус
+                          <select
+                            value={geoZoneStatus}
+                            disabled={!canWrite}
+                            onChange={(e) => setGeoZoneStatus(e.target.value)}
+                          >
+                            <option value="draft">draft — черновик</option>
+                            <option value="published">published — активен</option>
+                            <option value="archived">archived — архив</option>
+                          </select>
+                        </label>
+                      </div>
+                    )}
+
+                    <div className="admin-actions">
+                      {showCreateGeoZone ? (
+                        <>
+                          <button
+                            className="admin-primary"
+                            onClick={handleCreateGeoZone}
+                            disabled={!canWrite || savingGeoZone}
+                          >
+                            {savingGeoZone ? 'Создание…' : 'Создать'}
+                          </button>
+                          <button
+                            className="admin-secondary"
+                            onClick={() => setShowCreateGeoZone(false)}
+                            disabled={savingGeoZone}
+                          >
+                            Отмена
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="admin-primary"
+                          onClick={handleSaveGeoZone}
+                          disabled={!canWrite || savingGeoZone}
+                        >
+                          {savingGeoZone ? 'Сохранение…' : 'Сохранить'}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </>
             )}
           </section>
         </div>
