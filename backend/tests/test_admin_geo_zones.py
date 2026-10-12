@@ -20,6 +20,7 @@ def _effective(**overrides: object) -> dict[str, object]:
         "latitude": 55.7558,
         "longitude": 37.6173,
         "radius_meters": 500,
+        "search_radius_meters": 3000,
         "polygon_coordinates": None,
         "timezone": "UTC",
         "starts_at": None,
@@ -46,11 +47,11 @@ class AdminGeoZonesValidationTests(unittest.TestCase):
     def test_validate_geo_zone_rejects_unknown_zone_type(self) -> None:
         self._assert_422(_effective(zone_type="wormhole"), "zone_type")
 
-    def test_validate_geo_zone_radius_rejects_missing_latitude(self) -> None:
-        self._assert_422(_effective(latitude=None), "latitude")
+    def test_validate_geo_zone_radius_rejects_lon_without_lat(self) -> None:
+        self._assert_422(_effective(latitude=None), "latitude/longitude")
 
-    def test_validate_geo_zone_radius_rejects_missing_longitude(self) -> None:
-        self._assert_422(_effective(longitude=None), "longitude")
+    def test_validate_geo_zone_radius_rejects_lat_without_lon(self) -> None:
+        self._assert_422(_effective(longitude=None), "latitude/longitude")
 
     def test_validate_geo_zone_radius_rejects_missing_radius_meters(self) -> None:
         self._assert_422(_effective(radius_meters=None), "radius_meters")
@@ -65,6 +66,9 @@ class AdminGeoZonesValidationTests(unittest.TestCase):
 
     def test_validate_geo_zone_radius_accepts_valid_zone(self) -> None:
         self._assert_ok(_effective())
+
+    def test_validate_geo_zone_radius_accepts_without_coordinates(self) -> None:
+        self._assert_ok(_effective(latitude=None, longitude=None))
 
     def test_validate_geo_zone_polygon_rejects_missing_polygon_coordinates(
         self,
@@ -208,6 +212,7 @@ class AdminGeoZonesResolveEffectiveTests(unittest.TestCase):
             latitude=55.7558,
             longitude=37.6173,
             radius_meters=500,
+            search_radius_meters=3000,
             polygon_coordinates=None,
             timezone="UTC",
             starts_at=None,
@@ -220,6 +225,7 @@ class AdminGeoZonesResolveEffectiveTests(unittest.TestCase):
         self.assertEqual(effective["latitude"], 55.7558)
         self.assertEqual(effective["longitude"], 37.6173)
         self.assertEqual(effective["radius_meters"], 1000)  # перезаписан
+        self.assertEqual(effective["search_radius_meters"], 3000)  # сохранён
         self.assertIsNone(effective["polygon_coordinates"])
         self.assertEqual(effective["timezone"], "UTC")
 
@@ -252,6 +258,7 @@ class AdminGeoZonesSerializationTests(unittest.TestCase):
             latitude=55.7558,
             longitude=37.6173,
             radius_meters=500,
+            search_radius_meters=3000,
             polygon_coordinates=None,
             timezone="Europe/Moscow",
             starts_at=datetime(2026, 10, 1, 9, 0, 0),
@@ -273,6 +280,7 @@ class AdminGeoZonesSerializationTests(unittest.TestCase):
         self.assertEqual(serialized["latitude"], 55.7558)
         self.assertEqual(serialized["longitude"], 37.6173)
         self.assertEqual(serialized["radiusMeters"], 500)
+        self.assertEqual(serialized["searchRadiusMeters"], 3000)
         self.assertIsNone(serialized["polygonCoordinates"])
         self.assertEqual(serialized["timezone"], "Europe/Moscow")
         self.assertEqual(serialized["startsAt"], "2026-10-01T09:00:00")
@@ -295,6 +303,7 @@ class AdminGeoZonesSerializationTests(unittest.TestCase):
             latitude=None,
             longitude=None,
             radius_meters=None,
+            search_radius_meters=None,
             polygon_coordinates=points,
             timezone="UTC",
             starts_at=None,
@@ -322,6 +331,7 @@ class AdminGeoZonesSerializationTests(unittest.TestCase):
             latitude=10.0,
             longitude=20.0,
             radius_meters=None,
+            search_radius_meters=None,
             polygon_coordinates=None,
             timezone="UTC",
             starts_at=None,
@@ -336,12 +346,40 @@ class AdminGeoZonesSerializationTests(unittest.TestCase):
 
         self.assertIsNone(serialized["description"])
         self.assertIsNone(serialized["radiusMeters"])
+        self.assertIsNone(serialized["searchRadiusMeters"])
         self.assertIsNone(serialized["polygonCoordinates"])
         self.assertIsNone(serialized["startsAt"])
         self.assertIsNone(serialized["endsAt"])
         self.assertIsNone(serialized["maxLocationAccuracyMeters"])
         self.assertIsNone(serialized["createdAt"])
         self.assertIsNone(serialized["updatedAt"])
+
+    def test_serialize_geo_zone_includes_search_radius_meters(self) -> None:
+        zone = SimpleNamespace(
+            id="geo-zone-4",
+            slug="search-radius-zone",
+            title="Search radius",
+            description=None,
+            zone_type="radius",
+            status="draft",
+            sort_order=0,
+            latitude=None,
+            longitude=None,
+            radius_meters=500,
+            search_radius_meters=3000,
+            polygon_coordinates=None,
+            timezone="UTC",
+            starts_at=None,
+            ends_at=None,
+            max_location_accuracy_meters=None,
+            minimum_presence_seconds=0,
+            created_at=None,
+            updated_at=None,
+        )
+
+        serialized = _serialize_geo_zone(zone)
+
+        self.assertEqual(serialized["searchRadiusMeters"], 3000)
 
 
 class AdminGeoZonesSlugTests(unittest.TestCase):

@@ -34,6 +34,7 @@ class AdminGeoZoneCreatePayload(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_meters: int | None = Field(default=None, ge=1, le=100_000)
+    search_radius_meters: int | None = Field(default=None, ge=1, le=100_000)
     polygon_coordinates: list[list[float]] | None = Field(default=None)
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
     starts_at: datetime | None = Field(default=None)
@@ -52,6 +53,7 @@ class AdminGeoZoneUpdatePayload(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_meters: int | None = Field(default=None, ge=1, le=100_000)
+    search_radius_meters: int | None = Field(default=None, ge=1, le=100_000)
     polygon_coordinates: list[list[float]] | None = Field(default=None)
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
     starts_at: datetime | None = Field(default=None)
@@ -97,6 +99,7 @@ def _resolve_effective(
             "latitude": payload.latitude,
             "longitude": payload.longitude,
             "radius_meters": payload.radius_meters,
+            "search_radius_meters": payload.search_radius_meters,
             "polygon_coordinates": payload.polygon_coordinates,
             "timezone": payload.timezone,
             "starts_at": payload.starts_at,
@@ -111,6 +114,7 @@ def _resolve_effective(
         "latitude": existing.latitude,
         "longitude": existing.longitude,
         "radius_meters": existing.radius_meters,
+        "search_radius_meters": existing.search_radius_meters,
         "polygon_coordinates": existing.polygon_coordinates,
         "timezone": existing.timezone,
         "starts_at": existing.starts_at,
@@ -124,6 +128,10 @@ def _resolve_effective(
         }
     )
     return effective
+
+
+def _fail(field: str, message: str) -> None:
+    raise HTTPException(status_code=422, detail=f"{field}: {message}")
 
 
 def _validate_geo_zone(effective: dict[str, Any]) -> None:
@@ -150,20 +158,24 @@ def _validate_geo_zone(effective: dict[str, Any]) -> None:
     polygon_coordinates = effective.get("polygon_coordinates")
 
     if zone_type == "radius":
-        if latitude is None:
-            raise HTTPException(status_code=422, detail="Зона radius требует latitude.")
-        if longitude is None:
-            raise HTTPException(status_code=422, detail="Зона radius требует longitude.")
-        if radius_meters is None:
-            raise HTTPException(
-                status_code=422,
-                detail="Зона radius требует radius_meters.",
-            )
-        if polygon_coordinates is not None:
-            raise HTTPException(
-                status_code=422,
-                detail="Зона radius не может содержать polygon_coordinates.",
-            )
+        radius_meters = effective.get("radius_meters")
+        if radius_meters is None or radius_meters <= 0:
+            _fail("radius_meters", "для zone_type=radius обязателен (целое > 0)")
+        search_radius = effective.get("search_radius_meters")
+        if search_radius is None or search_radius <= 0:
+            _fail("search_radius_meters", "для zone_type=radius обязателен (целое > 0)")
+        if effective.get("polygon_coordinates") not in (None, []):
+            _fail("polygon_coordinates", "несовместим с zone_type=radius")
+
+        lat = effective.get("latitude")
+        lon = effective.get("longitude")
+        if (lat is None) != (lon is None):
+            _fail("latitude/longitude", "задавайте оба или ни одного")
+        if lat is not None:
+            if not (-90 <= lat <= 90):
+                _fail("latitude", "должна быть от -90 до 90")
+            if not (-180 <= lon <= 180):
+                _fail("longitude", "должна быть от -180 до 180")
 
     elif zone_type == "polygon":
         if polygon_coordinates is None:
@@ -258,6 +270,7 @@ def _serialize_geo_zone(zone: GeoZone) -> dict[str, Any]:
         "latitude": zone.latitude,
         "longitude": zone.longitude,
         "radiusMeters": zone.radius_meters,
+        "searchRadiusMeters": zone.search_radius_meters,
         "polygonCoordinates": zone.polygon_coordinates,
         "timezone": zone.timezone,
         "startsAt": zone.starts_at.isoformat() if zone.starts_at else None,
@@ -346,6 +359,7 @@ def create_admin_geo_zone(
             latitude=payload.latitude,
             longitude=payload.longitude,
             radius_meters=payload.radius_meters,
+            search_radius_meters=payload.search_radius_meters,
             polygon_coordinates=payload.polygon_coordinates,
             timezone=payload.timezone.strip() or "UTC",
             starts_at=payload.starts_at,
@@ -424,6 +438,7 @@ def update_admin_geo_zone(
             "latitude": "latitude",
             "longitude": "longitude",
             "radius_meters": "radiusMeters",
+            "search_radius_meters": "searchRadiusMeters",
             "polygon_coordinates": "polygonCoordinates",
             "timezone": "timezone",
             "starts_at": "startsAt",

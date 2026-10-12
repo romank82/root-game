@@ -440,6 +440,9 @@ class GeoZone(TimestampMixin, Base):
     Координаты хранятся как Float/JSON: PostGIS не используется.
     Cross-field-валидация по типу зоны (radius требует radius_meters,
     polygon — polygon_coordinates) выполняется в Python-контракте, не в БД.
+
+    GeoZone — шаблон: search_radius_meters задаёт область поиска, в которой
+    сервер генерирует конкретное место зоны при взятии миссии.
     """
 
     __tablename__ = "geo_zones"
@@ -465,6 +468,9 @@ class GeoZone(TimestampMixin, Base):
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     radius_meters: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Радиус поиска: в этом радиусе сервер генерирует место зоны при взятии миссии.
+    # Игрок видит этот радиус как область поиска. radius_meters — размер самой зоны.
+    search_radius_meters: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Контур полигона: [[lat, lon], ...], минимум 3 точки.
     polygon_coordinates: Mapped[list | None] = mapped_column(
@@ -508,6 +514,10 @@ class GeoZone(TimestampMixin, Base):
         CheckConstraint(
             "radius_meters IS NULL OR radius_meters > 0",
             name="ck_geo_zones_radius_positive",
+        ),
+        CheckConstraint(
+            "search_radius_meters IS NULL OR search_radius_meters > 0",
+            name="ck_geo_zones_search_radius_positive",
         ),
         CheckConstraint(
             "max_location_accuracy_meters IS NULL OR max_location_accuracy_meters >= 0",
