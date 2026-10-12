@@ -318,6 +318,20 @@ class MissionEngineAcceptTests(unittest.TestCase):
             )
         self.assertEqual(count, 1)
 
+        # tz-инвариант: оба ответа сериализуют startedAt с "+00:00".
+        # Первый ответ — aware из памяти; второй — после reload из SQLite.
+        # Если этот инвариант нарушится — на фронте сломается new Date(...) в часовых поясах.
+        self.assertIsNotNone(first["startedAt"])
+        self.assertIsNotNone(second["startedAt"])
+        self.assertTrue(
+            first["startedAt"].endswith("+00:00"),
+            f"first.startedAt должен заканчиваться на +00:00, получили: {first['startedAt']!r}",
+        )
+        self.assertTrue(
+            second["startedAt"].endswith("+00:00"),
+            f"second.startedAt должен заканчиваться на +00:00, получили: {second['startedAt']!r}",
+        )
+
     def test_accept_fails_when_mission_has_no_zone(self) -> None:
         ids = self._fixture(with_zone=False)
 
