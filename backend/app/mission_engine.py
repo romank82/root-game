@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
+from app.datetime_utils import ensure_utc
 from app.db import SessionLocal
 from app.fallback_shop import create_first_failure_entitlement
 from app.geo_spawn import generate_spawn_point
@@ -342,12 +343,12 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "status": progress[mission.id].status,
                 "attemptCount": progress[mission.id].attempt_count,
                 "startedAt": (
-                    progress[mission.id].started_at.isoformat()
+                    ensure_utc(progress[mission.id].started_at).isoformat()
                     if progress[mission.id].started_at
                     else None
                 ),
                 "completedAt": (
-                    progress[mission.id].completed_at.isoformat()
+                    ensure_utc(progress[mission.id].completed_at).isoformat()
                     if progress[mission.id].completed_at
                     else None
                 ),
@@ -940,7 +941,7 @@ def _accept_mission_once(
             "search_radius_m": zone_template.search_radius_meters,
             "zone_radius_m": zone_template.radius_meters,
             "ar_object_id": mission.ar_object_id,
-            "generated_at": _utcnow().isoformat(),
+            "generated_at": ensure_utc(_utcnow()).isoformat(),
             "generated_from_lat": latitude,
             "generated_from_lng": longitude,
         }
@@ -981,7 +982,7 @@ def _serialize_accept_response(
         },
         "status": player_mission.status,
         "startedAt": (
-            player_mission.started_at.isoformat()
+            ensure_utc(player_mission.started_at).isoformat()
             if player_mission.started_at
             else None
         ),
