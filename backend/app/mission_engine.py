@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import time
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -10,9 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.fallback_shop import create_first_failure_entitlement
+from app.geo_spawn import generate_spawn_point
 from app.player_restrictions_engine import recompute_player_status
 from app.models import (
     GamePlayer,
+    GeoZone,
     InventoryEvent,
     Item,
     KeyRules,
@@ -185,6 +188,27 @@ def _synchronize_player_missions(
 
     session.flush()
     return progress
+
+
+def _load_mission_for_accept(session: Session, mission_id: str) -> Mission:
+    """Загрузить миссию и проверить, что она published и solo-подобная."""
+    mission = session.get(Mission, mission_id)
+    if mission is None or mission.status != "published":
+        raise MissionEngineError(
+            404,
+            "Миссия не найдена или не опубликована.",
+        )
+    if mission.mission_type == "team":
+        raise MissionEngineError(
+            409,
+            "Командные миссии берутся через отдельный API.",
+        )
+    if mission.geo_zone_id is None:
+        raise MissionEngineError(
+            422,
+            "У миссии не настроена геозона.",
+        )
+    return mission
 
 
 def _serialize_item(player_item: PlayerItem, item: Item) -> dict:
@@ -797,6 +821,142 @@ def _submit_mission_once(
         }
 
 
+def _accept_mission_once(
+    session: Session,
+    *,
+    player_id: str,
+    mission_id: str,
+    latitude: float,
+    longitude: float,
+    accuracy: float | None,
+) -> dict[str, Any]:
+    # Валидация координат
+    if not (-90.0 <= latitude <= 90.0):
+        raise MissionEngineError(
+            422,
+            "latitude должен быть в диапазоне [-90, 90].",
+        )
+    if not (-180.0 <= longitude <= 180.0):
+        raise MissionEngineError(
+            422,
+            "longitude должен быть в диапазоне [-180, 180].",
+        )
+    if accuracy is not None and accuracy <= 0:
+        raise MissionEngineError(
+            422,
+            "accuracy должен быть > 0 или null.",
+        )
+
+    with session.begin():
+        mission = _load_mission_for_accept(session, mission_id)
+        _ensure_player(session, player_id)
+        _synchronize_player_missions(session, player_id)
+
+        player_mission = session.scalars(
+            select(PlayerMission).where(
+                PlayerMission.player_id == player_id,
+                PlayerMission.mission_id == mission_id,
+            )
+        ).first()
+        if player_mission is None:
+            raise MissionEngineError(
+                500,
+                "Прогресс по миссии не найден.",
+            )
+
+        # Терминальные статусы
+        if player_mission.status == "completed":
+            raise MissionEngineError(
+                409,
+                "Миссия уже завершена.",
+            )
+        if player_mission.status == "cancelled":
+            raise MissionEngineError(
+                409,
+                "Миссия отменена.",
+            )
+        if player_mission.status == "locked":
+            raise MissionEngineError(
+                403,
+                "Миссия недоступна: не выполнены требования.",
+            )
+
+        # Идемпотентность: если spawn уже есть в progress — вернуть как есть
+        progress = player_mission.progress or {}
+        existing_spawn = progress.get("spawn")
+        if existing_spawn is not None and player_mission.status == "in_progress":
+            return _serialize_accept_response(
+                mission, player_mission, existing_spawn
+            )
+
+        # Загрузить GeoZone-шаблон
+        zone_template = session.get(GeoZone, mission.geo_zone_id)
+        if zone_template is None or zone_template.search_radius_meters is None:
+            raise MissionEngineError(
+                422,
+                "Шаблон геозоны не найден или не содержит search_radius_meters.",
+            )
+
+        # Сгенерировать spawn
+        spawn = generate_spawn_point(
+            center_latitude=latitude,
+            center_longitude=longitude,
+            search_radius_m=zone_template.search_radius_meters,
+        )
+
+        spawn_record = {
+            "latitude": spawn.latitude,
+            "longitude": spawn.longitude,
+            "search_radius_m": zone_template.search_radius_meters,
+            "zone_radius_m": zone_template.radius_meters,
+            "ar_object_id": mission.ar_object_id,
+            "generated_at": _utcnow().isoformat(),
+            "generated_from_lat": latitude,
+            "generated_from_lng": longitude,
+        }
+
+        progress = dict(progress)
+        progress["spawn"] = spawn_record
+        player_mission.progress = progress
+
+        if player_mission.started_at is None:
+            player_mission.started_at = _utcnow()
+        player_mission.status = "in_progress"
+
+        session.flush()
+
+        return _serialize_accept_response(mission, player_mission, spawn_record)
+
+
+def _serialize_accept_response(
+    mission: Mission,
+    player_mission: PlayerMission,
+    spawn_record: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "accepted": True,
+        "mission": {
+            "id": mission.id,
+            "slug": mission.slug,
+            "title": mission.title,
+            "missionType": mission.mission_type,
+        },
+        "spawn": {
+            "latitude": spawn_record["latitude"],
+            "longitude": spawn_record["longitude"],
+            "searchRadiusMeters": spawn_record["search_radius_m"],
+            "zoneRadiusMeters": spawn_record.get("zone_radius_m"),
+            "arObjectId": spawn_record.get("ar_object_id"),
+            "generatedAt": spawn_record["generated_at"],
+        },
+        "status": player_mission.status,
+        "startedAt": (
+            player_mission.started_at.isoformat()
+            if player_mission.started_at
+            else None
+        ),
+    }
+
 
 def submit_mission(
     player_id: str,
@@ -836,3 +996,27 @@ def submit_mission(
         409,
         "Запрос конкурирует с другой операцией. Повторите отправку миссии.",
     ) from last_error
+
+
+def accept_mission(
+    player_id: str,
+    mission_id: str,
+    latitude: float,
+    longitude: float,
+    accuracy: float | None = None,
+) -> dict[str, Any]:
+    """
+    Игрок берёт миссию: генерируется spawn-точка в радиусе от его GPS.
+
+    Идемпотентно: повторный вызов для in_progress миссии возвращает
+    уже существующий spawn без регенерации.
+    """
+    with SessionLocal() as session:
+        return _accept_mission_once(
+            session,
+            player_id=player_id,
+            mission_id=mission_id,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy=accuracy,
+        )

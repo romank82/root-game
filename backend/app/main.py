@@ -12,6 +12,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.mission_engine import (
     MissionEngineError,
+    accept_mission,
     get_bootstrap as get_engine_bootstrap,
     submit_mission,
 )
@@ -131,6 +132,11 @@ async def correlation_id_middleware(request: Request, call_next):
 class MissionSubmitPayload(BaseModel):
     answer: str | None = None
     sequence: list[str] | None = None
+
+class AcceptMissionPayload(BaseModel):
+    latitude: float
+    longitude: float
+    accuracy: float | None = None
 
 class TelegramAuthPayload(BaseModel):
     init_data: str = Field(
@@ -416,6 +422,29 @@ def submit_engine_mission(
             mission_id=mission_id,
             answer=payload.answer,
             sequence=payload.sequence,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/missions/{mission_id}/accept")
+def accept_engine_mission(
+    request: Request,
+    mission_id: str,
+    payload: AcceptMissionPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return accept_mission(
+            player_id=player_id,
+            mission_id=mission_id,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy=payload.accuracy,
         )
     except MissionEngineError as error:
         raise HTTPException(
