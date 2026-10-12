@@ -154,6 +154,22 @@ class Mission(TimestampMixin, Base):
         nullable=True,
         index=True,
     )
+
+    # Геозона-шаблон: сервер сгенерирует координаты при взятии миссии (Sprint 8.2).
+    # Привязка опциональна для draft, но обязательна для published (правило в admin_missions).
+    geo_zone_id: Mapped[str | None] = mapped_column(
+        ForeignKey("geo_zones.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # AR-объект: показывается игроку после сканирования QR (Sprint 8.6+).
+    # Привязка опциональна для draft, обязательна для published.
+    ar_object_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ar_objects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     mission_type: Mapped[str] = mapped_column(String(64), nullable=False)
     mission_category: Mapped[str] = mapped_column(

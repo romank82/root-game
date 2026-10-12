@@ -21,7 +21,9 @@ from app.mission_categories import is_valid_category
 from app.models import (
     AdminAuditLog,
     AdminUser,
+    ARObject,
     Chapter,
+    GeoZone,
     Item,
     Mission,
     MissionReward,
@@ -81,6 +83,8 @@ class AdminMissionRewardPayload(BaseModel):
 class AdminMissionCreatePayload(BaseModel):
     chapter_id: str = Field(min_length=1, max_length=64)
     story_node_id: str | None = Field(default=None, max_length=64)
+    geo_zone_id: str | None = Field(default=None, max_length=64)
+    ar_object_id: str | None = Field(default=None, max_length=64)
     slug: str = Field(min_length=3, max_length=128)
     mission_type: str = Field(min_length=1, max_length=64)
     mission_category: str = Field(default="solo", min_length=1, max_length=32)
@@ -95,6 +99,8 @@ class AdminMissionCreatePayload(BaseModel):
 class AdminMissionUpdatePayload(BaseModel):
     chapter_id: str | None = Field(default=None, min_length=1, max_length=64)
     story_node_id: str | None = Field(default=None, max_length=64)
+    geo_zone_id: str | None = Field(default=None, max_length=64)
+    ar_object_id: str | None = Field(default=None, max_length=64)
     slug: str | None = Field(default=None, min_length=3, max_length=128)
     mission_type: str | None = Field(default=None, min_length=1, max_length=64)
     mission_category: str | None = Field(default=None, max_length=32)
@@ -141,6 +147,8 @@ def _serialize_mission(
         "id": mission.id,
         "chapterId": mission.chapter_id,
         "storyNodeId": mission.story_node_id,
+        "geoZoneId": mission.geo_zone_id,
+        "arObjectId": mission.ar_object_id,
         "slug": mission.slug,
         "missionType": mission.mission_type,
         "missionCategory": mission.mission_category,
@@ -200,6 +208,8 @@ def _validate_references(
     *,
     chapter_id: str,
     story_node_id: str | None,
+    geo_zone_id: str | None,
+    ar_object_id: str | None,
 ) -> None:
     if session.get(Chapter, chapter_id) is None:
         raise HTTPException(
@@ -211,6 +221,18 @@ def _validate_references(
         raise HTTPException(
             status_code=422,
             detail="Указанный story_node_id не существует.",
+        )
+
+    if geo_zone_id is not None and session.get(GeoZone, geo_zone_id) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Указанная геозона (geo_zone_id) не существует.",
+        )
+
+    if ar_object_id is not None and session.get(ARObject, ar_object_id) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Указанный AR-объект (ar_object_id) не существует.",
         )
 
 
@@ -281,7 +303,20 @@ def _validate_for_publish(
         session,
         chapter_id=mission.chapter_id,
         story_node_id=mission.story_node_id,
+        geo_zone_id=mission.geo_zone_id,
+        ar_object_id=mission.ar_object_id,
     )
+
+    if mission.geo_zone_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Для публикации миссии обязательна привязка геозоны (geo_zone_id).",
+        )
+    if mission.ar_object_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Для публикации миссии обязательна привязка AR-объекта (ar_object_id).",
+        )
 
     if mission.mission_type == "team":
         _validate_team_mission_config(mission.validation_config)
@@ -431,6 +466,8 @@ def create_admin_mission(
             session,
             chapter_id=payload.chapter_id,
             story_node_id=payload.story_node_id,
+            geo_zone_id=payload.geo_zone_id,
+            ar_object_id=payload.ar_object_id,
         )
         _validate_rewards(session, payload.rewards)
         _validate_mission_category(payload.mission_category)
@@ -439,6 +476,8 @@ def create_admin_mission(
             id=_new_id("mission"),
             chapter_id=payload.chapter_id,
             story_node_id=payload.story_node_id,
+            geo_zone_id=payload.geo_zone_id,
+            ar_object_id=payload.ar_object_id,
             slug=slug,
             mission_type=payload.mission_type.strip(),
             mission_category=payload.mission_category,
@@ -522,10 +561,20 @@ def update_admin_mission(
             mission.story_node_id = updates["story_node_id"]
             changed_fields.append("storyNodeId")
 
+        if "geo_zone_id" in updates:
+            mission.geo_zone_id = updates["geo_zone_id"]
+            changed_fields.append("geoZoneId")
+
+        if "ar_object_id" in updates:
+            mission.ar_object_id = updates["ar_object_id"]
+            changed_fields.append("arObjectId")
+
         _validate_references(
             session,
             chapter_id=mission.chapter_id,
             story_node_id=mission.story_node_id,
+            geo_zone_id=mission.geo_zone_id,
+            ar_object_id=mission.ar_object_id,
         )
 
         if "mission_category" in updates:

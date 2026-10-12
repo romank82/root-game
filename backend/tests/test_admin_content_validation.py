@@ -132,6 +132,8 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             validation_config=valid_team_validation_config(),
             chapter_id="chapter-test",
             story_node_id=None,
+            geo_zone_id="zone-test",
+            ar_object_id="ar-test",
             id="mission-test",
         )
         session = SimpleNamespace(
@@ -156,6 +158,8 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             session,
             chapter_id="chapter-test",
             story_node_id=None,
+            geo_zone_id="zone-test",
+            ar_object_id="ar-test",
         )
         validate_team_config.assert_called_once_with(mission.validation_config)
         validate_rewards.assert_called_once_with(session, [])
@@ -170,6 +174,8 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             validation_config=invalid_team_validation_config(),
             chapter_id="chapter-test",
             story_node_id=None,
+            geo_zone_id="zone-test",
+            ar_object_id="ar-test",
         )
         session = SimpleNamespace()
 
