@@ -472,6 +472,12 @@ class GeoZone(TimestampMixin, Base):
     # Игрок видит этот радиус как область поиска. radius_meters — размер самой зоны.
     search_radius_meters: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Правила размещения: {'avoid_buildings': true, 'avoid_water': true, 'avoid_roads': true, 'avoid_private': true}.
+    # Используется сервером при генерации точки зоны в Спринте 8.2.
+    location_constraints: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict,
+    )
+
     # Контур полигона: [[lat, lon], ...], минимум 3 точки.
     polygon_coordinates: Mapped[list | None] = mapped_column(
         JSON, nullable=True, default=list
@@ -570,6 +576,16 @@ class ARObject(TimestampMixin, Base):
     asset_mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     scene_preset: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # Размер AR-объекта в реальном мире (метры). 1.0 = 1 метр.
+    # Модель нормализуется так, что 1 unit = 1 метр; scale_meters — множитель.
+    scale_meters: Mapped[float] = mapped_column(
+        Float, nullable=False, default=1.0,
+    )
+    # Ориентация: 'free' — вращается, 'upright' — стоит, 'flat' — лежит плашмя.
+    orientation: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="free",
+    )
+
     discovery_scenario: Mapped[dict] = mapped_column(
         JSON, nullable=False, default=dict
     )
@@ -594,6 +610,14 @@ class ARObject(TimestampMixin, Base):
         CheckConstraint(
             "ends_at IS NULL OR starts_at IS NULL OR ends_at >= starts_at",
             name="ck_ar_objects_time_order",
+        ),
+        CheckConstraint(
+            "scale_meters > 0 AND scale_meters <= 10",
+            name="ck_ar_objects_scale_range",
+        ),
+        CheckConstraint(
+            "orientation IN ('free', 'upright', 'flat')",
+            name="ck_ar_objects_orientation",
         ),
         Index(
             "ix_ar_objects_geo_zone_status",

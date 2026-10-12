@@ -35,6 +35,7 @@ class AdminGeoZoneCreatePayload(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_meters: int | None = Field(default=None, ge=1, le=100_000)
     search_radius_meters: int | None = Field(default=None, ge=1, le=100_000)
+    location_constraints: dict[str, Any] = Field(default_factory=dict)
     polygon_coordinates: list[list[float]] | None = Field(default=None)
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
     starts_at: datetime | None = Field(default=None)
@@ -54,6 +55,7 @@ class AdminGeoZoneUpdatePayload(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_meters: int | None = Field(default=None, ge=1, le=100_000)
     search_radius_meters: int | None = Field(default=None, ge=1, le=100_000)
+    location_constraints: dict[str, Any] | None = None
     polygon_coordinates: list[list[float]] | None = Field(default=None)
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
     starts_at: datetime | None = Field(default=None)
@@ -100,6 +102,7 @@ def _resolve_effective(
             "longitude": payload.longitude,
             "radius_meters": payload.radius_meters,
             "search_radius_meters": payload.search_radius_meters,
+            "location_constraints": payload.location_constraints,
             "polygon_coordinates": payload.polygon_coordinates,
             "timezone": payload.timezone,
             "starts_at": payload.starts_at,
@@ -115,6 +118,7 @@ def _resolve_effective(
         "longitude": existing.longitude,
         "radius_meters": existing.radius_meters,
         "search_radius_meters": existing.search_radius_meters,
+        "location_constraints": existing.location_constraints,
         "polygon_coordinates": existing.polygon_coordinates,
         "timezone": existing.timezone,
         "starts_at": existing.starts_at,
@@ -134,7 +138,35 @@ def _fail(field: str, message: str) -> None:
     raise HTTPException(status_code=422, detail=f"{field}: {message}")
 
 
+VALID_LOCATION_CONSTRAINT_KEYS = frozenset({
+    "avoid_buildings",
+    "avoid_water",
+    "avoid_roads",
+    "avoid_private",
+})
+
+
+def _validate_location_constraints(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        _fail("location_constraints", "должен быть JSON-объектом")
+    for key, val in value.items():
+        if key not in VALID_LOCATION_CONSTRAINT_KEYS:
+            _fail(
+                "location_constraints",
+                f"неизвестный ключ: {key}. Допустимы: {', '.join(sorted(VALID_LOCATION_CONSTRAINT_KEYS))}",
+            )
+        if not isinstance(val, bool):
+            _fail(
+                "location_constraints",
+                f"значение для {key} должно быть boolean",
+            )
+
+
 def _validate_geo_zone(effective: dict[str, Any]) -> None:
+    _validate_location_constraints(effective.get("location_constraints"))
+
     zone_type = effective.get("zone_type")
 
     if zone_type not in VALID_ZONE_TYPES:
@@ -271,6 +303,7 @@ def _serialize_geo_zone(zone: GeoZone) -> dict[str, Any]:
         "longitude": zone.longitude,
         "radiusMeters": zone.radius_meters,
         "searchRadiusMeters": zone.search_radius_meters,
+        "locationConstraints": zone.location_constraints or {},
         "polygonCoordinates": zone.polygon_coordinates,
         "timezone": zone.timezone,
         "startsAt": zone.starts_at.isoformat() if zone.starts_at else None,
@@ -360,6 +393,7 @@ def create_admin_geo_zone(
             longitude=payload.longitude,
             radius_meters=payload.radius_meters,
             search_radius_meters=payload.search_radius_meters,
+            location_constraints=payload.location_constraints,
             polygon_coordinates=payload.polygon_coordinates,
             timezone=payload.timezone.strip() or "UTC",
             starts_at=payload.starts_at,
@@ -439,6 +473,7 @@ def update_admin_geo_zone(
             "longitude": "longitude",
             "radius_meters": "radiusMeters",
             "search_radius_meters": "searchRadiusMeters",
+            "location_constraints": "locationConstraints",
             "polygon_coordinates": "polygonCoordinates",
             "timezone": "timezone",
             "starts_at": "startsAt",
@@ -470,6 +505,9 @@ def update_admin_geo_zone(
 
             if field_name == "timezone" and value is not None:
                 value = value.strip()
+
+            if field_name == "location_constraints" and value is None:
+                value = {}
 
             setattr(zone, field_name, value)
             changed_fields.append(audit_name)

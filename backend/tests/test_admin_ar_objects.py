@@ -29,6 +29,8 @@ def _ar_object(**overrides: object) -> SimpleNamespace:
         "asset_uri": "https://cdn.example.com/assets/tower.glb",
         "asset_mime_type": None,
         "scene_preset": None,
+        "scale_meters": 1.0,
+        "orientation": "free",
         "discovery_scenario": {"trigger": "proximity"},
         "minigame_config": {},
         "instruction_text": None,
@@ -147,6 +149,8 @@ class AdminARObjectSerializationTests(unittest.TestCase):
         obj = _ar_object(
             starts_at=datetime(2026, 6, 1, 7, 0, 0),
             ends_at=datetime(2026, 7, 1, 23, 59, 59),
+            scale_meters=1.5,
+            orientation="upright",
         )
 
         serialized = _serialize_ar_object(obj)
@@ -164,6 +168,8 @@ class AdminARObjectSerializationTests(unittest.TestCase):
         )
         self.assertIsNone(serialized["assetMimeType"])
         self.assertIsNone(serialized["scenePreset"])
+        self.assertEqual(serialized["scaleMeters"], 1.5)
+        self.assertEqual(serialized["orientation"], "upright")
         self.assertIsNone(serialized["instructionText"])
         self.assertEqual(serialized["startsAt"], "2026-06-01T07:00:00")
         self.assertEqual(serialized["endsAt"], "2026-07-01T23:59:59")

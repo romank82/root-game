@@ -34,6 +34,8 @@ class AdminARObjectCreatePayload(BaseModel):
     asset_uri: str = Field(min_length=1, max_length=512)
     asset_mime_type: str | None = Field(default=None, max_length=128)
     scene_preset: str | None = Field(default=None, max_length=128)
+    scale_meters: float = Field(default=1.0, gt=0.0, le=10.0)
+    orientation: str = Field(default="free", min_length=1, max_length=32)
     discovery_scenario: dict[str, Any] = Field(default_factory=dict)
     minigame_config: dict[str, Any] = Field(default_factory=dict)
     instruction_text: str | None = Field(default=None, max_length=20_000)
@@ -53,6 +55,8 @@ class AdminARObjectUpdatePayload(BaseModel):
     asset_uri: str | None = Field(default=None, min_length=1, max_length=512)
     asset_mime_type: str | None = Field(default=None, max_length=128)
     scene_preset: str | None = Field(default=None, max_length=128)
+    scale_meters: float | None = Field(default=None, gt=0.0, le=10.0)
+    orientation: str | None = Field(default=None, min_length=1, max_length=32)
     discovery_scenario: dict[str, Any] | None = None
     minigame_config: dict[str, Any] | None = None
     instruction_text: str | None = Field(default=None, max_length=20_000)
@@ -114,6 +118,19 @@ def _validate_time_window(
         )
 
 
+VALID_ORIENTATIONS = frozenset({"free", "upright", "flat"})
+
+
+def _validate_orientation(value: str | None) -> None:
+    if value is None:
+        return
+    if value not in VALID_ORIENTATIONS:
+        raise HTTPException(
+            status_code=422,
+            detail="orientation должен быть одним из: free, upright, flat.",
+        )
+
+
 def _serialize_ar_object(obj: ARObject) -> dict[str, Any]:
     return {
         "id": obj.id,
@@ -127,6 +144,8 @@ def _serialize_ar_object(obj: ARObject) -> dict[str, Any]:
         "assetUri": obj.asset_uri,
         "assetMimeType": obj.asset_mime_type,
         "scenePreset": obj.scene_preset,
+        "scaleMeters": obj.scale_meters,
+        "orientation": obj.orientation,
         "discoveryScenario": obj.discovery_scenario,
         "minigameConfig": obj.minigame_config,
         "instructionText": obj.instruction_text,
@@ -204,6 +223,7 @@ def create_admin_ar_object(
 
         _validate_geo_zone_exists(session, payload.geo_zone_id)
         _validate_time_window(payload.starts_at, payload.ends_at)
+        _validate_orientation(payload.orientation)
 
         obj = ARObject(
             id=_new_id("ar-object"),
@@ -221,6 +241,8 @@ def create_admin_ar_object(
                 payload.asset_mime_type.strip() if payload.asset_mime_type else None
             ),
             scene_preset=payload.scene_preset.strip() if payload.scene_preset else None,
+            scale_meters=payload.scale_meters,
+            orientation=payload.orientation,
             discovery_scenario=payload.discovery_scenario,
             minigame_config=payload.minigame_config,
             instruction_text=(
@@ -280,6 +302,7 @@ def update_admin_ar_object(
         effective_starts = updates.get("starts_at", obj.starts_at)
         effective_ends = updates.get("ends_at", obj.ends_at)
         _validate_time_window(effective_starts, effective_ends)
+        _validate_orientation(payload.orientation)
 
         if "slug" in updates:
             slug = _normalize_slug(updates["slug"])
@@ -307,6 +330,8 @@ def update_admin_ar_object(
             "asset_uri": "assetUri",
             "asset_mime_type": "assetMimeType",
             "scene_preset": "scenePreset",
+            "scale_meters": "scaleMeters",
+            "orientation": "orientation",
             "discovery_scenario": "discoveryScenario",
             "minigame_config": "minigameConfig",
             "instruction_text": "instructionText",
@@ -323,6 +348,9 @@ def update_admin_ar_object(
 
             if field_name in ("title", "object_type", "asset_uri") and value is not None:
                 value = value.strip()
+
+            if field_name == "orientation" and value is not None:
+                value = value.strip().lower()
 
             if (
                 field_name
