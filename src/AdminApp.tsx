@@ -64,6 +64,8 @@ type RewardForm = {
 type MissionForm = {
   chapterId: string
   storyNodeId: string
+  geoZoneId: string
+  arObjectId: string
   slug: string
   missionType: string
   missionCategory: string
@@ -100,6 +102,8 @@ const emptyReward = (): RewardForm => ({
 const emptyForm = (): MissionForm => ({
   chapterId: '',
   storyNodeId: '',
+  geoZoneId: '',
+  arObjectId: '',
   slug: '',
   missionType: 'text_answer',
   missionCategory: 'solo',
@@ -205,6 +209,8 @@ function formFromMission(mission: AdminMission): MissionForm {
   return {
     chapterId: mission.chapterId,
     storyNodeId: mission.storyNodeId ?? '',
+    geoZoneId: mission.geoZoneId ?? '',
+    arObjectId: mission.arObjectId ?? '',
     slug: mission.slug,
     missionType: mission.missionType,
     missionCategory: mission.missionCategory ?? 'solo',
@@ -325,6 +331,8 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
   return {
     chapter_id: form.chapterId.trim(),
     story_node_id: form.storyNodeId.trim() || null,
+    geo_zone_id: form.geoZoneId.trim() || null,
+    ar_object_id: form.arObjectId.trim() || null,
     slug: form.slug.trim(),
     mission_type: form.missionType.trim(),
     mission_category: form.missionCategory,
@@ -642,6 +650,35 @@ function AdminApp() {
       cancelled = true
     }
   }, [section, contentTab])
+
+  useEffect(() => {
+    if (section !== 'missions') return
+    let cancelled = false
+
+    listGeoZones()
+      .then((data) => {
+        if (cancelled) return
+        setGeoZones(data)
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setGeoZonesError(err.message)
+      })
+
+    listARObjects()
+      .then((data) => {
+        if (cancelled) return
+        setARObjects(data)
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setARObjectsError(err.message)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [section])
 
   useEffect(() => {
     setShowCreateKey(false)
@@ -2026,6 +2063,52 @@ function AdminApp() {
                   setForm({ ...form, storyNodeId: event.target.value })
                 }
               />
+            </label>
+
+            <label>
+              Геозона *
+              <select
+                value={form.geoZoneId}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, geoZoneId: event.target.value })
+                }
+              >
+                <option value="">— не выбрано —</option>
+                {form.geoZoneId && !geoZones.some((z) => z.id === form.geoZoneId) && (
+                  <option value={form.geoZoneId}>
+                    (нет в списке: {form.geoZoneId})
+                  </option>
+                )}
+                {geoZones.map((z) => (
+                  <option key={z.id} value={z.id}>
+                    {z.title} · {z.slug} [{z.status}]
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              AR-объект *
+              <select
+                value={form.arObjectId}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, arObjectId: event.target.value })
+                }
+              >
+                <option value="">— не выбрано —</option>
+                {form.arObjectId && !arObjects.some((o) => o.id === form.arObjectId) && (
+                  <option value={form.arObjectId}>
+                    (нет в списке: {form.arObjectId})
+                  </option>
+                )}
+                {arObjects.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.title} · {o.slug} [{o.status}]
+                  </option>
+                ))}
+              </select>
             </label>
 
             <label>

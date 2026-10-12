@@ -23,6 +23,8 @@ export type AdminMission = {
   id: string
   chapterId: string
   storyNodeId: string | null
+  geoZoneId: string | null
+  arObjectId: string | null
   slug: string
   missionType: string
   missionCategory: string
@@ -40,6 +42,8 @@ export type AdminMission = {
 export type AdminMissionPayload = {
   chapter_id: string
   story_node_id?: string | null
+  geo_zone_id?: string | null
+  ar_object_id?: string | null
   slug: string
   mission_type: string
   mission_category?: string
