@@ -4,6 +4,15 @@ export type EngineMissionStatus =
   | 'in_progress'
   | 'completed'
 
+export type EngineMissionSpawn = {
+  latitude: number
+  longitude: number
+  searchRadiusMeters: number
+  zoneRadiusMeters: number | null
+  arObjectId: string | null
+  generatedAt: string
+}
+
 export type EngineMission = {
   id: string
   slug: string
@@ -13,10 +22,24 @@ export type EngineMission = {
   content: Record<string, unknown>
   geoZoneId: string | null
   arObjectId: string | null
+  spawn: EngineMissionSpawn | null
   status: EngineMissionStatus
   attemptCount: number
   startedAt: string | null
   completedAt: string | null
+}
+
+export type EngineAcceptMissionResponse = {
+  accepted: boolean
+  mission: {
+    id: string
+    slug: string
+    title: string
+    missionType: string
+  }
+  spawn: EngineMissionSpawn
+  status: string
+  startedAt: string | null
 }
 
 export type EngineInventoryItem = {
@@ -211,6 +234,34 @@ export async function submitEngineMission(
   }
 
   return response.json() as Promise<MissionSubmission>
+}
+
+export type AcceptMissionPayload = {
+  latitude: number
+  longitude: number
+  accuracy?: number | null
+}
+
+export async function acceptEngineMission(
+  missionId: string,
+  payload: AcceptMissionPayload,
+): Promise<EngineAcceptMissionResponse> {
+  const response = await apiFetch(
+    `/api/v1/engine/missions/${missionId}/accept`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineAcceptMissionResponse>
 }
 
 export async function listFallbackOffers(): Promise<FallbackOffer[]> {
