@@ -569,6 +569,14 @@
 - **Client UI:** фоновая отправка координат при движении.
 - **Проверка:** сервер принимает доказательства только от игрока в зоне.
 
+### Cleanup после Sprint 8.4.f
+
+- **Что**: удалить временный dev-компонент `src/components/DevAcceptMissionButton.tsx` и его рендер в `src/App.tsx` (строка с `{import.meta.env.DEV && <DevAcceptMissionButton />}`).
+- **Причина**: временная кнопка для проверки accept на телефоне (Sprint 8.4.f). В production не появляется (защита через `import.meta.env.DEV`), но код нужно удалить.
+- **Как найти**: `grep -rn "DevAcceptMissionButton" src/`.
+- **Проверка**: после удаления `npm run build` зелёный, `grep -rn "DevAcceptMissionButton" src/` пуст.
+- **Статус**: ⏳ pending, после Sprint 8.5.
+
 ### Спринт 8.6. AR-камера + куб — вертикальный срез
 - **Backend:** — (без изменений).
 - **Client UI:** WebXR/Three.js: рендер куба в камере телефона, привязка к координатам.
