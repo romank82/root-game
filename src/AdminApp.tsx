@@ -55,7 +55,15 @@ type MissionForm = {
   title: string
   description: string
   content: string
+  contentLabel: string
+  contentQuestion: string
+  contentInputPlaceholder: string
+  contentSuccessTitle: string
+  contentSuccessText: string
   validationConfig: string
+  validationValidator: string
+  validationAcceptedAnswers: string[]
+  validationCorrectSequence: string[]
   sortOrder: string
   rewards: RewardForm[]
 }
@@ -78,8 +86,16 @@ const emptyForm = (): MissionForm => ({
   title: '',
   description: '',
   content: '{}',
+  contentLabel: '',
+  contentQuestion: '',
+  contentInputPlaceholder: '',
+  contentSuccessTitle: '',
+  contentSuccessText: '',
   validationConfig:
     '{"validator":"normalized_text_match","acceptedAnswers":[]}',
+  validationValidator: 'normalized_text_match',
+  validationAcceptedAnswers: [''],
+  validationCorrectSequence: [''],
   sortOrder: '0',
   rewards: [emptyReward()],
 })
@@ -89,6 +105,72 @@ function prettyJson(value: Record<string, unknown>): string {
 }
 
 function formFromMission(mission: AdminMission): MissionForm {
+  const isTextAnswer = mission.missionType === 'text_answer'
+  const hasContentObject =
+    isTextAnswer &&
+    mission.content !== null &&
+    typeof mission.content === 'object'
+  const ui =
+    hasContentObject &&
+    typeof (mission.content as Record<string, unknown>).ui === 'object' &&
+    (mission.content as Record<string, unknown>).ui !== null
+      ? ((mission.content as Record<string, unknown>).ui as Record<
+          string,
+          unknown
+        >)
+      : {}
+  const uiEntry = (key: string): string => {
+    const value = ui[key]
+    return typeof value === 'string' ? value : ''
+  }
+
+  const isStructuredValidation =
+    mission.missionType === 'text_answer' ||
+    mission.missionType === 'code_repair'
+
+  let validationConfig: string
+  let validationValidator: string
+  let validationAcceptedAnswers: string[]
+  let validationCorrectSequence: string[]
+
+  if (isStructuredValidation) {
+    const cfg =
+      mission.validationConfig !== null &&
+      typeof mission.validationConfig === 'object'
+        ? (mission.validationConfig as Record<string, unknown>)
+        : {}
+
+    validationValidator =
+      typeof cfg.validator === 'string'
+        ? cfg.validator
+        : mission.missionType === 'code_repair'
+          ? 'ordered_blocks_match'
+          : 'normalized_text_match'
+
+    const acceptedRaw = Array.isArray(cfg.acceptedAnswers)
+      ? cfg.acceptedAnswers
+      : []
+    const accepted = acceptedRaw.filter(
+      (a): a is string => typeof a === 'string' && a.trim().length > 0,
+    )
+    validationAcceptedAnswers = accepted.length > 0 ? accepted : ['']
+
+    const sequenceRaw = Array.isArray(cfg.correctSequence)
+      ? cfg.correctSequence
+      : []
+    const sequence = sequenceRaw.filter(
+      (s): s is string => typeof s === 'string' && s.trim().length > 0,
+    )
+    validationCorrectSequence = sequence.length > 0 ? sequence : ['']
+
+    validationConfig = ''
+  } else {
+    validationConfig = prettyJson(mission.validationConfig)
+    validationValidator = 'normalized_text_match'
+    validationAcceptedAnswers = ['']
+    validationCorrectSequence = ['']
+  }
+
   return {
     chapterId: mission.chapterId,
     storyNodeId: mission.storyNodeId ?? '',
@@ -97,8 +179,16 @@ function formFromMission(mission: AdminMission): MissionForm {
     missionCategory: mission.missionCategory ?? 'solo',
     title: mission.title,
     description: mission.description ?? '',
-    content: prettyJson(mission.content),
-    validationConfig: prettyJson(mission.validationConfig),
+    content: isTextAnswer ? '{}' : prettyJson(mission.content),
+    contentLabel: uiEntry('label'),
+    contentQuestion: uiEntry('question'),
+    contentInputPlaceholder: uiEntry('inputPlaceholder'),
+    contentSuccessTitle: uiEntry('successTitle'),
+    contentSuccessText: uiEntry('successText'),
+    validationConfig,
+    validationValidator,
+    validationAcceptedAnswers,
+    validationCorrectSequence,
     sortOrder: String(mission.sortOrder),
     rewards: mission.rewards.map((reward) => ({
       rewardType: reward.rewardType,
@@ -137,6 +227,47 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     sort_order: Number(reward.sortOrder || 0),
   }))
 
+  let content: Record<string, unknown>
+  if (form.missionType === 'text_answer') {
+    content = {
+      schemaVersion: 1,
+      ui: {
+        label: form.contentLabel.trim(),
+        question: form.contentQuestion.trim(),
+        inputPlaceholder: form.contentInputPlaceholder.trim(),
+        successTitle: form.contentSuccessTitle.trim(),
+        successText: form.contentSuccessText.trim(),
+      },
+    }
+  } else {
+    content = parseObject(form.content, 'Content')
+  }
+
+  const isStructuredValidation =
+    form.missionType === 'text_answer' ||
+    form.missionType === 'code_repair'
+
+  let validation_config: Record<string, unknown>
+  if (isStructuredValidation) {
+    if (form.validationValidator === 'ordered_blocks_match') {
+      validation_config = {
+        validator: 'ordered_blocks_match',
+        correctSequence: form.validationCorrectSequence
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      }
+    } else {
+      validation_config = {
+        validator: 'normalized_text_match',
+        acceptedAnswers: form.validationAcceptedAnswers
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      }
+    }
+  } else {
+    validation_config = parseObject(form.validationConfig, 'Validation config')
+  }
+
   return {
     chapter_id: form.chapterId.trim(),
     story_node_id: form.storyNodeId.trim() || null,
@@ -145,11 +276,8 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     mission_category: form.missionCategory,
     title: form.title.trim(),
     description: form.description.trim() || null,
-    content: parseObject(form.content, 'Content'),
-    validation_config: parseObject(
-      form.validationConfig,
-      'Validation config',
-    ),
+    content,
+    validation_config,
     sort_order: Number(form.sortOrder || 0),
     rewards,
   }
@@ -792,6 +920,56 @@ function AdminApp() {
     }))
   }
 
+  function changeAcceptedAnswer(index: number, value: string) {
+    setForm((current) => ({
+      ...current,
+      validationAcceptedAnswers: current.validationAcceptedAnswers.map((a, i) =>
+        i === index ? value : a,
+      ),
+    }))
+  }
+
+  function addAcceptedAnswer() {
+    setForm((current) => ({
+      ...current,
+      validationAcceptedAnswers: [...current.validationAcceptedAnswers, ''],
+    }))
+  }
+
+  function removeAcceptedAnswer(index: number) {
+    setForm((current) => ({
+      ...current,
+      validationAcceptedAnswers: current.validationAcceptedAnswers.filter(
+        (_, i) => i !== index,
+      ),
+    }))
+  }
+
+  function changeCorrectSequence(index: number, value: string) {
+    setForm((current) => ({
+      ...current,
+      validationCorrectSequence: current.validationCorrectSequence.map((s, i) =>
+        i === index ? value : s,
+      ),
+    }))
+  }
+
+  function addCorrectSequence() {
+    setForm((current) => ({
+      ...current,
+      validationCorrectSequence: [...current.validationCorrectSequence, ''],
+    }))
+  }
+
+  function removeCorrectSequence(index: number) {
+    setForm((current) => ({
+      ...current,
+      validationCorrectSequence: current.validationCorrectSequence.filter(
+        (_, i) => i !== index,
+      ),
+    }))
+  }
+
   async function saveMission() {
     setError('')
     setNotice('')
@@ -1153,8 +1331,6 @@ function AdminApp() {
                 <option value="code_repair">
                   code_repair — восстановить код
                 </option>
-                <option value="cipher">cipher — расшифровка (командные)</option>
-                <option value="team">team — командная миссия</option>
               </select>
             </label>
 
@@ -1209,29 +1385,201 @@ function AdminApp() {
             </label>
           </div>
 
-          <label className="admin-json-field">
-            Content (JSON)
-            <textarea
-              spellCheck={false}
-              value={form.content}
-              disabled={!canWrite}
-              onChange={(event) =>
-                setForm({ ...form, content: event.target.value })
-              }
-            />
-          </label>
+          {form.missionType === 'text_answer' ? (
+            <>
+              <label className="admin-span-2">
+                Текст на кнопке (label)
+                <input
+                  value={form.contentLabel}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({ ...form, contentLabel: event.target.value })
+                  }
+                />
+              </label>
 
-          <label className="admin-json-field">
-            Validation config (JSON, закрытые данные)
-            <textarea
-              spellCheck={false}
-              value={form.validationConfig}
-              disabled={!canWrite}
-              onChange={(event) =>
-                setForm({ ...form, validationConfig: event.target.value })
-              }
-            />
-          </label>
+              <label className="admin-span-2">
+                Вопрос
+                <textarea
+                  value={form.contentQuestion}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({ ...form, contentQuestion: event.target.value })
+                  }
+                />
+              </label>
+
+              <label>
+                Placeholder поля ввода
+                <input
+                  value={form.contentInputPlaceholder}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      contentInputPlaceholder: event.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Заголовок при успехе
+                <input
+                  value={form.contentSuccessTitle}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      contentSuccessTitle: event.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Текст при успехе
+                <textarea
+                  value={form.contentSuccessText}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      contentSuccessText: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            </>
+          ) : (
+            <label className="admin-json-field">
+              Content (JSON)
+              <textarea
+                spellCheck={false}
+                value={form.content}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, content: event.target.value })
+                }
+              />
+            </label>
+          )}
+
+          {form.missionType === 'text_answer' ||
+          form.missionType === 'code_repair' ? (
+            <section className="admin-validation-config">
+              <div className="admin-section-heading">
+                <h3>Правила проверки ответа</h3>
+              </div>
+
+              <label>
+                Тип проверки
+                <select
+                  value={form.validationValidator}
+                  disabled={!canWrite}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      validationValidator: event.target.value,
+                    })
+                  }
+                >
+                  <option value="normalized_text_match">
+                    normalized_text_match — сравнить текст ответа
+                  </option>
+                  <option value="ordered_blocks_match">
+                    ordered_blocks_match — собрать правильную последовательность
+                  </option>
+                </select>
+              </label>
+
+              {form.validationValidator === 'normalized_text_match' && (
+                <div className="admin-validation-list">
+                  <div className="admin-section-heading">
+                    <h4>Принятые ответы</h4>
+                    <button
+                      className="admin-secondary"
+                      onClick={addAcceptedAnswer}
+                      disabled={!canWrite}
+                    >
+                      + Добавить ответ
+                    </button>
+                  </div>
+
+                  {form.validationAcceptedAnswers.map((answer, index) => (
+                    <div className="admin-validation-row" key={index}>
+                      <input
+                        value={answer}
+                        disabled={!canWrite}
+                        onChange={(event) =>
+                          changeAcceptedAnswer(index, event.target.value)
+                        }
+                      />
+                      <button
+                        className="admin-danger"
+                        onClick={() => removeAcceptedAnswer(index)}
+                        disabled={
+                          !canWrite ||
+                          form.validationAcceptedAnswers.length <= 1
+                        }
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {form.validationValidator === 'ordered_blocks_match' && (
+                <div className="admin-validation-list">
+                  <div className="admin-section-heading">
+                    <h4>Правильная последовательность</h4>
+                    <button
+                      className="admin-secondary"
+                      onClick={addCorrectSequence}
+                      disabled={!canWrite}
+                    >
+                      + Добавить блок
+                    </button>
+                  </div>
+
+                  {form.validationCorrectSequence.map((block, index) => (
+                    <div className="admin-validation-row" key={index}>
+                      <input
+                        value={block}
+                        disabled={!canWrite}
+                        onChange={(event) =>
+                          changeCorrectSequence(index, event.target.value)
+                        }
+                      />
+                      <button
+                        className="admin-danger"
+                        onClick={() => removeCorrectSequence(index)}
+                        disabled={
+                          !canWrite ||
+                          form.validationCorrectSequence.length <= 1
+                        }
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : (
+            <label className="admin-json-field">
+              Validation config (JSON, закрытые данные)
+              <textarea
+                spellCheck={false}
+                value={form.validationConfig}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, validationConfig: event.target.value })
+                }
+              />
+            </label>
+          )}
 
           <section className="admin-runtime-policy">
             <div className="admin-section-heading">
