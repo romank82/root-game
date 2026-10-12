@@ -10,6 +10,7 @@ import { ArchiveScreen } from './components/screens/ArchiveScreen'
 import { InventoryScreen } from './components/screens/InventoryScreen'
 import { ScannerScreen } from './components/screens/ScannerScreen'
 import { ShopScreen } from './components/screens/ShopScreen'
+import { DevAcceptMissionButton } from './components/DevAcceptMissionButton'
 
 function App() {
   const {
@@ -136,6 +137,8 @@ function App() {
           ОСТАНОВИТЬ СЕССИЮ
         </button>
       )}
+
+      {import.meta.env.DEV && <DevAcceptMissionButton />}
     </main>
   )
 }
