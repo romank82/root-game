@@ -234,6 +234,8 @@ def _extract_spawn_for_bootstrap(
             "searchRadiusMeters": spawn_record["search_radius_m"],
             "zoneRadiusMeters": spawn_record.get("zone_radius_m"),
             "arObjectId": spawn_record.get("ar_object_id"),
+            "generatedFromLat": spawn_record.get("generated_from_lat"),
+            "generatedFromLng": spawn_record.get("generated_from_lng"),
             "generatedAt": spawn_record["generated_at"],
         }
     except KeyError:
@@ -978,6 +980,8 @@ def _serialize_accept_response(
             "searchRadiusMeters": spawn_record["search_radius_m"],
             "zoneRadiusMeters": spawn_record.get("zone_radius_m"),
             "arObjectId": spawn_record.get("ar_object_id"),
+            "generatedFromLat": spawn_record.get("generated_from_lat"),
+            "generatedFromLng": spawn_record.get("generated_from_lng"),
             "generatedAt": spawn_record["generated_at"],
         },
         "status": player_mission.status,
