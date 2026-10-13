@@ -1881,11 +1881,11 @@ h2 {
 .ar-cube-world {
   position: absolute;
   top: 50%;
-  width: min(35vmin, 180px);
-  height: min(35vmin, 180px);
+  width: min(22vmin, 110px);
+  height: min(22vmin, 110px);
   perspective: 600px;
   pointer-events: none;
-  transition: left 0.3s ease-out, transform 0.3s ease-out;
+  transition: left 0.15s linear, transform 0.15s linear;
   z-index: 10;
 }
 
@@ -1911,12 +1911,12 @@ h2 {
   box-sizing: border-box;
 }
 
-.ar-cube-3d-front  { transform: rotateY(0deg)   translateZ(calc(min(35vmin, 180px) / 2)); }
-.ar-cube-3d-back   { transform: rotateY(180deg) translateZ(calc(min(35vmin, 180px) / 2)); }
-.ar-cube-3d-right  { transform: rotateY(90deg)  translateZ(calc(min(35vmin, 180px) / 2)); }
-.ar-cube-3d-left   { transform: rotateY(-90deg) translateZ(calc(min(35vmin, 180px) / 2)); }
-.ar-cube-3d-top    { transform: rotateX(90deg)  translateZ(calc(min(35vmin, 180px) / 2)); }
-.ar-cube-3d-bottom { transform: rotateX(-90deg) translateZ(calc(min(35vmin, 180px) / 2)); }
+.ar-cube-3d-front  { transform: rotateY(0deg)   translateZ(calc(min(22vmin, 110px) / 2)); }
+.ar-cube-3d-back   { transform: rotateY(180deg) translateZ(calc(min(22vmin, 110px) / 2)); }
+.ar-cube-3d-right  { transform: rotateY(90deg)  translateZ(calc(min(22vmin, 110px) / 2)); }
+.ar-cube-3d-left   { transform: rotateY(-90deg) translateZ(calc(min(22vmin, 110px) / 2)); }
+.ar-cube-3d-top    { transform: rotateX(90deg)  translateZ(calc(min(22vmin, 110px) / 2)); }
+.ar-cube-3d-bottom { transform: rotateX(-90deg) translateZ(calc(min(22vmin, 110px) / 2)); }
 
 @keyframes ar-cube-spin {
   0%   { transform: rotateX(-15deg) rotateY(0deg); }
@@ -2029,4 +2029,22 @@ h2 {
   font-size: 12px;
   opacity: 0.8;
   line-height: 1.4;
+}
+.ar-debug-overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #00ff88;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.ar-debug-overlay p {
+  margin: 0;
 }

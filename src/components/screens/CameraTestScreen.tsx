@@ -6,6 +6,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import type { EngineMission } from '../../api/engineApi'
 import { getMissionQrPayload } from '../../api/engineApi'
 import { useCameraStream } from '../../hooks/useCameraStream'
+import { useActiveMission } from '../../hooks/useActiveMission'
 
 interface CameraTestScreenProps {
   missions: EngineMission[]
@@ -69,32 +70,16 @@ export function CameraTestScreen({
     hmac: string
   } | null>(null)
 
-  // Выбираем ближайшую in_progress миссию со spawn.
-  // TODO (Sprint 8.6.k): заменить на явный выбор активной миссии игроком.
-  const mission = (() => {
-    if (!geoPosition) {
-      // Без GPS — берём первую in_progress со spawn (порядок не важен для UI).
-      return missions.find(
-        (m) => m.status === 'in_progress' && m.spawn !== null,
-      ) ?? null
-    }
-    let closest: EngineMission | null = null
-    let closestDist = Infinity
-    for (const m of missions) {
-      if (m.status !== 'in_progress' || m.spawn === null) continue
-      const d = calculateDistanceM(
-        geoPosition.lat,
-        geoPosition.lng,
-        m.spawn.latitude,
-        m.spawn.longitude,
-      )
-      if (d < closestDist) {
-        closestDist = d
-        closest = m
-      }
-    }
-    return closest
-  })()
+  // TEMP (8.6.i.6): тик debug-оверлея — удалить вместе с 8.6.j.
+  const [debugNow, setDebugNow] = useState(Date.now())
+
+  useEffect(() => {
+    const t = setInterval(() => setDebugNow(Date.now()), 200)
+    return () => clearInterval(t)
+  }, [])
+
+  // Единый выбор активной миссии: ближайшая in_progress со spawn.
+  const mission = useActiveMission(missions, geoPosition)
 
   const spawn = mission?.spawn ?? null
 
@@ -109,6 +94,13 @@ export function CameraTestScreen({
   // Компас с throttle 10 Hz + EMA 0.3.
   const lastUpdateRef = useRef<number>(0)
   const smoothedRef = useRef<number | null>(null)
+  const lastAbsoluteAtRef = useRef<number>(0)
+  const lastRawHeadingRef = useRef<number | null>(null)
+  const jumpCounterRef = useRef<number>(0)
+  const smoothedDistanceRef = useRef<number | null>(null)
+  const smoothedDeltaRef = useRef<number | null>(null)
+  const lastGoodPositionRef = useRef<{ lat: number; lng: number } | null>(null)
+  const anchoredBearingRef = useRef<number | null>(null)
 
   useEffect(() => {
     function onOrientation(event: DeviceOrientationEvent) {
@@ -116,7 +108,18 @@ export function CameraTestScreen({
       if (alpha === null || alpha === undefined) return
 
       const now = Date.now()
-      if (now - lastUpdateRef.current < 100) return
+
+      const isAbsolute =
+        event.type === 'deviceorientationabsolute' ||
+        (event as DeviceOrientationEvent).absolute === true
+
+      if (isAbsolute) {
+        lastAbsoluteAtRef.current = now
+      } else {
+        if (now - lastAbsoluteAtRef.current < 2000) return
+      }
+
+      if (now - lastUpdateRef.current < 50) return
       lastUpdateRef.current = now
 
       let raw: number
@@ -125,12 +128,27 @@ export function CameraTestScreen({
           webkitCompassHeading?: number
         }
       ).webkitCompassHeading
+
       if (typeof webkit === 'number') {
         raw = webkit
-      } else {
+      } else if (isAbsolute) {
         const normalized = ((alpha % 360) + 360) % 360
         raw = (360 - normalized) % 360
+      } else {
+        raw = ((alpha % 360) + 360) % 360
       }
+
+      const prevRaw = lastRawHeadingRef.current
+      if (prevRaw !== null) {
+        let jump = raw - prevRaw
+        if (jump > 180) jump -= 360
+        if (jump < -180) jump += 360
+        if (Math.abs(jump) > 90) {
+          jumpCounterRef.current += 1
+          return
+        }
+      }
+      lastRawHeadingRef.current = raw
 
       const prev = smoothedRef.current
       let smoothed: number
@@ -140,7 +158,7 @@ export function CameraTestScreen({
         let diff = raw - prev
         if (diff > 180) diff -= 360
         if (diff < -180) diff += 360
-        smoothed = (prev + 0.3 * diff + 360) % 360
+        smoothed = (prev + 0.5 * diff + 360) % 360
       }
       smoothedRef.current = smoothed
       setHeading(smoothed)
@@ -192,39 +210,93 @@ export function CameraTestScreen({
     }
   }, [status, mission?.id])
 
-  // Вычислить delta и distance.
+  // Сброс anchor и сглаживания при смене миссии — иначе куб «застрянет» с прошлого.
+  useEffect(() => {
+    anchoredBearingRef.current = null
+    smoothedDistanceRef.current = null
+    smoothedDeltaRef.current = null
+    lastGoodPositionRef.current = null
+  }, [mission?.id])
+
+  // Вычислить delta и distance — с EMA-сглаживанием и accuracy gate.
   let deltaDeg: number | null = null
   let distanceM: number | null = null
+
   if (geoPosition && spawn) {
+    // Accuracy gate: пока GPS шумит (±>30 м), не обновляем позицию.
+    // Используем последнюю «хорошую» точку.
+    const accuracyOk = geoPosition.accuracy <= 30
+    let playerLat = geoPosition.lat
+    let playerLng = geoPosition.lng
+
+    if (accuracyOk) {
+      lastGoodPositionRef.current = { lat: geoPosition.lat, lng: geoPosition.lng }
+    } else if (lastGoodPositionRef.current) {
+      playerLat = lastGoodPositionRef.current.lat
+      playerLng = lastGoodPositionRef.current.lng
+    }
+
     const bearing = calculateBearing(
-      geoPosition.lat,
-      geoPosition.lng,
+      playerLat,
+      playerLng,
       spawn.latitude,
       spawn.longitude,
     )
-    distanceM = calculateDistanceM(
-      geoPosition.lat,
-      geoPosition.lng,
+    const rawDistance = calculateDistanceM(
+      playerLat,
+      playerLng,
       spawn.latitude,
       spawn.longitude,
     )
+
+    // EMA distance: 70% старая + 30% новая. Сглаживает GPS-шум.
+    const prevDist = smoothedDistanceRef.current
+    const smoothedDist =
+      prevDist === null ? rawDistance : prevDist * 0.7 + rawDistance * 0.3
+    smoothedDistanceRef.current = smoothedDist
+    distanceM = smoothedDist
+
+    // ANCHOR: при первом входе в зону (или очень близко) фиксируем направление
+    // на цель. Дальше bearing не пересчитывается — куб не дрожит от GPS.
+    // Порог: максимум из zone_radius или 40 м (чтобы у маленьких зон был запас).
+    const zoneRadius = spawn.zoneRadiusMeters ?? 50
+    const anchorRange = Math.max(zoneRadius, 40)
+
+    if (smoothedDist <= anchorRange && anchoredBearingRef.current === null) {
+      anchoredBearingRef.current = bearing
+    }
+
+    // Если anchor взят — используем его. Иначе — свежий bearing от GPS.
+    const effectiveBearing = anchoredBearingRef.current ?? bearing
+
     if (heading !== null) {
-      deltaDeg = ((bearing - heading + 540) % 360) - 180
+      const rawDelta = ((effectiveBearing - heading + 540) % 360) - 180
+      // EMA delta: 60% старая + 40% новая (быстрее следует за компасом).
+      const prevDelta = smoothedDeltaRef.current
+      const smoothedDelta =
+        prevDelta === null
+          ? rawDelta
+          : prevDelta * 0.6 + rawDelta * 0.4
+      smoothedDeltaRef.current = smoothedDelta
+      deltaDeg = smoothedDelta
     }
   }
 
   // Позиция куба на экране в % по горизонтали.
-  // delta = 0 → 50% (центр), delta = +30° → 100% (правый край), delta = -30° → 0% (левый край).
-  // Клэмпим в [-30, 130], чтобы куб уезжал немного за край при большом отклонении.
+  // delta = 0 → центр, delta = ±60° → край экрана.
+  // Клэмпим в [-20, 120], чтобы куб мог немного уехать за край.
   const rawPosition =
-    deltaDeg === null ? 50 : 50 + (deltaDeg / 60) * 100
-  const leftPercent = Math.max(-30, Math.min(130, rawPosition))
+    deltaDeg === null ? 50 : 50 + (deltaDeg / 120) * 100
+  const leftPercent = Math.max(-20, Math.min(120, rawPosition))
 
-  // Масштаб: далеко → 0.6, близко → 2.0.
+  // Плавная интерполяция: 70 м → 0.3; 35 м → 1.15; 5 м → 1.95; 0 м → 2.0 (clamp).
   const scale =
     distanceM === null
       ? 1
-      : Math.max(0.6, Math.min(2, 1 + (VISIBLE_RANGE_M - distanceM) / 50))
+      : Math.max(
+          0.3,
+          Math.min(2, (VISIBLE_RANGE_M - distanceM) / 40 + 0.3),
+        )
 
   const isNear = distanceM !== null && distanceM <= VISIBLE_RANGE_M
   const isCentered = deltaDeg !== null && Math.abs(deltaDeg) < 15
@@ -306,6 +378,21 @@ export function CameraTestScreen({
               {Math.round(Math.abs(deltaDeg))}°
             </div>
           )}
+
+        {import.meta.env.DEV && (
+          <div className="ar-debug-overlay">
+            <p>heading: {heading === null ? '—' : heading.toFixed(1)}°</p>
+            <p>anchored: {anchoredBearingRef.current === null ? 'нет' : anchoredBearingRef.current.toFixed(1) + '°'}</p>
+            <p>delta: {deltaDeg === null ? '—' : deltaDeg.toFixed(1)}°</p>
+            <p>dist: {distanceM === null ? '—' : distanceM.toFixed(1)} м</p>
+            <p>scale: {scale.toFixed(2)}</p>
+            <p>left: {leftPercent.toFixed(0)}%</p>
+            <p>accuracy: {geoPosition?.accuracy?.toFixed(0) ?? '—'} м</p>
+            <p>jumps: {jumpCounterRef.current}</p>
+            <p>abs: {lastAbsoluteAtRef.current === 0 ? 'never' : Math.round((Date.now() - lastAbsoluteAtRef.current) / 1000) + 's ago'}</p>
+            <p>tick: {debugNow % 1000}</p>
+          </div>
+        )}
       </div>
     </section>
   )

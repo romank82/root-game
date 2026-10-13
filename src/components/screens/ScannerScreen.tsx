@@ -10,6 +10,7 @@ import {
   openRouteInNavigator,
 } from '../../utils/geolocation'
 import { EchoRadar } from '../EchoRadar'
+import { useActiveMission } from '../../hooks/useActiveMission'
 
 type SegmentContent = {
   code: string
@@ -188,9 +189,7 @@ export function ScannerScreen({
   const [repairError, setRepairError] = useState('')
   const [confirmedAward, setConfirmedAward] = useState<string | null>(null)
 
-  const spawnMission = missions.find(
-    (m) => m.status === 'in_progress' && m.spawn !== null,
-  ) ?? null
+  const spawnMission = useActiveMission(missions, geoPosition)
 
   const activeMission = missions.find(
     (mission) =>

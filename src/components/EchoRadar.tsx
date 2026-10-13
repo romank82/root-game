@@ -84,6 +84,9 @@ export function EchoRadar({
   const [compassError, setCompassError] = useState<string | null>(null)
 
   const lastUpdateRef = useRef<number>(0)
+  const lastAbsoluteAtRef = useRef<number>(0)
+  const lastRawHeadingRef = useRef<number | null>(null)
+  const jumpCounterRef = useRef<number>(0)
   const smoothedHeadingRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -91,29 +94,57 @@ export function EchoRadar({
       const alpha = event.alpha
       if (alpha === null || alpha === undefined) return
 
-      // Throttle: не чаще 10 раз в секунду (100 мс).
       const now = Date.now()
-      if (now - lastUpdateRef.current < 100) return
+
+      // Определяем источник события.
+      // deviceorientationabsolute — всегда абсолютный.
+      // deviceorientation имеет флаг absolute.
+      const isAbsolute =
+        event.type === 'deviceorientationabsolute' ||
+        (event as DeviceOrientationEvent).absolute === true
+
+      if (isAbsolute) {
+        lastAbsoluteAtRef.current = now
+      } else {
+        // Если абсолютный компас работал в последние 2 сек — игнорируем относительный.
+        if (now - lastAbsoluteAtRef.current < 2000) return
+      }
+
+      // Throttle.
+      if (now - lastUpdateRef.current < 50) return
       lastUpdateRef.current = now
 
       let raw: number
-
-      // iOS: webkitCompassHeading уже истинный курс (0=север, по часовой).
       const webkit = (event as DeviceOrientationEvent & {
         webkitCompassHeading?: number
       }).webkitCompassHeading
+
       if (typeof webkit === 'number') {
         raw = webkit
-      } else {
-        // Стандартный alpha идёт ПРОТИВ часовой стрелки:
-        //   0° = север, 90° = запад, 180° = юг, 270° = восток.
-        // Для компаса (по часовой: 0=север, 90=восток, ...) инвертируем.
+      } else if (isAbsolute) {
+        // Абсолютный alpha идёт ПРОТИВ часовой: 0=С, 90=З, 180=Ю, 270=В.
         const normalized = ((alpha % 360) + 360) % 360
         raw = (360 - normalized) % 360
+      } else {
+        // Относительный — не привязан к северу. Но раз absolute не работает,
+        // используем как есть (хоть что-то).
+        raw = ((alpha % 360) + 360) % 360
       }
 
-      // EMA-сглаживание с учётом перехода через 0/360:
-      // сначала нормализуем разницу в диапазон [-180, 180].
+      // Jump filter: если скачок > 90° за один тик — глитч, игнорируем.
+      const prevRaw = lastRawHeadingRef.current
+      if (prevRaw !== null) {
+        let jump = raw - prevRaw
+        if (jump > 180) jump -= 360
+        if (jump < -180) jump += 360
+        if (Math.abs(jump) > 90) {
+          jumpCounterRef.current += 1
+          return
+        }
+      }
+      lastRawHeadingRef.current = raw
+
+      // EMA 0.3.
       const prev = smoothedHeadingRef.current
       let smoothed: number
       if (prev === null) {
