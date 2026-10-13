@@ -43,6 +43,13 @@ export type EngineAcceptMissionResponse = {
   status: string
   startedAt: string | null
 }
+export type EngineMissionQrPayload = {
+  missionId: string
+  payload: string
+  hmac: string
+  expiresAt: string
+  ttlSeconds: number
+}
 
 export type EngineInventoryItem = {
   id: string
@@ -264,6 +271,21 @@ export async function acceptEngineMission(
   }
 
   return response.json() as Promise<EngineAcceptMissionResponse>
+}
+
+export async function getMissionQrPayload(
+  missionId: string,
+): Promise<EngineMissionQrPayload> {
+  const response = await apiFetch(
+    `/api/v1/engine/missions/${missionId}/qr-payload`,
+    { method: 'GET' },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineMissionQrPayload>
 }
 
 export async function listFallbackOffers(): Promise<FallbackOffer[]> {
