@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type {
   EngineMission,
   EngineSegment,
@@ -9,6 +9,7 @@ import {
   calculateDistanceInMeters,
   openRouteInNavigator,
 } from '../../utils/geolocation'
+import { EchoRadar } from '../EchoRadar'
 
 type SegmentContent = {
   code: string
@@ -182,6 +183,7 @@ export function ScannerScreen({
   const [repairSequence, setRepairSequence] = useState<string[]>([])
   const [repairError, setRepairError] = useState('')
   const [confirmedAward, setConfirmedAward] = useState<string | null>(null)
+  const [playerCoords, setPlayerCoords] = useState<{ lat: number; lng: number } | null>(null)
 
   const activeMission = missions.find(
     (mission) =>
@@ -276,6 +278,27 @@ export function ScannerScreen({
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     )
   }
+
+  function refreshPlayerCoords() {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setPlayerCoords({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        })
+      },
+      () => {
+        // Игнорируем ошибку — радар просто не покажется.
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    )
+  }
+
+  useEffect(() => {
+    refreshPlayerCoords()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function startArSearch() {
     setArSessionStarted(true)
@@ -444,6 +467,24 @@ export function ScannerScreen({
           </>
         )}
       </section>
+
+      {mission.spawn && mission.status === 'in_progress' && playerCoords && !arSessionStarted && (
+        <>
+          <EchoRadar
+            playerLat={playerCoords.lat}
+            playerLng={playerCoords.lng}
+            targetLat={mission.spawn.latitude}
+            targetLng={mission.spawn.longitude}
+            hint="Идите в направлении центра радара. Когда приблизитесь — откройте камеру."
+          />
+          <button
+            className="ar-start-button"
+            onClick={() => onScreenChange('camera-test')}
+          >
+            ОТКРЫТЬ КАМЕРУ →
+          </button>
+        </>
+      )}
 
       {!arSessionStarted ? (
         <button
