@@ -1991,3 +1991,44 @@ h2 {
   pointer-events: none;
   z-index: 9;
 }
+/* === Compass debug overlay (Sprint 8.6.c-bis, TEMP) === */
+.compass-debug-overlay {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #00ff88;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.compass-debug-overlay > * {
+  pointer-events: auto;
+}
+
+.compass-debug-line {
+  margin: 0;
+}
+
+.compass-debug-error {
+  margin: 4px 0 0 0;
+  color: #ffd0d0;
+}
+
+.compass-debug-button {
+  margin-top: 8px;
+  background: #00ff88;
+  color: #000;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+  font-size: 12px;
+}
