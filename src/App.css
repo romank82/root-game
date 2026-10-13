@@ -2155,3 +2155,9 @@ h2 {
   margin: 4px 0 0 0;
   color: #ffd0d0;
 }
+/* === Scan API result (Sprint 8.6.g.2, TEMP) === */
+.scan-api-result {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 255, 136, 0.4);
+}

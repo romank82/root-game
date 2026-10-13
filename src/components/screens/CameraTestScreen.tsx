@@ -4,7 +4,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { getMissionQrPayload } from '../../api/engineApi'
+import { getMissionQrPayload, scanMissionQr } from '../../api/engineApi'
+import type { EngineMissionScanResult } from '../../api/engineApi'
 import jsQR from 'jsqr'
 
 export function CameraTestScreen() {
@@ -27,6 +28,10 @@ export function CameraTestScreen() {
   const [mode, setMode] = useState<'cube' | 'scan'>('cube')
   const [scanResult, setScanResult] = useState<string | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)
+  const [scanApiResult, setScanApiResult] = useState<EngineMissionScanResult | null>(null)
+  const [scanApiError, setScanApiError] = useState<string | null>(null)
+  const [scanApiLoading, setScanApiLoading] = useState(false)
+  const lastSubmittedRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -224,6 +229,34 @@ export function CameraTestScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, status])
 
+  useEffect(() => {
+    if (scanResult && !scanApiResult && !scanApiLoading) {
+      void submitScan(scanResult)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanResult, scanApiResult, scanApiLoading])
+
+  async function submitScan(raw: string) {
+    // Защита от повторной отправки той же строки.
+    if (lastSubmittedRef.current === raw) return
+    lastSubmittedRef.current = raw
+
+    setScanApiLoading(true)
+    setScanApiError(null)
+    setScanApiResult(null)
+
+    try {
+      const data = await scanMissionQr(DEV_MISSION_ID, raw)
+      setScanApiResult(data)
+    } catch (err) {
+      setScanApiError(err instanceof Error ? err.message : 'Ошибка проверки QR.')
+      // Сбросить блокировку при ошибке, чтобы можно было попробовать снова.
+      lastSubmittedRef.current = null
+    } finally {
+      setScanApiLoading(false)
+    }
+  }
+
   function switchCamera() {
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
   }
@@ -255,13 +288,29 @@ export function CameraTestScreen() {
         <div className="camera-mode-switch">
           <button
             className={mode === 'cube' ? 'active' : ''}
-            onClick={() => { setMode('cube'); setScanResult(null); setScanError(null) }}
+            onClick={() => {
+              setMode('cube')
+              setScanResult(null)
+              setScanError(null)
+              setScanApiResult(null)
+              setScanApiError(null)
+              setScanApiLoading(false)
+              lastSubmittedRef.current = null
+            }}
           >
             Куб
           </button>
           <button
             className={mode === 'scan' ? 'active' : ''}
-            onClick={() => { setMode('scan'); setScanResult(null); setScanError(null) }}
+            onClick={() => {
+              setMode('scan')
+              setScanResult(null)
+              setScanError(null)
+              setScanApiResult(null)
+              setScanApiError(null)
+              setScanApiLoading(false)
+              lastSubmittedRef.current = null
+            }}
           >
             Сканер
           </button>
@@ -339,18 +388,43 @@ export function CameraTestScreen() {
         {mode === 'scan' && status === 'ok' && (
           <div className="scan-result-overlay">
             <p className="scan-result-title">РЕЗУЛЬТАТ СКАНИРОВАНИЯ</p>
-            {scanResult ? (
+
+            {!scanResult && <p className="scan-result-value">наведите на QR…</p>}
+
+            {scanResult && (
               <>
-                <p className="scan-result-value">{scanResult.slice(0, 80)}{scanResult.length > 80 ? '…' : ''}</p>
-                <p className="scan-result-meta">len: {scanResult.length}</p>
+                <p className="scan-result-value">
+                  {scanResult.slice(0, 60)}
+                  {scanResult.length > 60 ? '…' : ''}
+                </p>
                 <p className="scan-result-meta">
-                  содержит точку: {scanResult.includes('.') ? 'да' : 'нет'}
+                  len: {scanResult.length} · точка: {scanResult.includes('.') ? 'да' : 'нет'}
                 </p>
               </>
-            ) : (
-              <p className="scan-result-value">наведите на QR…</p>
             )}
+
             {scanError && <p className="scan-result-error">{scanError}</p>}
+
+            {scanApiLoading && (
+              <p className="scan-result-meta">проверка на сервере…</p>
+            )}
+
+            {scanApiError && (
+              <p className="scan-result-error">ОШИБКА: {scanApiError}</p>
+            )}
+
+            {scanApiResult && (
+              <div className="scan-api-result">
+                <p className="scan-result-title">✓ ПРИНЯТО СЕРВЕРОМ</p>
+                <p className="scan-result-meta">
+                  missionType: {scanApiResult.miniGame.missionType}
+                </p>
+                <p className="scan-result-meta">
+                  scannedAt: {new Date(scanApiResult.scannedAt).toLocaleTimeString()}
+                </p>
+                <p className="scan-result-value">Мини-игра готова — интеграция в 8.6.i</p>
+              </div>
+            )}
           </div>
         )}
 
