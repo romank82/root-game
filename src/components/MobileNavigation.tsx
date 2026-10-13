@@ -33,6 +33,14 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
       </button>
 
       <button
+        className={screen === 'map' ? 'active' : ''}
+        onClick={() => onScreenChange('map')}
+      >
+        <span>◎</span>
+        Карта
+      </button>
+
+      <button
         className={screen === 'inventory' ? 'active' : ''}
         onClick={() => onScreenChange('inventory')}
       >

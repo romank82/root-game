@@ -10,6 +10,7 @@ import { ArchiveScreen } from './components/screens/ArchiveScreen'
 import { InventoryScreen } from './components/screens/InventoryScreen'
 import { ScannerScreen } from './components/screens/ScannerScreen'
 import { ShopScreen } from './components/screens/ShopScreen'
+import { MapScreen } from './components/screens/MapScreen'
 import { DevAcceptMissionButton } from './components/DevAcceptMissionButton'
 
 function App() {
@@ -123,6 +124,8 @@ function App() {
           onSubmitMission={submitMission}
         />
       )}
+
+      {screen === 'map' && <MapScreen />}
 
       {screen === 'shop' && (
         <ShopScreen onScreenChange={setScreen} />

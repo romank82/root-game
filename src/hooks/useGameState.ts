@@ -15,7 +15,8 @@ export function useGameState() {
     return saved === 'terminal' ||
       saved === 'archive' ||
       saved === 'inventory' ||
-      saved === 'scanner'
+      saved === 'scanner' ||
+      saved === 'map'
       ? saved
       : 'briefing'
   })
