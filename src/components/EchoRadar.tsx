@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 interface EchoRadarProps {
   playerLat: number
   playerLng: number
+  playerAccuracy: number
   targetLat: number
   targetLng: number
   // Опционально: подпись под радаром.
@@ -74,6 +75,7 @@ function calculateDistanceM(
 export function EchoRadar({
   playerLat,
   playerLng,
+  playerAccuracy,
   targetLat,
   targetLng,
   hint,
@@ -292,6 +294,14 @@ export function EchoRadar({
         <p className="echo-radar-line">
           РАССТОЯНИЕ: {Math.round(distanceM)} м
         </p>
+        <p className="echo-radar-line">
+          ТОЧНОСТЬ: ±{Math.round(playerAccuracy)} м
+        </p>
+        {playerAccuracy > 100 && (
+          <p className="echo-radar-line echo-radar-warning">
+            GPS пока неточный, подождите 10-20 сек или выйдите на открытое место.
+          </p>
+        )}
         {heading !== null && (
           <p className="echo-radar-line echo-radar-debug">
             heading: {heading.toFixed(1)}° · bearing: {bearingDeg.toFixed(1)}° · delta: {deltaDeg.toFixed(1)}°

@@ -183,7 +183,11 @@ export function ScannerScreen({
   const [repairSequence, setRepairSequence] = useState<string[]>([])
   const [repairError, setRepairError] = useState('')
   const [confirmedAward, setConfirmedAward] = useState<string | null>(null)
-  const [playerCoords, setPlayerCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [playerCoords, setPlayerCoords] = useState<{
+    lat: number
+    lng: number
+    accuracy: number
+  } | null>(null)
   function refreshPlayerCoords() {
     if (!navigator.geolocation) return
     navigator.geolocation.getCurrentPosition(
@@ -191,12 +195,20 @@ export function ScannerScreen({
         setPlayerCoords({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
+          accuracy: position.coords.accuracy,
         })
       },
       () => {
         // Игнорируем ошибку — радар просто не покажется.
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        // maximumAge: разрешаем браузеру вернуть последний кэшированный фикс,
+        // если он не старше 30 секунд. Иначе на первой секунде получаем грубый
+        // WiFi/cell-fix (±200-500 м), который даёт "дрейф" точки.
+        maximumAge: 30000,
+      },
     )
   }
 
@@ -257,6 +269,7 @@ export function ScannerScreen({
             <EchoRadar
               playerLat={playerCoords.lat}
               playerLng={playerCoords.lng}
+              playerAccuracy={playerCoords.accuracy}
               targetLat={spawnMission.spawn!.latitude}
               targetLng={spawnMission.spawn!.longitude}
               hint="Идите по радару. Когда приблизитесь — откройте камеру."
