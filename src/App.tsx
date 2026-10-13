@@ -28,6 +28,7 @@ function App() {
     
     applyEngineBootstrap,
     submitMission,
+    acceptMission,
     resetProgress,
   } = useGameState()
 
@@ -102,6 +103,7 @@ function App() {
           missions={missions}
           onScreenChange={setScreen}
           onSubmitMission={submitMission}
+          onAcceptMission={acceptMission}
         />
       )}
 

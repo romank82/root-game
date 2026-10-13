@@ -16,6 +16,9 @@ interface TerminalScreenProps {
     missionId: string,
     payload: { answer?: string },
   ) => Promise<MissionSubmission | null>
+  onAcceptMission: (
+    missionId: string,
+  ) => Promise<{ accepted: boolean; error?: string }>
 }
 
 function missionStatusLabel(status: EngineMission['status']): string {
@@ -37,9 +40,12 @@ export function TerminalScreen({
   missions,
   onScreenChange,
   onSubmitMission,
+  onAcceptMission,
 }: TerminalScreenProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [submissionError, setSubmissionError] = useState<string | null>(null)
+  const [acceptingId, setAcceptingId] = useState<string | null>(null)
+  const [acceptError, setAcceptError] = useState<string | null>(null)
 
   // Ordering and player-visible status come from authenticated bootstrap.
   // This screen only renders public text-answer presentation data.
@@ -65,6 +71,19 @@ export function TerminalScreen({
     setSubmissionError(
       response.message ?? 'ОТВЕТ НЕ ПРИНЯТ. ПРОВЕРЬТЕ ДАННЫЕ И ПОВТОРИТЕ.',
     )
+  }
+
+  async function handleAccept(mission: EngineMission) {
+    setAcceptError(null)
+    setAcceptingId(mission.id)
+    const result = await onAcceptMission(mission.id)
+    setAcceptingId(null)
+    if (!result.accepted) {
+      setAcceptError(result.error ?? 'Не удалось взять миссию.')
+      return
+    }
+    // После accept переходим на карту — там будут круги.
+    onScreenChange('map')
   }
 
   return (
@@ -94,6 +113,10 @@ export function TerminalScreen({
           <p className="repair-error">{submissionError}</p>
         )}
 
+        {acceptError && (
+          <p className="repair-error">{acceptError}</p>
+        )}
+
         {textMissions.length === 0 ? (
           <section className="location-status">
             <span className="location-status-icon">⌖</span>
@@ -109,6 +132,7 @@ export function TerminalScreen({
           textMissions.map((mission) => {
             const isCompleted = mission.status === 'completed'
             const isLocked = mission.status === 'locked'
+            const isInProgress = mission.status === 'in_progress'
 
             return (
               <article className="puzzle" key={mission.id}>
@@ -148,32 +172,53 @@ export function TerminalScreen({
                       </small>
                     </div>
                   </div>
-                ) : (
-                  <div className="answer-row">
-                    <input
-                      value={answers[mission.id] ?? ''}
-                      onChange={(event) => {
-                        const value = event.target.value
-                        setAnswers((current) => ({
-                          ...current,
-                          [mission.id]: value,
-                        }))
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          void submitAnswer(mission)
-                        }
-                      }}
-                      placeholder={missionText(
-                        mission,
-                        'inputPlaceholder',
-                        'Введите ответ...',
-                      )}
-                    />
-                    <button onClick={() => void submitAnswer(mission)}>
-                      ПРОВЕРИТЬ
+                ) : isInProgress ? (
+                  <div className="accept-row">
+                    <p className="in-progress-hint">
+                      Миссия активна. Зона поиска уже на карте.
+                    </p>
+                    <button onClick={() => onScreenChange('map')}>
+                      ОТКРЫТЬ КАРТУ
                     </button>
                   </div>
+                ) : (
+                  <>
+                    <div className="accept-row">
+                      <button
+                        onClick={() => void handleAccept(mission)}
+                        disabled={acceptingId === mission.id}
+                      >
+                        {acceptingId === mission.id
+                          ? 'ПОЛУЧЕНИЕ GPS…'
+                          : 'ВЗЯТЬ МИССИЮ'}
+                      </button>
+                    </div>
+                    <div className="answer-row">
+                      <input
+                        value={answers[mission.id] ?? ''}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setAnswers((current) => ({
+                            ...current,
+                            [mission.id]: value,
+                          }))
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            void submitAnswer(mission)
+                          }
+                        }}
+                        placeholder={missionText(
+                          mission,
+                          'inputPlaceholder',
+                          'Введите ответ...',
+                        )}
+                      />
+                      <button onClick={() => void submitAnswer(mission)}>
+                        ПРОВЕРИТЬ
+                      </button>
+                    </div>
+                  </>
                 )}
               </article>
             )
