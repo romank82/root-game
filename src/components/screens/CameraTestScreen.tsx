@@ -3,6 +3,8 @@
 // Если камера/куб не запускаются — пересматриваем концепцию AR.
 
 import { useEffect, useRef, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
+import { getMissionQrPayload } from '../../api/engineApi'
 
 export function CameraTestScreen() {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -13,6 +15,13 @@ export function CameraTestScreen() {
   const [heading, setHeading] = useState<number | null>(null)
   const [compassStatus, setCompassStatus] = useState<'idle' | 'requested' | 'ok' | 'denied' | 'unsupported'>('idle')
   const [compassError, setCompassError] = useState<string | null>(null)
+
+  // Захардкоженная миссия для dev-проверки. test-code-01 — in_progress.
+  const DEV_MISSION_ID = 'mission-d36d8f9130944783bce7dc1d4dcd15c3'
+
+  const [qrPayload, setQrPayload] = useState<{ payload: string; hmac: string; expiresAt: string } | null>(null)
+  const [qrError, setQrError] = useState<string | null>(null)
+  const [qrLoading, setQrLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -122,6 +131,60 @@ export function CameraTestScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compassStatus])
 
+  async function refreshQr() {
+    setQrLoading(true)
+    setQrError(null)
+    try {
+      const data = await getMissionQrPayload(DEV_MISSION_ID)
+      setQrPayload({
+        payload: data.payload,
+        hmac: data.hmac,
+        expiresAt: data.expiresAt,
+      })
+    } catch (err) {
+      setQrError(err instanceof Error ? err.message : 'Ошибка загрузки QR.')
+    } finally {
+      setQrLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (status !== 'ok') return
+    let cancelled = false
+
+    async function initialLoad() {
+      try {
+        const data = await getMissionQrPayload(DEV_MISSION_ID)
+        if (cancelled) return
+        setQrPayload({
+          payload: data.payload,
+          hmac: data.hmac,
+          expiresAt: data.expiresAt,
+        })
+      } catch (err) {
+        if (cancelled) return
+        setQrError(err instanceof Error ? err.message : 'Ошибка загрузки QR.')
+      }
+    }
+
+    void initialLoad()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status])
+
+  // Автообновление за 60 секунд до истечения.
+  useEffect(() => {
+    if (!qrPayload) return
+    const expiresAtMs = new Date(qrPayload.expiresAt).getTime()
+    const nowMs = Date.now()
+    const refreshIn = Math.max(expiresAtMs - nowMs - 60_000, 10_000)
+    const timer = setTimeout(() => {
+      void refreshQr()
+    }, refreshIn)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrPayload])
+
   function switchCamera() {
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
   }
@@ -149,13 +212,51 @@ export function CameraTestScreen() {
           )}
         </div>
 
+        {/* QR-дебаг (dev) */}
+        <div className="qr-debug-overlay">
+          <p className="qr-debug-line">
+            QR: {qrLoading ? 'загрузка…' : qrPayload ? 'готов' : '—'}
+          </p>
+          {qrPayload && (
+            <p className="qr-debug-line">
+              exp: {new Date(qrPayload.expiresAt).toLocaleTimeString()}
+            </p>
+          )}
+          {qrError && <p className="qr-debug-error">{qrError}</p>}
+          <button className="qr-debug-button" onClick={() => void refreshQr()} disabled={qrLoading}>
+            Обновить QR
+          </button>
+        </div>
+
         {/* CSS-3D куб — прототип AR-объекта */}
         {status === 'ok' && (
           <>
             <div className="ar-cube-stage">
               <div className="ar-cube-3d">
-                <div className="ar-cube-3d-face ar-cube-3d-front" />
-                <div className="ar-cube-3d-face ar-cube-3d-back" />
+                <div className="ar-cube-3d-face ar-cube-3d-front">
+                  {qrPayload ? (
+                    <QRCodeSVG
+                      value={qrPayload.payload}
+                      size={120}
+                      bgColor="#000000"
+                      fgColor="#00ff88"
+                      level="M"
+                      style={{ width: '100%', height: '100%' }}
+                    />
+                  ) : null}
+                </div>
+                <div className="ar-cube-3d-face ar-cube-3d-back">
+                  {qrPayload ? (
+                    <QRCodeSVG
+                      value={qrPayload.payload}
+                      size={120}
+                      bgColor="#000000"
+                      fgColor="#00ff88"
+                      level="M"
+                      style={{ width: '100%', height: '100%' }}
+                    />
+                  ) : null}
+                </div>
                 <div className="ar-cube-3d-face ar-cube-3d-right" />
                 <div className="ar-cube-3d-face ar-cube-3d-left" />
                 <div className="ar-cube-3d-face ar-cube-3d-top" />

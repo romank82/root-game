@@ -2032,3 +2032,58 @@ h2 {
   cursor: pointer;
   font-size: 12px;
 }
+
+/* === QR debug overlay (Sprint 8.6.d.2, TEMP) === */
+.qr-debug-overlay {
+  position: absolute;
+  top: 96px;
+  left: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #00ff88;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.qr-debug-overlay > * {
+  pointer-events: auto;
+}
+
+.qr-debug-line {
+  margin: 0;
+}
+
+.qr-debug-error {
+  margin: 4px 0 0 0;
+  color: #ffd0d0;
+}
+
+.qr-debug-button {
+  margin-top: 6px;
+  background: #00ff88;
+  color: #000;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.qr-debug-button:disabled {
+  background: #555;
+  color: #aaa;
+  cursor: wait;
+}
+
+/* Убедимся, что SVG QR полностью вписывается в грань. */
+.ar-cube-3d-face > svg {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
