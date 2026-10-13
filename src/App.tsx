@@ -11,6 +11,8 @@ import { InventoryScreen } from './components/screens/InventoryScreen'
 import { ScannerScreen } from './components/screens/ScannerScreen'
 import { ShopScreen } from './components/screens/ShopScreen'
 import { MapScreen } from './components/screens/MapScreen'
+// TEMP: dev-only camera test screen — удалить в Sprint 8.6.g.
+import { CameraTestScreen } from './components/screens/CameraTestScreen'
 
 function App() {
   const {
@@ -127,6 +129,9 @@ function App() {
       )}
 
       {screen === 'map' && <MapScreen missions={missions} />}
+
+      {/* TEMP: dev-only camera test screen — удалить в Sprint 8.6.g. */}
+      {import.meta.env.DEV && screen === 'camera-test' && <CameraTestScreen />}
 
       {screen === 'shop' && (
         <ShopScreen onScreenChange={setScreen} />

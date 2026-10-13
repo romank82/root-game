@@ -40,6 +40,17 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         Карта
       </button>
 
+      {/* TEMP: dev-only camera test button — удалить в Sprint 8.6.g. */}
+      {import.meta.env.DEV && (
+        <button
+          className={screen === 'camera-test' ? 'active' : ''}
+          onClick={() => onScreenChange('camera-test')}
+        >
+          <span>◐</span>
+          Камера
+        </button>
+      )}
+
       <button
         className={screen === 'inventory' ? 'active' : ''}
         onClick={() => onScreenChange('inventory')}

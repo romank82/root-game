@@ -18,7 +18,8 @@ export function useGameState() {
       saved === 'archive' ||
       saved === 'inventory' ||
       saved === 'scanner' ||
-      saved === 'map'
+      saved === 'map' ||
+      saved === 'camera-test'
       ? saved
       : 'briefing'
   })
