@@ -125,7 +125,7 @@ function App() {
         />
       )}
 
-      {screen === 'map' && <MapScreen />}
+      {screen === 'map' && <MapScreen missions={missions} />}
 
       {screen === 'shop' && (
         <ShopScreen onScreenChange={setScreen} />

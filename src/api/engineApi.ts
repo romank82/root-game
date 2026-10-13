@@ -10,6 +10,8 @@ export type EngineMissionSpawn = {
   searchRadiusMeters: number
   zoneRadiusMeters: number | null
   arObjectId: string | null
+  generatedFromLat: number | null
+  generatedFromLng: number | null
   generatedAt: string
 }
 

@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react'
 import {
+  acceptEngineMission,
+  getEngineBootstrap,
   submitEngineMission,
   type EngineBootstrap,
   type EngineInventoryItem,
@@ -57,6 +59,58 @@ export function useGameState() {
     }
   }, [applyEngineBootstrap])
 
+  const acceptMission = useCallback(
+    async (missionId: string): Promise<{ accepted: boolean; error?: string }> => {
+      // 1. Запрос GPS
+      let coords: GeolocationPosition
+      try {
+        coords = await new Promise<GeolocationPosition>((resolve, reject) => {
+          if (!navigator.geolocation) {
+            reject(new Error('Геолокация не поддерживается устройством.'))
+            return
+          }
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0,
+          })
+        })
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Не удалось получить GPS.'
+        return { accepted: false, error: message }
+      }
+
+      // 2. Вызов accept
+      try {
+        await acceptEngineMission(missionId, {
+          latitude: coords.coords.latitude,
+          longitude: coords.coords.longitude,
+          accuracy: coords.coords.accuracy,
+        })
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Сервер не принял миссию.'
+        return { accepted: false, error: message }
+      }
+
+      // 3. Refresh bootstrap, чтобы клиентское состояние missions/spawn обновилось
+      try {
+        const fresh = await getEngineBootstrap()
+        applyEngineBootstrap(fresh)
+      } catch (err) {
+        // Миссия принята, но bootstrap не обновился — не считаем это ошибкой accept,
+        // но возвращаем предупреждение. UI может показать «перезагрузите страницу».
+        const message =
+          err instanceof Error ? err.message : 'Не удалось обновить состояние.'
+        return { accepted: true, error: message }
+      }
+
+      return { accepted: true }
+    },
+    [applyEngineBootstrap],
+  )
+
   const resetProgress = useCallback(() => {
     setAccepted(false)
     setScreen('briefing')
@@ -78,6 +132,7 @@ export function useGameState() {
     setApiStatus,
     applyEngineBootstrap,
     submitMission,
+    acceptMission,
     resetProgress,
   }
 }

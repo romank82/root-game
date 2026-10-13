@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet'
+import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet'
+import type { EngineMission } from '../../api/engineApi'
 import 'leaflet/dist/leaflet.css'
 
 // Заглушка пока GPS не получен — Москва.
@@ -34,7 +35,11 @@ function MapController({
   return null
 }
 
-export function MapScreen() {
+interface MapScreenProps {
+  missions: EngineMission[]
+}
+
+export function MapScreen({ missions }: MapScreenProps) {
   const [gps, setGps] = useState<GpsCoords | null>(null)
   const [gpsError, setGpsError] = useState<string | null>(null)
   const [loadingGps, setLoadingGps] = useState(false)
@@ -78,6 +83,10 @@ export function MapScreen() {
     : DEFAULT_CENTER
   const zoom = gps ? FOCUS_ZOOM : DEFAULT_ZOOM
 
+  const missionsWithSpawn = missions.filter(
+    (m) => m.spawn !== null && m.status === 'in_progress',
+  )
+
   return (
     <section className="map-screen">
       <MapContainer
@@ -90,6 +99,43 @@ export function MapScreen() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <MapController center={center} zoom={zoom} />
+
+        {missionsWithSpawn.map((mission) => {
+          const spawn = mission.spawn!
+          const hasCenter =
+            spawn.generatedFromLat !== null && spawn.generatedFromLng !== null
+          return (
+            <Fragment key={mission.id}>
+              {/* Большой круг — область поиска. Центр — точка accept. */}
+              {hasCenter && (
+                <Circle
+                  center={[spawn.generatedFromLat!, spawn.generatedFromLng!]}
+                  radius={spawn.searchRadiusMeters}
+                  pathOptions={{
+                    color: '#00ff88',
+                    fillColor: '#00ff88',
+                    fillOpacity: 0.08,
+                    weight: 2,
+                  }}
+                />
+              )}
+
+              {/* Маленький круг — точка spawn. Только в dev. */}
+              {import.meta.env.DEV && (
+                <Circle
+                  center={[spawn.latitude, spawn.longitude]}
+                  radius={spawn.zoneRadiusMeters ?? 20}
+                  pathOptions={{
+                    color: '#ffcc00',
+                    fillColor: '#ffcc00',
+                    fillOpacity: 0.4,
+                    weight: 2,
+                  }}
+                />
+              )}
+            </Fragment>
+          )
+        })}
 
         {gps && (
           <>
