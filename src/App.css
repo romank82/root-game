@@ -2209,3 +2209,7 @@ h2 {
   font-size: 11px;
   opacity: 0.7;
 }
+.echo-radar-debug {
+  font-size: 10px !important;
+  opacity: 0.6;
+}

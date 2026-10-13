@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface EchoRadarProps {
   playerLat: number
@@ -81,18 +81,49 @@ export function EchoRadar({
   const [heading, setHeading] = useState<number | null>(null)
   const [compassError, setCompassError] = useState<string | null>(null)
 
+  const lastUpdateRef = useRef<number>(0)
+  const smoothedHeadingRef = useRef<number | null>(null)
+
   useEffect(() => {
     function onOrientation(event: DeviceOrientationEvent) {
       const alpha = event.alpha
       if (alpha === null || alpha === undefined) return
+
+      // Throttle: не чаще 10 раз в секунду (100 мс).
+      const now = Date.now()
+      if (now - lastUpdateRef.current < 100) return
+      lastUpdateRef.current = now
+
+      let raw: number
+
+      // iOS: webkitCompassHeading уже истинный курс (0=север, по часовой).
       const webkit = (event as DeviceOrientationEvent & {
         webkitCompassHeading?: number
       }).webkitCompassHeading
       if (typeof webkit === 'number') {
-        setHeading(webkit)
+        raw = webkit
       } else {
-        setHeading(((alpha % 360) + 360) % 360)
+        // Стандартный alpha идёт ПРОТИВ часовой стрелки:
+        //   0° = север, 90° = запад, 180° = юг, 270° = восток.
+        // Для компаса (по часовой: 0=север, 90=восток, ...) инвертируем.
+        const normalized = ((alpha % 360) + 360) % 360
+        raw = (360 - normalized) % 360
       }
+
+      // EMA-сглаживание с учётом перехода через 0/360:
+      // сначала нормализуем разницу в диапазон [-180, 180].
+      const prev = smoothedHeadingRef.current
+      let smoothed: number
+      if (prev === null) {
+        smoothed = raw
+      } else {
+        let diff = raw - prev
+        if (diff > 180) diff -= 360
+        if (diff < -180) diff += 360
+        smoothed = (prev + 0.3 * diff + 360) % 360
+      }
+      smoothedHeadingRef.current = smoothed
+      setHeading(smoothed)
     }
 
     if (typeof DeviceOrientationEvent === 'undefined') {
@@ -237,6 +268,7 @@ export function EchoRadar({
             fill="#ffcc00"
             stroke="#000"
             strokeWidth={1}
+            style={{ transition: 'cx 0.2s linear, cy 0.2s linear' }}
           />
         )}
 
@@ -250,6 +282,7 @@ export function EchoRadar({
               fill="none"
               stroke="#ffcc00"
               strokeWidth={2}
+              style={{ transition: 'cx 0.2s linear, cy 0.2s linear' }}
             />
           </g>
         )}
@@ -259,6 +292,11 @@ export function EchoRadar({
         <p className="echo-radar-line">
           РАССТОЯНИЕ: {Math.round(distanceM)} м
         </p>
+        {heading !== null && (
+          <p className="echo-radar-line echo-radar-debug">
+            heading: {heading.toFixed(1)}° · bearing: {bearingDeg.toFixed(1)}° · delta: {deltaDeg.toFixed(1)}°
+          </p>
+        )}
         <p className="echo-radar-line">
           НАПРАВЛЕНИЕ:{' '}
           {heading === null
