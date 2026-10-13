@@ -142,7 +142,9 @@ function App() {
       )}
 
       {/* TEMP: dev-only camera test screen — удалить в Sprint 8.6.g. */}
-      {import.meta.env.DEV && screen === 'camera-test' && <CameraTestScreen />}
+      {import.meta.env.DEV && screen === 'camera-test' && (
+        <CameraTestScreen missions={missions} geoPosition={geoPosition} />
+      )}
 
       {screen === 'shop' && (
         <ShopScreen onScreenChange={setScreen} />

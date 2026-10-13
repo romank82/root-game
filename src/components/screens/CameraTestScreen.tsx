@@ -1,269 +1,237 @@
-// TEMP: dev-only camera test screen — удалить в Sprint 8.6.g.
-// Цель: проверить getUserMedia + CSS-3D куб поверх видео (прототип AR-объекта).
-// Если камера/куб не запускаются — пересматриваем концепцию AR.
+// TEMP: dev-only AR camera — удалить в Sprint 8.6.j.
+// Единый AR-режим: камера + куб с QR, позиционированный по компасу и GPS.
 
 import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { getMissionQrPayload, scanMissionQr } from '../../api/engineApi'
-import type { EngineMissionScanResult } from '../../api/engineApi'
-import jsQR from 'jsqr'
+import type { EngineMission } from '../../api/engineApi'
+import { getMissionQrPayload } from '../../api/engineApi'
+import { useCameraStream } from '../../hooks/useCameraStream'
 
-export function CameraTestScreen() {
+interface CameraTestScreenProps {
+  missions: EngineMission[]
+  geoPosition: { lat: number; lng: number; accuracy: number } | null
+}
+
+// Радиус, до которого куб виден и активен (в метрах).
+const VISIBLE_RANGE_M = 70
+
+function toRadians(deg: number): number {
+  return (deg * Math.PI) / 180
+}
+
+function toDegrees(rad: number): number {
+  return (rad * 180) / Math.PI
+}
+
+function calculateBearing(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const φ1 = toRadians(lat1)
+  const φ2 = toRadians(lat2)
+  const Δλ = toRadians(lon2 - lon1)
+  const y = Math.sin(Δλ) * Math.cos(φ2)
+  const x =
+    Math.cos(φ1) * Math.sin(φ2) -
+    Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
+  return (toDegrees(Math.atan2(y, x)) + 360) % 360
+}
+
+function calculateDistanceM(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const R = 6371000
+  const φ1 = toRadians(lat1)
+  const φ2 = toRadians(lat2)
+  const Δφ = toRadians(lat2 - lat1)
+  const Δλ = toRadians(lon2 - lon1)
+  const a =
+    Math.sin(Δφ / 2) ** 2 +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+export function CameraTestScreen({
+  missions,
+  geoPosition,
+}: CameraTestScreenProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const [status, setStatus] = useState<'idle' | 'starting' | 'ok' | 'error'>('idle')
-  const [error, setError] = useState<string | null>(null)
-  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
+  const { stream, status, error } = useCameraStream()
+
   const [heading, setHeading] = useState<number | null>(null)
-  const [compassStatus, setCompassStatus] = useState<'idle' | 'requested' | 'ok' | 'denied' | 'unsupported'>('idle')
-  const [compassError, setCompassError] = useState<string | null>(null)
+  const [qrPayload, setQrPayload] = useState<{
+    payload: string
+    hmac: string
+  } | null>(null)
 
-  // Захардкоженная миссия для dev-проверки. test-code-01 — in_progress.
-  const DEV_MISSION_ID = 'mission-d36d8f9130944783bce7dc1d4dcd15c3'
-
-  const [qrPayload, setQrPayload] = useState<{ payload: string; hmac: string; expiresAt: string } | null>(null)
-  const [qrError, setQrError] = useState<string | null>(null)
-  const [qrLoading, setQrLoading] = useState(false)
-  const [mode, setMode] = useState<'cube' | 'scan'>('cube')
-  const [scanResult, setScanResult] = useState<string | null>(null)
-  const [scanError, setScanError] = useState<string | null>(null)
-  const [scanApiResult, setScanApiResult] = useState<EngineMissionScanResult | null>(null)
-  const [scanApiError, setScanApiError] = useState<string | null>(null)
-  const [scanApiLoading, setScanApiLoading] = useState(false)
-  const lastSubmittedRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setStatus('starting')
-    setError(null)
-
-    async function start() {
-      try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('getUserMedia не поддерживается этим устройством.')
-        }
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: facingMode } },
-          audio: false,
-        })
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop())
-          return
-        }
-        streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          await videoRef.current.play().catch(() => {})
-        }
-        setStatus('ok')
-      } catch (err) {
-        if (cancelled) return
-        const message = err instanceof Error ? err.message : String(err)
-        setError(message)
-        setStatus('error')
+  // Выбираем ближайшую in_progress миссию со spawn.
+  // TODO (Sprint 8.6.k): заменить на явный выбор активной миссии игроком.
+  const mission = (() => {
+    if (!geoPosition) {
+      // Без GPS — берём первую in_progress со spawn (порядок не важен для UI).
+      return missions.find(
+        (m) => m.status === 'in_progress' && m.spawn !== null,
+      ) ?? null
+    }
+    let closest: EngineMission | null = null
+    let closestDist = Infinity
+    for (const m of missions) {
+      if (m.status !== 'in_progress' || m.spawn === null) continue
+      const d = calculateDistanceM(
+        geoPosition.lat,
+        geoPosition.lng,
+        m.spawn.latitude,
+        m.spawn.longitude,
+      )
+      if (d < closestDist) {
+        closestDist = d
+        closest = m
       }
     }
+    return closest
+  })()
 
-    void start()
+  const spawn = mission?.spawn ?? null
 
+  // Привязка MediaStream к <video>.
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream
+      videoRef.current.play().catch(() => {})
+    }
+  }, [stream])
+
+  // Компас с throttle 10 Hz + EMA 0.3.
+  const lastUpdateRef = useRef<number>(0)
+  const smoothedRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    function onOrientation(event: DeviceOrientationEvent) {
+      const alpha = event.alpha
+      if (alpha === null || alpha === undefined) return
+
+      const now = Date.now()
+      if (now - lastUpdateRef.current < 100) return
+      lastUpdateRef.current = now
+
+      let raw: number
+      const webkit = (
+        event as DeviceOrientationEvent & {
+          webkitCompassHeading?: number
+        }
+      ).webkitCompassHeading
+      if (typeof webkit === 'number') {
+        raw = webkit
+      } else {
+        const normalized = ((alpha % 360) + 360) % 360
+        raw = (360 - normalized) % 360
+      }
+
+      const prev = smoothedRef.current
+      let smoothed: number
+      if (prev === null) {
+        smoothed = raw
+      } else {
+        let diff = raw - prev
+        if (diff > 180) diff -= 360
+        if (diff < -180) diff += 360
+        smoothed = (prev + 0.3 * diff + 360) % 360
+      }
+      smoothedRef.current = smoothed
+      setHeading(smoothed)
+    }
+
+    if (typeof DeviceOrientationEvent === 'undefined') return
+    window.addEventListener(
+      'deviceorientationabsolute',
+      onOrientation as EventListener,
+      true,
+    )
+    window.addEventListener(
+      'deviceorientation',
+      onOrientation as EventListener,
+      true,
+    )
+    return () => {
+      window.removeEventListener(
+        'deviceorientationabsolute',
+        onOrientation as EventListener,
+        true,
+      )
+      window.removeEventListener(
+        'deviceorientation',
+        onOrientation as EventListener,
+        true,
+      )
+    }
+  }, [])
+
+  // Загрузка QR-payload один раз при готовности камеры.
+  useEffect(() => {
+    if (status !== 'ready') return
+    if (!mission) return
+    let cancelled = false
+    async function load() {
+      try {
+        const data = await getMissionQrPayload(mission!.id)
+        if (cancelled) return
+        setQrPayload({ payload: data.payload, hmac: data.hmac })
+      } catch {
+        // Тихо: QR не готов — куб просто не покажется.
+      }
+    }
+    setQrPayload(null)
+    void load()
     return () => {
       cancelled = true
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop())
-        streamRef.current = null
-      }
     }
-  }, [facingMode])
+  }, [status, mission?.id])
 
-  function normalizeHeading(raw: number): number {
-    // alpha в DeviceOrientation: 0..360, но отсчёт против часовой от севера.
-    // Для «курс вверх» используем именно alpha как «куда смотрит верх телефона».
-    const normalized = ((raw % 360) + 360) % 360
-    return normalized
-  }
-
-  function handleDeviceOrientation(event: DeviceOrientationEvent) {
-    const alpha = event.alpha
-    if (alpha === null || alpha === undefined) return
-    // webkitCompassHeading: iOS-специфичное поле, более точное.
-    const webkit = (event as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading
-    if (typeof webkit === 'number') {
-      setHeading(webkit)
-    } else {
-      setHeading(normalizeHeading(alpha))
-    }
-    setCompassStatus('ok')
-  }
-
-  async function requestCompass() {
-    setCompassError(null)
-
-    // Сначала проверяем существование глобала — иначе обращение к нему
-    // упадёт с ReferenceError на некоторых WebView.
-    if (typeof DeviceOrientationEvent === 'undefined') {
-      setCompassStatus('unsupported')
-      setCompassError('DeviceOrientationEvent не поддерживается.')
-      return
-    }
-
-    // iOS 13+ требует явное разрешение
-    const anyEvent = DeviceOrientationEvent as unknown as {
-      requestPermission?: () => Promise<'granted' | 'denied'>
-    }
-    if (typeof anyEvent.requestPermission === 'function') {
-      try {
-        const result = await anyEvent.requestPermission()
-        if (result !== 'granted') {
-          setCompassStatus('denied')
-          setCompassError('Пользователь запретил доступ к компасу.')
-          return
-        }
-      } catch (err) {
-        setCompassStatus('denied')
-        setCompassError(err instanceof Error ? err.message : 'Ошибка запроса компаса.')
-        return
-      }
-    }
-
-    setCompassStatus('requested')
-  }
-
-  useEffect(() => {
-    if (compassStatus === 'requested' || compassStatus === 'ok') {
-      window.addEventListener('deviceorientationabsolute', handleDeviceOrientation as EventListener, true)
-      window.addEventListener('deviceorientation', handleDeviceOrientation as EventListener, true)
-    }
-    return () => {
-      window.removeEventListener('deviceorientationabsolute', handleDeviceOrientation as EventListener, true)
-      window.removeEventListener('deviceorientation', handleDeviceOrientation as EventListener, true)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compassStatus])
-
-  async function refreshQr() {
-    setQrLoading(true)
-    setQrError(null)
-    try {
-      const data = await getMissionQrPayload(DEV_MISSION_ID)
-      setQrPayload({
-        payload: data.payload,
-        hmac: data.hmac,
-        expiresAt: data.expiresAt,
-      })
-    } catch (err) {
-      setQrError(err instanceof Error ? err.message : 'Ошибка загрузки QR.')
-    } finally {
-      setQrLoading(false)
+  // Вычислить delta и distance.
+  let deltaDeg: number | null = null
+  let distanceM: number | null = null
+  if (geoPosition && spawn) {
+    const bearing = calculateBearing(
+      geoPosition.lat,
+      geoPosition.lng,
+      spawn.latitude,
+      spawn.longitude,
+    )
+    distanceM = calculateDistanceM(
+      geoPosition.lat,
+      geoPosition.lng,
+      spawn.latitude,
+      spawn.longitude,
+    )
+    if (heading !== null) {
+      deltaDeg = ((bearing - heading + 540) % 360) - 180
     }
   }
 
-  useEffect(() => {
-    if (status !== 'ok') return
-    let cancelled = false
+  // Позиция куба на экране в % по горизонтали.
+  // delta = 0 → 50% (центр), delta = +30° → 100% (правый край), delta = -30° → 0% (левый край).
+  // Клэмпим в [-30, 130], чтобы куб уезжал немного за край при большом отклонении.
+  const rawPosition =
+    deltaDeg === null ? 50 : 50 + (deltaDeg / 60) * 100
+  const leftPercent = Math.max(-30, Math.min(130, rawPosition))
 
-    async function initialLoad() {
-      try {
-        const data = await getMissionQrPayload(DEV_MISSION_ID)
-        if (cancelled) return
-        setQrPayload({
-          payload: data.payload,
-          hmac: data.hmac,
-          expiresAt: data.expiresAt,
-        })
-      } catch (err) {
-        if (cancelled) return
-        setQrError(err instanceof Error ? err.message : 'Ошибка загрузки QR.')
-      }
-    }
+  // Масштаб: далеко → 0.6, близко → 2.0.
+  const scale =
+    distanceM === null
+      ? 1
+      : Math.max(0.6, Math.min(2, 1 + (VISIBLE_RANGE_M - distanceM) / 50))
 
-    void initialLoad()
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status])
-
-  // Автообновление за 60 секунд до истечения.
-  useEffect(() => {
-    if (!qrPayload) return
-    const expiresAtMs = new Date(qrPayload.expiresAt).getTime()
-    const nowMs = Date.now()
-    const refreshIn = Math.max(expiresAtMs - nowMs - 60_000, 10_000)
-    const timer = setTimeout(() => {
-      void refreshQr()
-    }, refreshIn)
-    return () => clearTimeout(timer)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qrPayload])
-
-  function scanFrame() {
-    const video = videoRef.current
-    if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return
-
-    let canvas = canvasRef.current
-    if (!canvas) {
-      canvas = document.createElement('canvas')
-      canvasRef.current = canvas
-    }
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    if (!ctx) return
-
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: 'dontInvert',
-    })
-
-    if (code && code.data) {
-      setScanResult(code.data)
-      setScanError(null)
-    }
-  }
-
-  useEffect(() => {
-    if (mode !== 'scan' || status !== 'ok') return
-    const interval = setInterval(scanFrame, 250)
-    return () => clearInterval(interval)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, status])
-
-  useEffect(() => {
-    if (scanResult && !scanApiResult && !scanApiLoading) {
-      void submitScan(scanResult)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanResult, scanApiResult, scanApiLoading])
-
-  async function submitScan(raw: string) {
-    // Защита от повторной отправки той же строки.
-    if (lastSubmittedRef.current === raw) return
-    lastSubmittedRef.current = raw
-
-    setScanApiLoading(true)
-    setScanApiError(null)
-    setScanApiResult(null)
-
-    try {
-      const data = await scanMissionQr(DEV_MISSION_ID, raw)
-      setScanApiResult(data)
-    } catch (err) {
-      setScanApiError(err instanceof Error ? err.message : 'Ошибка проверки QR.')
-      // Сбросить блокировку при ошибке, чтобы можно было попробовать снова.
-      lastSubmittedRef.current = null
-    } finally {
-      setScanApiLoading(false)
-    }
-  }
-
-  function switchCamera() {
-    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
-  }
+  const isNear = distanceM !== null && distanceM <= VISIBLE_RANGE_M
+  const isCentered = deltaDeg !== null && Math.abs(deltaDeg) < 15
 
   return (
     <section className="camera-test-screen">
-      <div className="camera-test-video-wrapper">
+      <div className="camera-video-area">
         <video
           ref={videoRef}
           playsInline
@@ -272,179 +240,72 @@ export function CameraTestScreen() {
           className="camera-test-video"
         />
 
-        {/* Компас-heading overlay (dev) */}
-        <div className="compass-debug-overlay">
-          <p className="compass-debug-line">heading: {heading === null ? '—' : `${heading.toFixed(1)}°`}</p>
-          <p className="compass-debug-line">compass: {compassStatus}</p>
-          {compassError && <p className="compass-debug-error">{compassError}</p>}
-          {compassStatus !== 'ok' && (
-            <button className="compass-debug-button" onClick={() => void requestCompass()}>
-              Запросить компас
-            </button>
-          )}
-        </div>
-
-        {/* Переключатель режима: куб / сканер (dev) */}
-        <div className="camera-mode-switch">
-          <button
-            className={mode === 'cube' ? 'active' : ''}
-            onClick={() => {
-              setMode('cube')
-              setScanResult(null)
-              setScanError(null)
-              setScanApiResult(null)
-              setScanApiError(null)
-              setScanApiLoading(false)
-              lastSubmittedRef.current = null
-            }}
-          >
-            Куб
-          </button>
-          <button
-            className={mode === 'scan' ? 'active' : ''}
-            onClick={() => {
-              setMode('scan')
-              setScanResult(null)
-              setScanError(null)
-              setScanApiResult(null)
-              setScanApiError(null)
-              setScanApiLoading(false)
-              lastSubmittedRef.current = null
-            }}
-          >
-            Сканер
-          </button>
-        </div>
-
-        {/* QR-дебаг (dev) */}
-        <div className="qr-debug-overlay">
-          <p className="qr-debug-line">
-            QR: {qrLoading ? 'загрузка…' : qrPayload ? 'готов' : '—'}
-          </p>
-          {qrPayload && (
-            <p className="qr-debug-line">
-              exp: {new Date(qrPayload.expiresAt).toLocaleTimeString()}
-            </p>
-          )}
-          {qrPayload && (
-            <p className="qr-debug-line">
-              len: {qrPayload.payload.length + qrPayload.hmac.length + 1}
-            </p>
-          )}
-          {qrError && <p className="qr-debug-error">{qrError}</p>}
-          <button className="qr-debug-button" onClick={() => void refreshQr()} disabled={qrLoading}>
-            Обновить QR
-          </button>
-        </div>
-
-        {/* CSS-3D куб — прототип AR-объекта */}
-        {status === 'ok' && mode === 'cube' && (
-          <>
-            <div className="ar-cube-stage">
-              <div className="ar-cube-3d">
-                <div className="ar-cube-3d-face ar-cube-3d-front">
-                  {qrPayload ? (
-                    <QRCodeSVG
-                      value={`${qrPayload.payload}.${qrPayload.hmac}`}
-                      size={120}
-                      bgColor="#000000"
-                      fgColor="#00ff88"
-                      level="M"
-                      style={{ width: '100%', height: '100%' }}
-                    />
-                  ) : null}
-                </div>
-                <div className="ar-cube-3d-face ar-cube-3d-back">
-                  {qrPayload ? (
-                    <QRCodeSVG
-                      value={`${qrPayload.payload}.${qrPayload.hmac}`}
-                      size={120}
-                      bgColor="#000000"
-                      fgColor="#00ff88"
-                      level="M"
-                      style={{ width: '100%', height: '100%' }}
-                    />
-                  ) : null}
-                </div>
-                <div className="ar-cube-3d-face ar-cube-3d-right" />
-                <div className="ar-cube-3d-face ar-cube-3d-left" />
-                <div className="ar-cube-3d-face ar-cube-3d-top" />
-                <div className="ar-cube-3d-face ar-cube-3d-bottom" />
-              </div>
-            </div>
-
-            {/* Reticle (прицел) в центре — как в AR-приложениях */}
-            <div className="ar-reticle-test">
-              <span className="ar-reticle-test-cross">+</span>
-            </div>
-
-            {/* Подпись снизу — что здесь появится AR-объект */}
-            <div className="ar-test-hint">
-              Прототип AR-объекта (dev)
-            </div>
-          </>
-        )}
-
-        {mode === 'scan' && status === 'ok' && (
-          <div className="scan-result-overlay">
-            <p className="scan-result-title">РЕЗУЛЬТАТ СКАНИРОВАНИЯ</p>
-
-            {!scanResult && <p className="scan-result-value">наведите на QR…</p>}
-
-            {scanResult && (
-              <>
-                <p className="scan-result-value">
-                  {scanResult.slice(0, 60)}
-                  {scanResult.length > 60 ? '…' : ''}
-                </p>
-                <p className="scan-result-meta">
-                  len: {scanResult.length} · точка: {scanResult.includes('.') ? 'да' : 'нет'}
-                </p>
-              </>
-            )}
-
-            {scanError && <p className="scan-result-error">{scanError}</p>}
-
-            {scanApiLoading && (
-              <p className="scan-result-meta">проверка на сервере…</p>
-            )}
-
-            {scanApiError && (
-              <p className="scan-result-error">ОШИБКА: {scanApiError}</p>
-            )}
-
-            {scanApiResult && (
-              <div className="scan-api-result">
-                <p className="scan-result-title">✓ ПРИНЯТО СЕРВЕРОМ</p>
-                <p className="scan-result-meta">
-                  missionType: {scanApiResult.miniGame.missionType}
-                </p>
-                <p className="scan-result-meta">
-                  scannedAt: {new Date(scanApiResult.scannedAt).toLocaleTimeString()}
-                </p>
-                <p className="scan-result-value">Мини-игра готова — интеграция в 8.6.i</p>
-              </div>
-            )}
-          </div>
-        )}
-
         {status === 'starting' && (
           <div className="camera-test-overlay">Запуск камеры…</div>
         )}
+
         {status === 'error' && (
           <div className="camera-test-overlay camera-test-overlay-error">
-            Ошибка: {error}
+            {error ?? 'Ошибка камеры'}
           </div>
         )}
-      </div>
-      <div className="camera-test-controls">
-        <p className="camera-test-status">
-          status: {status}
-          {error && ` — ${error}`}
-        </p>
-        <button onClick={switchCamera} disabled={status === 'starting'}>
-          Переключить камеру ({facingMode})
-        </button>
+
+        {status === 'ready' && isNear && qrPayload && (
+          <div
+            className={`ar-cube-world${isCentered ? ' is-centered' : ''}`}
+            style={{
+              left: `${leftPercent}%`,
+              transform: `translate(-50%, -50%) scale(${scale})`,
+            }}
+          >
+            <div className="ar-cube-3d">
+              <div className="ar-cube-3d-face ar-cube-3d-front">
+                <QRCodeSVG
+                  value={`${qrPayload.payload}.${qrPayload.hmac}`}
+                  size={120}
+                  bgColor="#000000"
+                  fgColor="#00ff88"
+                  level="M"
+                  style={{ width: '100%', height: '100%' }}
+                />
+              </div>
+              <div className="ar-cube-3d-face ar-cube-3d-back">
+                <QRCodeSVG
+                  value={`${qrPayload.payload}.${qrPayload.hmac}`}
+                  size={120}
+                  bgColor="#000000"
+                  fgColor="#00ff88"
+                  level="M"
+                  style={{ width: '100%', height: '100%' }}
+                />
+              </div>
+              <div className="ar-cube-3d-face ar-cube-3d-right" />
+              <div className="ar-cube-3d-face ar-cube-3d-left" />
+              <div className="ar-cube-3d-face ar-cube-3d-top" />
+              <div className="ar-cube-3d-face ar-cube-3d-bottom" />
+            </div>
+          </div>
+        )}
+
+        {status === 'ready' && !geoPosition && (
+          <div className="ar-hint">Определяем вашу позицию…</div>
+        )}
+
+        {status === 'ready' && distanceM !== null && distanceM > VISIBLE_RANGE_M && (
+          <div className="ar-hint">
+            Цель в {Math.round(distanceM)} м. Идите по радару.
+          </div>
+        )}
+
+        {status === 'ready' &&
+          isNear &&
+          deltaDeg !== null &&
+          Math.abs(deltaDeg) > 30 && (
+            <div className="ar-hint">
+              Поверните телефон {deltaDeg > 0 ? 'вправо' : 'влево'} на{' '}
+              {Math.round(Math.abs(deltaDeg))}°
+            </div>
+          )}
       </div>
     </section>
   )
