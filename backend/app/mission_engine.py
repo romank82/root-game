@@ -1135,3 +1135,78 @@ def get_mission_qr_payload(player_id: str, mission_id: str) -> dict[str, Any]:
             "expiresAt": qr["expiresAt"],
             "ttlSeconds": get_qr_ttl_seconds(),
         }
+
+
+def process_qr_scan(
+    player_id: str,
+    mission_id: str,
+    payload_and_hmac: str,
+) -> dict[str, Any]:
+    """
+    Проверить отсканированный QR игрока.
+    При успехе — сохранить факт сканирования в PlayerMission.progress
+    и вернуть mini-game config.
+    """
+    from app.qr_service import split_payload_and_hmac, verify_qr_payload
+
+    with SessionLocal() as session:
+        with session.begin():
+            mission = session.get(Mission, mission_id)
+            if mission is None or mission.status != "published":
+                raise MissionEngineError(404, "Миссия не найдена или не опубликована.")
+
+            player_mission = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == player_id,
+                    PlayerMission.mission_id == mission_id,
+                )
+            ).first()
+            if player_mission is None:
+                raise MissionEngineError(404, "Прогресс по миссии не найден.")
+
+            if player_mission.status != "in_progress":
+                raise MissionEngineError(
+                    409,
+                    "QR можно сканировать только для миссии в статусе in_progress.",
+                )
+
+            progress = player_mission.progress or {}
+            if not isinstance(progress.get("spawn"), dict):
+                raise MissionEngineError(
+                    409,
+                    "Для этой миссии ещё не сгенерирован spawn.",
+                )
+
+            try:
+                payload_b64, hmac_b64 = split_payload_and_hmac(payload_and_hmac)
+            except ValueError:
+                raise MissionEngineError(422, "QR-код недействителен (формат).")
+
+            try:
+                body = verify_qr_payload(
+                    payload_b64=payload_b64,
+                    hmac_b64=hmac_b64,
+                    expected_player_id=player_id,
+                    expected_mission_id=mission_id,
+                )
+            except ValueError as exc:
+                # Не раскрываем детали игроку.
+                raise MissionEngineError(422, "QR-код недействителен.") from exc
+
+            scanned_at = _utcnow().isoformat()
+
+            progress = dict(progress)
+            progress["lastScanAt"] = scanned_at
+            progress["lastScanNonce"] = body.get("nonce")
+            player_mission.progress = progress
+            session.flush()
+
+            return {
+                "accepted": True,
+                "missionId": mission.id,
+                "scannedAt": scanned_at,
+                "miniGame": {
+                    "missionType": mission.mission_type,
+                    "content": mission.content,
+                },
+            }

@@ -139,3 +139,19 @@ def verify_qr_payload(
 
 def get_qr_ttl_seconds() -> int:
     return QR_TTL_SECONDS
+
+
+def split_payload_and_hmac(raw: str) -> tuple[str, str]:
+    """
+    Разбирает строку "payload.hmac" на две части.
+    Raises ValueError("invalid_format") если точек нет или их больше одной.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("invalid_format")
+    cleaned = raw.strip()
+    if "." not in cleaned:
+        raise ValueError("invalid_format")
+    payload_b64, hmac_b64 = cleaned.rsplit(".", 1)
+    if not payload_b64 or not hmac_b64:
+        raise ValueError("invalid_format")
+    return payload_b64, hmac_b64
