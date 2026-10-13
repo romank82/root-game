@@ -5,9 +5,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { getMissionQrPayload } from '../../api/engineApi'
+import jsQR from 'jsqr'
 
 export function CameraTestScreen() {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const [status, setStatus] = useState<'idle' | 'starting' | 'ok' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -22,6 +24,9 @@ export function CameraTestScreen() {
   const [qrPayload, setQrPayload] = useState<{ payload: string; hmac: string; expiresAt: string } | null>(null)
   const [qrError, setQrError] = useState<string | null>(null)
   const [qrLoading, setQrLoading] = useState(false)
+  const [mode, setMode] = useState<'cube' | 'scan'>('cube')
+  const [scanResult, setScanResult] = useState<string | null>(null)
+  const [scanError, setScanError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -185,6 +190,40 @@ export function CameraTestScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qrPayload])
 
+  function scanFrame() {
+    const video = videoRef.current
+    if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return
+
+    let canvas = canvasRef.current
+    if (!canvas) {
+      canvas = document.createElement('canvas')
+      canvasRef.current = canvas
+    }
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: 'dontInvert',
+    })
+
+    if (code && code.data) {
+      setScanResult(code.data)
+      setScanError(null)
+    }
+  }
+
+  useEffect(() => {
+    if (mode !== 'scan' || status !== 'ok') return
+    const interval = setInterval(scanFrame, 250)
+    return () => clearInterval(interval)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, status])
+
   function switchCamera() {
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
   }
@@ -212,6 +251,22 @@ export function CameraTestScreen() {
           )}
         </div>
 
+        {/* Переключатель режима: куб / сканер (dev) */}
+        <div className="camera-mode-switch">
+          <button
+            className={mode === 'cube' ? 'active' : ''}
+            onClick={() => { setMode('cube'); setScanResult(null); setScanError(null) }}
+          >
+            Куб
+          </button>
+          <button
+            className={mode === 'scan' ? 'active' : ''}
+            onClick={() => { setMode('scan'); setScanResult(null); setScanError(null) }}
+          >
+            Сканер
+          </button>
+        </div>
+
         {/* QR-дебаг (dev) */}
         <div className="qr-debug-overlay">
           <p className="qr-debug-line">
@@ -222,6 +277,11 @@ export function CameraTestScreen() {
               exp: {new Date(qrPayload.expiresAt).toLocaleTimeString()}
             </p>
           )}
+          {qrPayload && (
+            <p className="qr-debug-line">
+              len: {qrPayload.payload.length + qrPayload.hmac.length + 1}
+            </p>
+          )}
           {qrError && <p className="qr-debug-error">{qrError}</p>}
           <button className="qr-debug-button" onClick={() => void refreshQr()} disabled={qrLoading}>
             Обновить QR
@@ -229,14 +289,14 @@ export function CameraTestScreen() {
         </div>
 
         {/* CSS-3D куб — прототип AR-объекта */}
-        {status === 'ok' && (
+        {status === 'ok' && mode === 'cube' && (
           <>
             <div className="ar-cube-stage">
               <div className="ar-cube-3d">
                 <div className="ar-cube-3d-face ar-cube-3d-front">
                   {qrPayload ? (
                     <QRCodeSVG
-                      value={qrPayload.payload}
+                      value={`${qrPayload.payload}.${qrPayload.hmac}`}
                       size={120}
                       bgColor="#000000"
                       fgColor="#00ff88"
@@ -248,7 +308,7 @@ export function CameraTestScreen() {
                 <div className="ar-cube-3d-face ar-cube-3d-back">
                   {qrPayload ? (
                     <QRCodeSVG
-                      value={qrPayload.payload}
+                      value={`${qrPayload.payload}.${qrPayload.hmac}`}
                       size={120}
                       bgColor="#000000"
                       fgColor="#00ff88"
@@ -274,6 +334,24 @@ export function CameraTestScreen() {
               Прототип AR-объекта (dev)
             </div>
           </>
+        )}
+
+        {mode === 'scan' && status === 'ok' && (
+          <div className="scan-result-overlay">
+            <p className="scan-result-title">РЕЗУЛЬТАТ СКАНИРОВАНИЯ</p>
+            {scanResult ? (
+              <>
+                <p className="scan-result-value">{scanResult.slice(0, 80)}{scanResult.length > 80 ? '…' : ''}</p>
+                <p className="scan-result-meta">len: {scanResult.length}</p>
+                <p className="scan-result-meta">
+                  содержит точку: {scanResult.includes('.') ? 'да' : 'нет'}
+                </p>
+              </>
+            ) : (
+              <p className="scan-result-value">наведите на QR…</p>
+            )}
+            {scanError && <p className="scan-result-error">{scanError}</p>}
+          </div>
         )}
 
         {status === 'starting' && (
