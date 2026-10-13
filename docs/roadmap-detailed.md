@@ -575,7 +575,7 @@
 - **Причина**: временная кнопка для проверки accept на телефоне (Sprint 8.4.f). В production не появляется (защита через `import.meta.env.DEV`), но код нужно удалить.
 - **Как найти**: `grep -rn "DevAcceptMissionButton" src/`.
 - **Проверка**: после удаления `npm run build` зелёный, `grep -rn "DevAcceptMissionButton" src/` пуст.
-- **Статус**: ⏳ pending, после Sprint 8.5.
+- **Статус**: ✅ done (2026-10-13), кнопка удалена в Sprint 8.5.f.
 
 ### Спринт 8.6. AR-камера + куб — вертикальный срез
 - **Backend:** — (без изменений).

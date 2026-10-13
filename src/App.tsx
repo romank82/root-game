@@ -11,7 +11,6 @@ import { InventoryScreen } from './components/screens/InventoryScreen'
 import { ScannerScreen } from './components/screens/ScannerScreen'
 import { ShopScreen } from './components/screens/ShopScreen'
 import { MapScreen } from './components/screens/MapScreen'
-import { DevAcceptMissionButton } from './components/DevAcceptMissionButton'
 
 function App() {
   const {
@@ -143,7 +142,6 @@ function App() {
         </button>
       )}
 
-      {import.meta.env.DEV && <DevAcceptMissionButton />}
     </main>
   )
 }
