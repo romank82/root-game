@@ -3,9 +3,6 @@ import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from 'react-lea
 import type { EngineMission } from '../../api/engineApi'
 import 'leaflet/dist/leaflet.css'
 
-// Заглушка пока GPS не получен — Москва.
-const DEFAULT_CENTER: [number, number] = [55.7558, 37.6173]
-const DEFAULT_ZOOM = 13
 // Приближение, когда знаем позицию игрока.
 const FOCUS_ZOOM = 16
 
@@ -78,27 +75,51 @@ export function MapScreen({ missions }: MapScreenProps) {
     requestGps()
   }, [requestGps])
 
-  const center: [number, number] = gps
-    ? [gps.latitude, gps.longitude]
-    : DEFAULT_CENTER
-  const zoom = gps ? FOCUS_ZOOM : DEFAULT_ZOOM
-
   const missionsWithSpawn = missions.filter(
     (m) => m.spawn !== null && m.status === 'in_progress',
   )
 
+  if (!gps) {
+    return (
+      <section className="map-screen map-screen-loading">
+        <div className="map-loading-box">
+          {gpsError ? (
+            <>
+              <p className="map-loading-title">ОШИБКА ГЕОЛОКАЦИИ</p>
+              <p className="map-loading-text">{gpsError}</p>
+              <button
+                className="map-overlay-button"
+                onClick={requestGps}
+                disabled={loadingGps}
+              >
+                {loadingGps ? 'Определение…' : 'Попробовать снова'}
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="map-loading-title">ОПРЕДЕЛЯЕМ ВАШУ ПОЗИЦИЮ…</p>
+              <p className="map-loading-text">
+                Разрешите геолокацию, чтобы увидеть карту и зоны миссий.
+              </p>
+            </>
+          )}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section className="map-screen">
       <MapContainer
-        center={center}
-        zoom={zoom}
+        center={[gps.latitude, gps.longitude]}
+        zoom={FOCUS_ZOOM}
         style={{ width: '100%', height: '100%' }}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <MapController center={center} zoom={zoom} />
+        <MapController center={[gps.latitude, gps.longitude]} zoom={FOCUS_ZOOM} />
 
         {missionsWithSpawn.map((mission) => {
           const spawn = mission.spawn!
