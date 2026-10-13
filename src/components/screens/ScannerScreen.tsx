@@ -184,6 +184,30 @@ export function ScannerScreen({
   const [repairError, setRepairError] = useState('')
   const [confirmedAward, setConfirmedAward] = useState<string | null>(null)
   const [playerCoords, setPlayerCoords] = useState<{ lat: number; lng: number } | null>(null)
+  function refreshPlayerCoords() {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setPlayerCoords({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        })
+      },
+      () => {
+        // Игнорируем ошибку — радар просто не покажется.
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    )
+  }
+
+  useEffect(() => {
+    refreshPlayerCoords()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const spawnMission = missions.find(
+    (m) => m.status === 'in_progress' && m.spawn !== null,
+  ) ?? null
 
   const activeMission = missions.find(
     (mission) =>
@@ -207,6 +231,54 @@ export function ScannerScreen({
   const codeRepairContent = activeMission
     ? parseCodeRepairContent(activeMission)
     : null
+
+  if (spawnMission) {
+    return (
+      <section className="segment-screen">
+        <p className="eyebrow">АКТИВНАЯ МИССИЯ / {spawnMission.id.toUpperCase()}</p>
+
+        <div className="segment-heading">
+          <div>
+            <h2>{spawnMission.title}</h2>
+            <p>{spawnMission.description}</p>
+          </div>
+        </div>
+
+        {!playerCoords ? (
+          <section className="location-status">
+            <span className="location-status-icon">⌖</span>
+            <div>
+              <strong>ОПРЕДЕЛЯЕМ ПОЗИЦИЮ…</strong>
+              <p>Разрешите геолокацию, чтобы увидеть радар.</p>
+            </div>
+          </section>
+        ) : (
+          <>
+            <EchoRadar
+              playerLat={playerCoords.lat}
+              playerLng={playerCoords.lng}
+              targetLat={spawnMission.spawn!.latitude}
+              targetLng={spawnMission.spawn!.longitude}
+              hint="Идите по радару. Когда приблизитесь — откройте камеру."
+            />
+            <button
+              className="ar-start-button"
+              onClick={() => onScreenChange('camera-test')}
+            >
+              ОТКРЫТЬ КАМЕРУ →
+            </button>
+          </>
+        )}
+
+        <button
+          className="back-button"
+          onClick={() => onScreenChange('terminal')}
+        >
+          ← ВЕРНУТЬСЯ В КОНТУР
+        </button>
+      </section>
+    )
+  }
 
   if (!activeMission || !activeSegment || !segmentContent || !codeRepairContent) {
     return (
@@ -278,27 +350,6 @@ export function ScannerScreen({
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     )
   }
-
-  function refreshPlayerCoords() {
-    if (!navigator.geolocation) return
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setPlayerCoords({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        })
-      },
-      () => {
-        // Игнорируем ошибку — радар просто не покажется.
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
-    )
-  }
-
-  useEffect(() => {
-    refreshPlayerCoords()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   function startArSearch() {
     setArSessionStarted(true)
@@ -467,24 +518,6 @@ export function ScannerScreen({
           </>
         )}
       </section>
-
-      {mission.spawn && mission.status === 'in_progress' && playerCoords && !arSessionStarted && (
-        <>
-          <EchoRadar
-            playerLat={playerCoords.lat}
-            playerLng={playerCoords.lng}
-            targetLat={mission.spawn.latitude}
-            targetLng={mission.spawn.longitude}
-            hint="Идите в направлении центра радара. Когда приблизитесь — откройте камеру."
-          />
-          <button
-            className="ar-start-button"
-            onClick={() => onScreenChange('camera-test')}
-          >
-            ОТКРЫТЬ КАМЕРУ →
-          </button>
-        </>
-      )}
 
       {!arSessionStarted ? (
         <button
