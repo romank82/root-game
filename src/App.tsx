@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import './App.css'
 import { useAuth } from './hooks/useAuth'
 import { useGameState } from './hooks/useGameState'
+import { useGeoPosition } from './hooks/useGeoPosition'
 import { Topbar } from './components/Topbar'
 import { MobileNavigation } from './components/MobileNavigation'
 import { BriefingScreen } from './components/screens/BriefingScreen'
@@ -34,6 +35,8 @@ function App() {
   } = useGameState()
 
   const { authStatus, authError } = useAuth(applyEngineBootstrap)
+
+  const { position: geoPosition, error: geoError } = useGeoPosition()
 
   useEffect(() => {
     localStorage.setItem('chimera-screen', screen)
@@ -125,10 +128,18 @@ function App() {
           segments={segments}
           onScreenChange={setScreen}
           onSubmitMission={submitMission}
+          geoPosition={geoPosition}
+          geoError={geoError}
         />
       )}
 
-      {screen === 'map' && <MapScreen missions={missions} />}
+      {screen === 'map' && (
+        <MapScreen
+          missions={missions}
+          geoPosition={geoPosition}
+          geoError={geoError}
+        />
+      )}
 
       {/* TEMP: dev-only camera test screen — удалить в Sprint 8.6.g. */}
       {import.meta.env.DEV && screen === 'camera-test' && <CameraTestScreen />}

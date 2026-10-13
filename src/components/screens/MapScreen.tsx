@@ -1,16 +1,10 @@
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useEffect } from 'react'
 import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet'
 import type { EngineMission } from '../../api/engineApi'
 import 'leaflet/dist/leaflet.css'
 
 // Приближение, когда знаем позицию игрока.
 const FOCUS_ZOOM = 16
-
-type GpsCoords = {
-  latitude: number
-  longitude: number
-  accuracy: number
-}
 
 /**
  * Вспомогательный компонент внутри MapContainer: умеет двигать карту,
@@ -34,66 +28,23 @@ function MapController({
 
 interface MapScreenProps {
   missions: EngineMission[]
+  geoPosition: { lat: number; lng: number; accuracy: number } | null
+  geoError: string | null
 }
 
-export function MapScreen({ missions }: MapScreenProps) {
-  const [gps, setGps] = useState<GpsCoords | null>(null)
-  const [gpsError, setGpsError] = useState<string | null>(null)
-  const [loadingGps, setLoadingGps] = useState(false)
-
-  const requestGps = useCallback(() => {
-    if (!navigator.geolocation) {
-      setGpsError('Геолокация не поддерживается этим устройством.')
-      return
-    }
-    setLoadingGps(true)
-    setGpsError(null)
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setGps({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        })
-        setLoadingGps(false)
-      },
-      (error) => {
-        const messages: Record<number, string> = {
-          1: 'Доступ к геолокации запрещён. Разрешите в настройках.',
-          2: 'Не удалось определить позицию. Проверьте GPS.',
-          3: 'Превышено время ожидания GPS.',
-        }
-        setGpsError(messages[error.code] ?? 'Ошибка геолокации.')
-        setLoadingGps(false)
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
-    )
-  }, [])
-
-  useEffect(() => {
-    requestGps()
-  }, [requestGps])
-
+export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
   const missionsWithSpawn = missions.filter(
     (m) => m.spawn !== null && m.status === 'in_progress',
   )
 
-  if (!gps) {
+  if (!geoPosition) {
     return (
       <section className="map-screen map-screen-loading">
         <div className="map-loading-box">
-          {gpsError ? (
+          {geoError ? (
             <>
               <p className="map-loading-title">ОШИБКА ГЕОЛОКАЦИИ</p>
-              <p className="map-loading-text">{gpsError}</p>
-              <button
-                className="map-overlay-button"
-                onClick={requestGps}
-                disabled={loadingGps}
-              >
-                {loadingGps ? 'Определение…' : 'Попробовать снова'}
-              </button>
+              <p className="map-loading-text">{geoError}</p>
             </>
           ) : (
             <>
@@ -111,7 +62,7 @@ export function MapScreen({ missions }: MapScreenProps) {
   return (
     <section className="map-screen">
       <MapContainer
-        center={[gps.latitude, gps.longitude]}
+        center={[geoPosition.lat, geoPosition.lng]}
         zoom={FOCUS_ZOOM}
         style={{ width: '100%', height: '100%' }}
       >
@@ -119,7 +70,7 @@ export function MapScreen({ missions }: MapScreenProps) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <MapController center={[gps.latitude, gps.longitude]} zoom={FOCUS_ZOOM} />
+        <MapController center={[geoPosition.lat, geoPosition.lng]} zoom={FOCUS_ZOOM} />
 
         {missionsWithSpawn.map((mission) => {
           const spawn = mission.spawn!
@@ -158,50 +109,36 @@ export function MapScreen({ missions }: MapScreenProps) {
           )
         })}
 
-        {gps && (
-          <>
-            {/* Точка игрока — синий кружок. */}
-            <CircleMarker
-              center={[gps.latitude, gps.longitude]}
-              radius={8}
-              pathOptions={{
-                color: '#ffffff',
-                fillColor: '#1976d2',
-                fillOpacity: 1,
-                weight: 3,
-              }}
-            />
-            {/* Радиус точности — тонкий ореол. */}
-            <CircleMarker
-              center={[gps.latitude, gps.longitude]}
-              radius={8}
-              pathOptions={{
-                color: '#1976d2',
-                fillColor: '#1976d2',
-                fillOpacity: 0.15,
-                weight: 1,
-              }}
-            />
-          </>
-        )}
+        {/* Точка игрока — синий кружок. */}
+        <CircleMarker
+          center={[geoPosition.lat, geoPosition.lng]}
+          radius={8}
+          pathOptions={{
+            color: '#ffffff',
+            fillColor: '#1976d2',
+            fillOpacity: 1,
+            weight: 3,
+          }}
+        />
+        {/* Радиус точности — тонкий ореол. */}
+        <CircleMarker
+          center={[geoPosition.lat, geoPosition.lng]}
+          radius={8}
+          pathOptions={{
+            color: '#1976d2',
+            fillColor: '#1976d2',
+            fillOpacity: 0.15,
+            weight: 1,
+          }}
+        />
       </MapContainer>
 
       <div className="map-overlay">
-        {loadingGps && <div className="map-overlay-info">Определяем вашу позицию…</div>}
-        {gpsError && <div className="map-overlay-error">{gpsError}</div>}
-        {gps && !loadingGps && (
-          <div className="map-overlay-info">
-            {gps.latitude.toFixed(5)}, {gps.longitude.toFixed(5)}
-            {' '}± {Math.round(gps.accuracy)} м
-          </div>
-        )}
-        <button
-          className="map-overlay-button"
-          onClick={requestGps}
-          disabled={loadingGps}
-        >
-          {loadingGps ? 'Обновление…' : 'Обновить мою позицию'}
-        </button>
+        {geoError && <div className="map-overlay-error">{geoError}</div>}
+        <div className="map-overlay-info">
+          {geoPosition.lat.toFixed(5)}, {geoPosition.lng.toFixed(5)}
+          {' '}± {Math.round(geoPosition.accuracy)} м
+        </div>
       </div>
     </section>
   )

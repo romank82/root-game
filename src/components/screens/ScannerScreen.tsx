@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type {
   EngineMission,
   EngineSegment,
@@ -40,6 +40,8 @@ interface ScannerScreenProps {
     missionId: string,
     payload: { sequence?: string[] },
   ) => Promise<MissionSubmission | null>
+  geoPosition: { lat: number; lng: number; accuracy: number } | null
+  geoError: string | null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -172,6 +174,8 @@ export function ScannerScreen({
   segments,
   onScreenChange,
   onSubmitMission,
+  geoPosition,
+  geoError,
 }: ScannerScreenProps) {
   const [distanceToSegment, setDistanceToSegment] = useState<number | null>(null)
   const [isCheckingLocation, setIsCheckingLocation] = useState(false)
@@ -183,39 +187,6 @@ export function ScannerScreen({
   const [repairSequence, setRepairSequence] = useState<string[]>([])
   const [repairError, setRepairError] = useState('')
   const [confirmedAward, setConfirmedAward] = useState<string | null>(null)
-  const [playerCoords, setPlayerCoords] = useState<{
-    lat: number
-    lng: number
-    accuracy: number
-  } | null>(null)
-  function refreshPlayerCoords() {
-    if (!navigator.geolocation) return
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setPlayerCoords({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        })
-      },
-      () => {
-        // Игнорируем ошибку — радар просто не покажется.
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        // maximumAge: разрешаем браузеру вернуть последний кэшированный фикс,
-        // если он не старше 30 секунд. Иначе на первой секунде получаем грубый
-        // WiFi/cell-fix (±200-500 м), который даёт "дрейф" точки.
-        maximumAge: 30000,
-      },
-    )
-  }
-
-  useEffect(() => {
-    refreshPlayerCoords()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const spawnMission = missions.find(
     (m) => m.status === 'in_progress' && m.spawn !== null,
@@ -256,20 +227,20 @@ export function ScannerScreen({
           </div>
         </div>
 
-        {!playerCoords ? (
+        {!geoPosition ? (
           <section className="location-status">
             <span className="location-status-icon">⌖</span>
             <div>
-              <strong>ОПРЕДЕЛЯЕМ ПОЗИЦИЮ…</strong>
-              <p>Разрешите геолокацию, чтобы увидеть радар.</p>
+              <strong>{geoError ? 'ГЕОЛОКАЦИЯ НЕДОСТУПНА' : 'ОПРЕДЕЛЯЕМ ПОЗИЦИЮ…'}</strong>
+              <p>{geoError ?? 'Разрешите геолокацию, чтобы увидеть радар.'}</p>
             </div>
           </section>
         ) : (
           <>
             <EchoRadar
-              playerLat={playerCoords.lat}
-              playerLng={playerCoords.lng}
-              playerAccuracy={playerCoords.accuracy}
+              playerLat={geoPosition.lat}
+              playerLng={geoPosition.lng}
+              playerAccuracy={geoPosition.accuracy}
               targetLat={spawnMission.spawn!.latitude}
               targetLng={spawnMission.spawn!.longitude}
               hint="Идите по радару. Когда приблизитесь — откройте камеру."
