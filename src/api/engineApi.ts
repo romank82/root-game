@@ -51,6 +51,16 @@ export type EngineMissionQrPayload = {
   ttlSeconds: number
 }
 
+export type EngineMissionScanResult = {
+  accepted: boolean
+  missionId: string
+  scannedAt: string
+  miniGame: {
+    missionType: string
+    content: Record<string, unknown>
+  }
+}
+
 export type EngineInventoryItem = {
   id: string
   slug: string
@@ -286,6 +296,28 @@ export async function getMissionQrPayload(
   }
 
   return response.json() as Promise<EngineMissionQrPayload>
+}
+
+export async function scanMissionQr(
+  missionId: string,
+  payloadAndHmac: string,
+): Promise<EngineMissionScanResult> {
+  const response = await apiFetch(
+    `/api/v1/engine/missions/${missionId}/scan-qr`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ payload_and_hmac: payloadAndHmac }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineMissionScanResult>
 }
 
 export async function listFallbackOffers(): Promise<FallbackOffer[]> {
