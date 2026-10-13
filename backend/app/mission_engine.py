@@ -14,6 +14,7 @@ from app.db import SessionLocal
 from app.fallback_shop import create_first_failure_entitlement
 from app.geo_spawn import generate_spawn_point
 from app.player_restrictions_engine import recompute_player_status
+from app.qr_service import generate_qr_payload, get_qr_ttl_seconds
 from app.models import (
     GamePlayer,
     GeoZone,
@@ -1055,3 +1056,82 @@ def accept_mission(
             longitude=longitude,
             accuracy=accuracy,
         )
+
+
+def get_mission_qr_payload(player_id: str, mission_id: str) -> dict[str, Any]:
+    """
+    8.6.c: подписанный QR-payload для миссии в статусе in_progress.
+
+    Read-only: ничего не пишет в БД и не создаёт PlayerMission — QR не
+    является действием игрока, а лишь материалом для отображения на грани
+    AR-куба (8.6.d). Проверка подписи при скане — отдельный шаг 8.8.
+
+    Индивидуальность гарантируется подписью: player_id и mission_id входят
+    в подписанный body, поэтому чужой (или подделанный) QR не пройдёт
+    verify_qr_payload. Одноразовый nonce и TTL не дают переиспользовать
+    payload повторно и ограничивают время его жизни.
+
+    Ответ: missionId, payload, hmac, expiresAt, ttlSeconds. Секреты,
+    validation_config и иные server-only поля не возвращаются.
+    """
+    with SessionLocal() as session:
+        _ensure_player(session, player_id)
+
+        mission = session.get(Mission, mission_id)
+        if mission is None or mission.status != "published":
+            raise MissionEngineError(
+                404,
+                "Миссия не найдена или не опубликована.",
+            )
+
+        player_mission = session.scalars(
+            select(PlayerMission).where(
+                PlayerMission.player_id == player_id,
+                PlayerMission.mission_id == mission_id,
+            )
+        ).first()
+
+        # Словарь статусов повторяет accept: терминальные и «не взята» дают
+        # конкретное сообщение, а не общее «нельзя».
+        status = player_mission.status if player_mission is not None else None
+        if status == "locked":
+            raise MissionEngineError(
+                403,
+                "Миссия недоступна: не выполнены требования.",
+            )
+        if status == "completed":
+            raise MissionEngineError(
+                409,
+                "Миссия уже завершена.",
+            )
+        if status == "cancelled":
+            raise MissionEngineError(
+                409,
+                "Миссия отменена.",
+            )
+        if status != "in_progress":
+            raise MissionEngineError(
+                409,
+                "Миссия не запущена: сначала возьмите миссию.",
+            )
+
+        try:
+            qr = generate_qr_payload(
+                player_id=player_id,
+                mission_id=mission_id,
+            )
+        except RuntimeError as error:
+            # GAME_SESSION_SECRET не настроен: это серверная проблема, а не
+            # ошибка игрока (та же семантика 503, что в telegram_auth).
+            raise MissionEngineError(
+                503,
+                "QR-подписи не настроены на сервере.",
+            ) from error
+
+        return {
+            "missionId": mission_id,
+            "payload": qr["payload"],
+            "hmac": qr["hmac"],
+            "expiresAt": qr["expiresAt"],
+            "ttlSeconds": get_qr_ttl_seconds(),
+        }

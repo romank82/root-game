@@ -5,6 +5,7 @@
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/engine/bootstrap`
 - `POST /api/v1/engine/missions/{mission_id}/submit`
+- `GET /api/v1/engine/missions/{mission_id}/qr-payload` — подписанный QR-payload для миссии в `in_progress`
 - `GET /api/v1/engine/fallback-offers`
 - `POST /api/v1/engine/fallback-offers/{offer_id}/purchases`
 - `POST /api/v1/engine/teams` — создать команду (201)
@@ -29,6 +30,27 @@
 - `POST /api/v1/engine/teams/{team_id}/join-requests/{request_id}/reject` — отклонить заявку (204)
 
 `GET /api/v1/engine/bootstrap` returns only public player content. Schema and redaction policy for `Segment.content` and `Mission.content` are defined in `docs/segment-content-contract.md`; validation configuration, answers, and server-side award rules are excluded.
+
+`GET /api/v1/engine/missions/{mission_id}/qr-payload` (8.6.c) выдаёт
+вызывающему игроку подписанный QR-payload для собственной миссии в статусе
+`in_progress`. Ответ: `missionId`, `payload` (base64url канонического JSON:
+`v`, `playerId`, `missionId`, `nonce`, `iat`, `exp`), `hmac` (HMAC-SHA256
+base64url от payload через domain-separated ключ `GAME_SESSION_SECRET`),
+`expiresAt` (ISO-8601 UTC) и `ttlSeconds` (300 с). Маршрут read-only и
+идемпотентен по эффекту: он не создаёт `PlayerMission`, не меняет статусы и
+не пишет ledger/audit; повторный вызов выдаёт свежий payload с новым nonce
+(предыдущий остаётся валидным до своего `exp`).
+Ошибки: 404 — миссии нет или она не `published`; 403 — миссия `locked`;
+409 — `available` (не взята), `completed`, `cancelled`; 503 — сервер не
+настроен (`GAME_SESSION_SECRET` пуст). Секреты, `validation_config`,
+координаты spawn и другие server-only данные в ответ не входят.
+Ограничение «responses never expose QR material» из
+`docs/mission-run-contract.md` относится к run/attempt-маршрутам target solo
+API, где QR — protected challenge snapshot; здесь QR является разрешённой
+видимой презентацией задачи для её владельца (`playerId` входит в подпись,
+поэтому скриншот чужого QR не пройдёт проверку в 8.8).
+Проверка подписи, принадлежности, свежести и запуск мини-игры —
+отдельный маршрут 8.8.
 
 `GET /api/v1/engine/fallback-offers` (4.3b) возвращает только персональные
 fallback-предложения вызывающего игрока после первого провала

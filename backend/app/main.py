@@ -14,6 +14,7 @@ from app.mission_engine import (
     MissionEngineError,
     accept_mission,
     get_bootstrap as get_engine_bootstrap,
+    get_mission_qr_payload,
     submit_mission,
 )
 from app.models import GamePlayer
@@ -445,6 +446,28 @@ def accept_engine_mission(
             latitude=payload.latitude,
             longitude=payload.longitude,
             accuracy=payload.accuracy,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+# 8.6.c: подписанный QR-payload для миссии в in_progress. Read-only,
+# секреты и validation_config не отдаются; чужой QR не пройдёт проверку,
+# потому что player_id входит в подписанный body (скан — шаг 8.8).
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/missions/{mission_id}/qr-payload")
+def get_engine_mission_qr_payload(
+    request: Request,
+    mission_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return get_mission_qr_payload(
+            player_id=player_id,
+            mission_id=mission_id,
         )
     except MissionEngineError as error:
         raise HTTPException(
