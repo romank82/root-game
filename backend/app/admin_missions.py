@@ -94,6 +94,11 @@ class AdminMissionCreatePayload(BaseModel):
         ge=0,
         le=7 * 24 * 3600,
     )
+    reentry_cooldown_seconds: int = Field(
+        default=0,
+        ge=0,
+        le=7 * 24 * 3600,
+    )
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
     content: dict[str, Any] = Field(default_factory=dict)
@@ -112,6 +117,11 @@ class AdminMissionUpdatePayload(BaseModel):
     mission_category: str | None = Field(default=None, max_length=32)
     mission_layer: str | None = Field(default=None, max_length=32)
     execution_time_limit_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        le=7 * 24 * 3600,
+    )
+    reentry_cooldown_seconds: int | None = Field(
         default=None,
         ge=0,
         le=7 * 24 * 3600,
@@ -166,6 +176,7 @@ def _serialize_mission(
         "missionCategory": mission.mission_category,
         "missionLayer": mission.mission_layer,
         "executionTimeLimitSeconds": mission.execution_time_limit_seconds,
+        "reentryCooldownSeconds": mission.reentry_cooldown_seconds,
         "title": mission.title,
         "description": mission.description,
         "content": mission.content,
@@ -520,6 +531,7 @@ def create_admin_mission(
                 and payload.execution_time_limit_seconds > 0
                 else None
             ),
+            reentry_cooldown_seconds=payload.reentry_cooldown_seconds,
             title=payload.title.strip(),
             description=payload.description.strip() if payload.description else None,
             content=payload.content,
@@ -633,6 +645,11 @@ def update_admin_mission(
                 raw if raw and raw > 0 else None
             )
             changed_fields.append("executionTimeLimitSeconds")
+
+        if "reentry_cooldown_seconds" in updates:
+            raw = updates["reentry_cooldown_seconds"]
+            mission.reentry_cooldown_seconds = raw if raw is not None and raw >= 0 else 0
+            changed_fields.append("reentryCooldownSeconds")
 
         scalar_fields = {
             "mission_type": "missionType",

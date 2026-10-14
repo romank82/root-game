@@ -71,6 +71,7 @@ type MissionForm = {
   missionCategory: string
   missionLayer: string
   executionTimeLimitSeconds: string
+  reentryCooldownSeconds: string
   title: string
   description: string
   content: string
@@ -111,6 +112,7 @@ const emptyForm = (): MissionForm => ({
   missionCategory: 'solo',
   missionLayer: 'solo',
   executionTimeLimitSeconds: '',
+  reentryCooldownSeconds: '0',
   title: '',
   description: '',
   content: '{}',
@@ -224,6 +226,7 @@ function formFromMission(mission: AdminMission): MissionForm {
       mission.executionTimeLimitSeconds === undefined
         ? ''
         : String(mission.executionTimeLimitSeconds),
+    reentryCooldownSeconds: String(mission.reentryCooldownSeconds ?? 0),
     title: mission.title,
     description: mission.description ?? '',
     content:
@@ -352,6 +355,13 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
       if (raw === '') return null
       const n = Number.parseInt(raw, 10)
       if (!Number.isFinite(n) || n < 0) return null
+      return n
+    })(),
+    reentry_cooldown_seconds: (() => {
+      const raw = form.reentryCooldownSeconds.trim()
+      if (raw === '') return 0
+      const n = Number.parseInt(raw, 10)
+      if (!Number.isFinite(n) || n < 0) return 0
       return n
     })(),
     title: form.title.trim(),
@@ -2238,6 +2248,27 @@ function AdminApp() {
                 <option value="86400">24 часа</option>
                 <option value="604800">7 дней</option>
               </select>
+            </label>
+
+            <label>
+              Повторное взятие
+              <select
+                value={form.reentryCooldownSeconds}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, reentryCooldownSeconds: event.target.value })
+                }
+              >
+                <option value="0">Одноразовая</option>
+                <option value="300">Через 5 минут</option>
+                <option value="3600">Через 1 час</option>
+                <option value="21600">Через 6 часов</option>
+                <option value="86400">Через 24 часа</option>
+                <option value="604800">Через 7 дней</option>
+              </select>
+              <small className="admin-muted">
+                «Одноразовая» — после завершения или провала миссия больше не появляется.
+              </small>
             </label>
           </div>
 
