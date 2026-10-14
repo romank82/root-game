@@ -104,6 +104,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
         search_radius_meters: int = 3000,
         mission_type: str = "text_answer",
         with_zone: bool = True,
+        execution_time_limit_seconds: int | None = None,
     ) -> dict[str, str]:
         from app.models import ARObject, Chapter, GamePlayer, GeoZone, Mission, Season
 
@@ -208,6 +209,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
                     sort_order=1,
                     geo_zone_id=ids["zone"] if with_zone else None,
                     ar_object_id=ids["ar_object"] if with_zone else None,
+                    execution_time_limit_seconds=execution_time_limit_seconds,
                 )
             )
 
@@ -331,6 +333,88 @@ class MissionEngineAcceptTests(unittest.TestCase):
             second["startedAt"].endswith("+00:00"),
             f"second.startedAt должен заканчиваться на +00:00, получили: {second['startedAt']!r}",
         )
+
+    def test_accept_sets_deadline_from_limit(self) -> None:
+        from app.models import PlayerMission
+        from sqlalchemy import select
+        from datetime import timedelta
+
+        ids = self._fixture(execution_time_limit_seconds=3600)
+        response = self._call_accept(ids)
+
+        self._assert_spawn_invariants(response, ids, search_radius_meters=3000)
+
+        with self.SessionLocal() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            self.assertIsNotNone(pm.started_at)
+            self.assertIsNotNone(pm.deadline_at)
+            delta = pm.deadline_at - pm.started_at
+            # Допуск: ±2 секунды (SQLite tz-awareness)
+            self.assertLess(abs(delta.total_seconds() - 3600), 2)
+
+    def test_accept_without_limit_leaves_deadline_none(self) -> None:
+        from app.models import PlayerMission
+        from sqlalchemy import select
+
+        ids = self._fixture(execution_time_limit_seconds=None)
+        self._call_accept(ids)
+
+        with self.SessionLocal() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            self.assertIsNotNone(pm.started_at)
+            self.assertIsNone(pm.deadline_at)
+
+    def test_idempotent_accept_does_not_change_deadline(self) -> None:
+        from app.models import PlayerMission
+        from sqlalchemy import select
+
+        ids = self._fixture(execution_time_limit_seconds=1800)
+
+        self._call_accept(ids)
+        with self.SessionLocal() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            first_deadline = pm.deadline_at
+
+        # Повторный accept
+        self._call_accept(ids)
+        with self.SessionLocal() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            self.assertEqual(pm.deadline_at, first_deadline)
+
+    def test_bootstrap_includes_deadline_fields(self) -> None:
+        ids = self._fixture(execution_time_limit_seconds=600)
+        self._call_accept(ids)
+
+        from app.mission_engine import get_bootstrap
+        bootstrap = get_bootstrap(ids["player"])
+
+        mission_entry = next(
+            (m for m in bootstrap["missions"] if m["id"] == ids["mission"]),
+            None,
+        )
+        self.assertIsNotNone(mission_entry)
+        self.assertEqual(mission_entry["executionTimeLimitSeconds"], 600)
+        self.assertIsNotNone(mission_entry["deadlineAt"])
 
     def test_accept_fails_when_mission_has_no_zone(self) -> None:
         ids = self._fixture(with_zone=False)
