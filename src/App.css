@@ -2031,3 +2031,10 @@ h2 {
   line-height: 1.4;
 }
 
+.map-overlay-button-compact {
+  padding: 6px 12px;
+  font-size: 12px;
+  background: rgba(0, 255, 136, 0.9);
+  align-self: flex-end;
+}
+

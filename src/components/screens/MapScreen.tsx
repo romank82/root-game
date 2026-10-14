@@ -1,7 +1,9 @@
-import { Fragment, useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet'
+import type { Map as LeafletMap } from 'leaflet'
 import type { EngineMission } from '../../api/engineApi'
 import 'leaflet/dist/leaflet.css'
+import { useActiveMission } from '../../hooks/useActiveMission'
 
 // Приближение, когда знаем позицию игрока.
 const FOCUS_ZOOM = 16
@@ -18,9 +20,12 @@ function MapController({
   zoom: number
 }) {
   const map = useMap()
+  const isInitialized = useRef(false)
 
   useEffect(() => {
+    if (isInitialized.current) return
     map.setView(center, zoom)
+    isInitialized.current = true
   }, [center, zoom, map])
 
   return null
@@ -33,9 +38,9 @@ interface MapScreenProps {
 }
 
 export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
-  const missionsWithSpawn = missions.filter(
-    (m) => m.spawn !== null && m.status === 'in_progress',
-  )
+  // Показываем только активную (ближайшую) миссию. Остальные — в других экранах.
+  const activeMission = useActiveMission(missions, geoPosition)
+  const mapRef = useRef<LeafletMap | null>(null)
 
   if (!geoPosition) {
     return (
@@ -59,9 +64,16 @@ export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
     )
   }
 
+  function centerOnPlayer() {
+    if (mapRef.current && geoPosition) {
+      mapRef.current.setView([geoPosition.lat, geoPosition.lng], FOCUS_ZOOM)
+    }
+  }
+
   return (
     <section className="map-screen">
       <MapContainer
+        ref={mapRef}
         center={[geoPosition.lat, geoPosition.lng]}
         zoom={FOCUS_ZOOM}
         style={{ width: '100%', height: '100%' }}
@@ -72,42 +84,18 @@ export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
         />
         <MapController center={[geoPosition.lat, geoPosition.lng]} zoom={FOCUS_ZOOM} />
 
-        {missionsWithSpawn.map((mission) => {
-          const spawn = mission.spawn!
-          const hasCenter =
-            spawn.generatedFromLat !== null && spawn.generatedFromLng !== null
-          return (
-            <Fragment key={mission.id}>
-              {/* Большой круг — область поиска. Центр — точка accept. */}
-              {hasCenter && (
-                <Circle
-                  center={[spawn.generatedFromLat!, spawn.generatedFromLng!]}
-                  radius={spawn.searchRadiusMeters}
-                  pathOptions={{
-                    color: '#00ff88',
-                    fillColor: '#00ff88',
-                    fillOpacity: 0.08,
-                    weight: 2,
-                  }}
-                />
-              )}
-
-              {/* Маленький круг — точка spawn. Только в dev. */}
-              {import.meta.env.DEV && (
-                <Circle
-                  center={[spawn.latitude, spawn.longitude]}
-                  radius={spawn.zoneRadiusMeters ?? 20}
-                  pathOptions={{
-                    color: '#ffcc00',
-                    fillColor: '#ffcc00',
-                    fillOpacity: 0.4,
-                    weight: 2,
-                  }}
-                />
-              )}
-            </Fragment>
-          )
-        })}
+        {activeMission?.spawn && (
+          <Circle
+            center={[activeMission.spawn.latitude, activeMission.spawn.longitude]}
+            radius={activeMission.spawn.zoneRadiusMeters ?? 50}
+            pathOptions={{
+              color: '#ffcc00',
+              fillColor: '#ffcc00',
+              fillOpacity: 0.5,
+              weight: 3,
+            }}
+          />
+        )}
 
         {/* Точка игрока — синий кружок. */}
         <CircleMarker
@@ -135,6 +123,12 @@ export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
 
       <div className="map-overlay">
         {geoError && <div className="map-overlay-error">{geoError}</div>}
+        <button
+          className="map-overlay-button map-overlay-button-compact"
+          onClick={centerOnPlayer}
+        >
+          ⌖ На игрока
+        </button>
         <div className="map-overlay-info">
           {geoPosition.lat.toFixed(5)}, {geoPosition.lng.toFixed(5)}
           {' '}± {Math.round(geoPosition.accuracy)} м
