@@ -86,10 +86,16 @@ type MissionForm = {
   contentLineNumber: string
   contentPlaceholder: string
   contentWrongAnswerText: string
+  contentDrumCount: string
+  contentAlphabet: string[]
+  contentFalseChoicesPerDrum: string
+  contentCombination: string
+  contentTimeLimitSeconds: string
   validationConfig: string
   validationValidator: string
   validationAcceptedAnswers: string[]
   validationCorrectSequence: string[]
+  validationCorrectCombination: string[]
   sortOrder: string
   rewards: RewardForm[]
 }
@@ -128,11 +134,17 @@ const emptyForm = (): MissionForm => ({
   contentLineNumber: '',
   contentPlaceholder: '',
   contentWrongAnswerText: '',
+  contentDrumCount: '4',
+  contentAlphabet: ['R', 'O', 'T', 'G', 'A', 'M', 'E'],
+  contentFalseChoicesPerDrum: '2',
+  contentCombination: '',
+  contentTimeLimitSeconds: '',
   validationConfig:
     '{"validator":"normalized_text_match","acceptedAnswers":[]}',
   validationValidator: 'normalized_text_match',
   validationAcceptedAnswers: [''],
   validationCorrectSequence: [''],
+  validationCorrectCombination: [''],
   sortOrder: '0',
   rewards: [emptyReward()],
 })
@@ -144,8 +156,9 @@ function prettyJson(value: Record<string, unknown>): string {
 function formFromMission(mission: AdminMission): MissionForm {
   const isTextAnswer = mission.missionType === 'text_answer'
   const isCodeRepair = mission.missionType === 'code_repair'
+  const isCipher = mission.missionType === 'cipher'
   const hasContentObject =
-    (isTextAnswer || isCodeRepair) &&
+    (isTextAnswer || isCodeRepair || isCipher) &&
     mission.content !== null &&
     typeof mission.content === 'object'
   const ui =
@@ -167,14 +180,23 @@ function formFromMission(mission: AdminMission): MissionForm {
     (b): b is string => typeof b === 'string' && b.trim().length > 0,
   )
 
+  const cipherAlphabetRaw =
+    isCipher && Array.isArray(ui.alphabet) ? ui.alphabet : []
+  const cleanCipherAlphabet = cipherAlphabetRaw.filter(
+    (a): a is string => typeof a === 'string' && a.trim().length > 0,
+  )
+  const cipherAlphabetFallback = ['R', 'O', 'T', 'G', 'A', 'M', 'E']
+
   const isStructuredValidation =
     mission.missionType === 'text_answer' ||
-    mission.missionType === 'code_repair'
+    mission.missionType === 'code_repair' ||
+    mission.missionType === 'cipher'
 
   let validationConfig: string
   let validationValidator: string
   let validationAcceptedAnswers: string[]
   let validationCorrectSequence: string[]
+  let validationCorrectCombination: string[]
 
   if (isStructuredValidation) {
     const cfg =
@@ -188,7 +210,9 @@ function formFromMission(mission: AdminMission): MissionForm {
         ? cfg.validator
         : mission.missionType === 'code_repair'
           ? 'ordered_blocks_match'
-          : 'normalized_text_match'
+          : mission.missionType === 'cipher'
+            ? 'cipher_match'
+            : 'normalized_text_match'
 
     const acceptedRaw = Array.isArray(cfg.acceptedAnswers)
       ? cfg.acceptedAnswers
@@ -206,12 +230,26 @@ function formFromMission(mission: AdminMission): MissionForm {
     )
     validationCorrectSequence = sequence.length > 0 ? sequence : ['']
 
+    if (isCipher && cfg.validator === 'cipher_match') {
+      const combinationRaw = Array.isArray(cfg.correctCombination)
+        ? cfg.correctCombination
+        : []
+      const combination = combinationRaw.filter(
+        (c): c is string => typeof c === 'string' && c.trim().length > 0,
+      )
+      validationCorrectCombination =
+        combination.length > 0 ? combination : ['']
+    } else {
+      validationCorrectCombination = ['']
+    }
+
     validationConfig = ''
   } else {
     validationConfig = prettyJson(mission.validationConfig)
     validationValidator = 'normalized_text_match'
     validationAcceptedAnswers = ['']
     validationCorrectSequence = ['']
+    validationCorrectCombination = ['']
   }
 
   return {
@@ -233,7 +271,7 @@ function formFromMission(mission: AdminMission): MissionForm {
     title: mission.title,
     description: mission.description ?? '',
     content:
-      isTextAnswer || isCodeRepair ? '{}' : prettyJson(mission.content),
+      isTextAnswer || isCodeRepair || isCipher ? '{}' : prettyJson(mission.content),
     contentLabel: uiEntry('label'),
     contentQuestion: uiEntry('question'),
     contentInputPlaceholder: uiEntry('inputPlaceholder'),
@@ -245,10 +283,25 @@ function formFromMission(mission: AdminMission): MissionForm {
     contentLineNumber: isCodeRepair ? uiEntry('lineNumber') : '',
     contentPlaceholder: isCodeRepair ? uiEntry('placeholder') : '',
     contentWrongAnswerText: isCodeRepair ? uiEntry('wrongAnswerText') : '',
+    contentDrumCount:
+      isCipher && ui.drumCount !== undefined ? String(ui.drumCount) : '4',
+    contentAlphabet: isCipher ? cleanCipherAlphabet : cipherAlphabetFallback,
+    contentFalseChoicesPerDrum:
+      isCipher && ui.falseChoicesPerDrum !== undefined
+        ? String(ui.falseChoicesPerDrum)
+        : '2',
+    contentCombination: isCipher ? uiEntry('combination') : '',
+    contentTimeLimitSeconds:
+      isCipher &&
+      ui.timeLimitSeconds !== undefined &&
+      ui.timeLimitSeconds !== null
+        ? String(ui.timeLimitSeconds)
+        : '',
     validationConfig,
     validationValidator,
     validationAcceptedAnswers,
     validationCorrectSequence,
+    validationCorrectCombination,
     sortOrder: String(mission.sortOrder),
     rewards: mission.rewards.map((reward) => ({
       rewardType: reward.rewardType,
@@ -315,13 +368,35 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
         wrongAnswerText: form.contentWrongAnswerText.trim(),
       },
     }
+  } else if (form.missionType === 'cipher') {
+    const cleanAlphabet = form.contentAlphabet
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    content = {
+      schemaVersion: 1,
+      ui: {
+        label: form.contentLabel.trim(),
+        instruction: form.contentInstruction.trim(),
+        drumCount: Number(form.contentDrumCount),
+        alphabet: cleanAlphabet,
+        falseChoicesPerDrum: Number(form.contentFalseChoicesPerDrum),
+        combination: form.contentCombination.trim(),
+        timeLimitSeconds: form.contentTimeLimitSeconds.trim()
+          ? Number(form.contentTimeLimitSeconds)
+          : null,
+        successTitle: form.contentSuccessTitle.trim(),
+        successText: form.contentSuccessText.trim(),
+        wrongAnswerText: form.contentWrongAnswerText.trim(),
+      },
+    }
   } else {
     content = parseObject(form.content, 'Content')
   }
 
   const isStructuredValidation =
     form.missionType === 'text_answer' ||
-    form.missionType === 'code_repair'
+    form.missionType === 'code_repair' ||
+    form.missionType === 'cipher'
 
   let validation_config: Record<string, unknown>
   if (isStructuredValidation) {
@@ -329,6 +404,13 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
       validation_config = {
         validator: 'ordered_blocks_match',
         correctSequence: form.validationCorrectSequence
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      }
+    } else if (form.validationValidator === 'cipher_match') {
+      validation_config = {
+        validator: 'cipher_match',
+        correctCombination: form.validationCorrectCombination
           .map((s) => s.trim())
           .filter((s) => s.length > 0),
       }
@@ -1755,6 +1837,60 @@ function AdminApp() {
     }))
   }
 
+  function changeContentAlphabet(index: number, value: string) {
+    setForm((current) => ({
+      ...current,
+      contentAlphabet: current.contentAlphabet.map((a, i) =>
+        i === index ? value : a,
+      ),
+    }))
+  }
+
+  function addContentAlphabet() {
+    setForm((current) => ({
+      ...current,
+      contentAlphabet: [...current.contentAlphabet, ''],
+    }))
+  }
+
+  function removeContentAlphabet(index: number) {
+    setForm((current) => ({
+      ...current,
+      contentAlphabet: current.contentAlphabet.filter((_, i) => i !== index),
+    }))
+  }
+
+  function changeValidationCorrectCombination(
+    index: number,
+    value: string,
+  ) {
+    setForm((current) => ({
+      ...current,
+      validationCorrectCombination:
+        current.validationCorrectCombination.map((c, i) =>
+          i === index ? value : c,
+        ),
+    }))
+  }
+
+  function addValidationCorrectCombination() {
+    setForm((current) => ({
+      ...current,
+      validationCorrectCombination: [
+        ...current.validationCorrectCombination,
+        '',
+      ],
+    }))
+  }
+
+  function removeValidationCorrectCombination(index: number) {
+    setForm((current) => ({
+      ...current,
+      validationCorrectCombination:
+        current.validationCorrectCombination.filter((_, i) => i !== index),
+    }))
+  }
+
   async function saveMission() {
     setError('')
     setNotice('')
@@ -2169,6 +2305,7 @@ function AdminApp() {
                 <option value="code_repair">
                   code_repair — восстановить код
                 </option>
+                <option value="cipher">cipher — кодовый замок</option>
               </select>
             </label>
 
@@ -2457,6 +2594,128 @@ function AdminApp() {
                 />
               </label>
             </>
+          ) : form.missionType === 'cipher' ? (
+            <>
+              <label className="admin-span-2">
+                Заголовок
+                <input
+                  value={form.contentLabel}
+                  disabled={!canWrite}
+                  onChange={(e) => setForm({ ...form, contentLabel: e.target.value })}
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Инструкция
+                <textarea
+                  value={form.contentInstruction}
+                  disabled={!canWrite}
+                  onChange={(e) => setForm({ ...form, contentInstruction: e.target.value })}
+                />
+              </label>
+
+              <label>
+                Количество барабанов
+                <input
+                  type="number"
+                  min={2}
+                  max={12}
+                  value={form.contentDrumCount}
+                  disabled={!canWrite}
+                  onChange={(e) => setForm({ ...form, contentDrumCount: e.target.value })}
+                />
+              </label>
+
+              <label>
+                Ложных символов на барабан
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={form.contentFalseChoicesPerDrum}
+                  disabled={!canWrite}
+                  onChange={(e) => setForm({ ...form, contentFalseChoicesPerDrum: e.target.value })}
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Правильная комбинация
+                <input
+                  value={form.contentCombination}
+                  disabled={!canWrite}
+                  placeholder="Например: ROOT"
+                  onChange={(e) => setForm({ ...form, contentCombination: e.target.value })}
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Время на решение (сек, пусто = без лимита)
+                <input
+                  type="number"
+                  min={1}
+                  max={3600}
+                  value={form.contentTimeLimitSeconds}
+                  disabled={!canWrite}
+                  onChange={(e) => setForm({ ...form, contentTimeLimitSeconds: e.target.value })}
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Заголовок при успехе
+                <input
+                  value={form.contentSuccessTitle}
+                  disabled={!canWrite}
+                  onChange={(e) => setForm({ ...form, contentSuccessTitle: e.target.value })}
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Текст при успехе
+                <textarea
+                  value={form.contentSuccessText}
+                  disabled={!canWrite}
+                  onChange={(e) => setForm({ ...form, contentSuccessText: e.target.value })}
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Текст при ошибке
+                <textarea
+                  value={form.contentWrongAnswerText}
+                  disabled={!canWrite}
+                  onChange={(e) => setForm({ ...form, contentWrongAnswerText: e.target.value })}
+                />
+              </label>
+
+              <div className="admin-validation-list">
+                <div className="admin-section-heading">
+                  <h4>Алфавит символов (публичный)</h4>
+                  <button
+                    className="admin-secondary"
+                    onClick={addContentAlphabet}
+                    disabled={!canWrite}
+                  >
+                    + Добавить символ
+                  </button>
+                </div>
+                {form.contentAlphabet.map((symbol, index) => (
+                  <div className="admin-validation-row" key={index}>
+                    <input
+                      value={symbol}
+                      disabled={!canWrite}
+                      onChange={(e) => changeContentAlphabet(index, e.target.value)}
+                    />
+                    <button
+                      className="admin-danger"
+                      onClick={() => removeContentAlphabet(index)}
+                      disabled={!canWrite || form.contentAlphabet.length <= 1}
+                    >
+                      Удалить
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           ) : (
             <label className="admin-json-field">
               Content (JSON)
@@ -2472,7 +2731,8 @@ function AdminApp() {
           )}
 
           {form.missionType === 'text_answer' ||
-          form.missionType === 'code_repair' ? (
+          form.missionType === 'code_repair' ||
+          form.missionType === 'cipher' ? (
             <section className="admin-validation-config">
               <div className="admin-section-heading">
                 <h3>Правила проверки ответа</h3>
@@ -2496,6 +2756,7 @@ function AdminApp() {
                   <option value="ordered_blocks_match">
                     ordered_blocks_match — собрать правильную последовательность
                   </option>
+                  <option value="cipher_match">cipher_match</option>
                 </select>
               </label>
 
@@ -2564,6 +2825,40 @@ function AdminApp() {
                         disabled={
                           !canWrite ||
                           form.validationCorrectSequence.length <= 1
+                        }
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {form.validationValidator === 'cipher_match' && (
+                <div className="admin-validation-list">
+                  <div className="admin-section-heading">
+                    <h4>Правильная комбинация</h4>
+                    <button
+                      className="admin-secondary"
+                      onClick={addValidationCorrectCombination}
+                      disabled={!canWrite}
+                    >
+                      + Добавить символ
+                    </button>
+                  </div>
+                  {form.validationCorrectCombination.map((symbol, index) => (
+                    <div className="admin-validation-row" key={index}>
+                      <input
+                        value={symbol}
+                        disabled={!canWrite}
+                        onChange={(e) => changeValidationCorrectCombination(index, e.target.value)}
+                      />
+                      <button
+                        className="admin-danger"
+                        onClick={() => removeValidationCorrectCombination(index)}
+                        disabled={
+                          !canWrite ||
+                          form.validationCorrectCombination.length <= 1
                         }
                       >
                         Удалить
