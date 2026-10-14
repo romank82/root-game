@@ -1296,5 +1296,61 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
 
 
+class CipherMatchValidatorUnitTests(unittest.TestCase):
+    """Direct unit tests for _validate_submission cipher_match validator."""
+
+    class FakeMission:
+        def __init__(self, validation_config: dict) -> None:
+            self.validation_config = validation_config
+            self.content = {"schemaVersion": 1}
+
+    @staticmethod
+    def _validate(
+        validation_config: dict,
+        sequence,
+        answer: str | None = None,
+    ) -> bool:
+        from app.mission_engine import _validate_submission
+
+        mission = CipherMatchValidatorUnitTests.FakeMission(validation_config)
+        return _validate_submission(mission, answer, sequence)
+
+    def test_cipher_match_accepts_correct_sequence(self) -> None:
+        validation_config = {
+            "validator": "cipher_match",
+            "correctCombination": ["R", "O", "O", "T"],
+        }
+
+        self.assertTrue(
+            self._validate(validation_config, sequence=["R", "O", "O", "T"])
+        )
+
+    def test_cipher_match_rejects_wrong_sequence(self) -> None:
+        validation_config = {
+            "validator": "cipher_match",
+            "correctCombination": ["R", "O", "O", "T"],
+        }
+
+        self.assertFalse(
+            self._validate(validation_config, sequence=["R", "O", "T", "O"])
+        )
+
+    def test_cipher_match_rejects_wrong_length(self) -> None:
+        validation_config = {
+            "validator": "cipher_match",
+            "correctCombination": ["R", "O", "O", "T"],
+        }
+
+        self.assertFalse(self._validate(validation_config, sequence=["R", "O"]))
+
+    def test_cipher_match_rejects_non_list(self) -> None:
+        validation_config = {
+            "validator": "cipher_match",
+            "correctCombination": ["R", "O", "O", "T"],
+        }
+
+        self.assertFalse(self._validate(validation_config, sequence="ROOT"))
+
+
 if __name__ == "__main__":
     unittest.main()

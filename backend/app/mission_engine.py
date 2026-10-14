@@ -488,6 +488,15 @@ def _validate_submission(
             and sequence == correct_sequence
         )
 
+    if validator == "cipher_match":
+        correct = mission.validation_config.get("correctCombination", [])
+        return (
+            isinstance(sequence, list)
+            and len(sequence) == len(correct)
+            and all(isinstance(s, str) for s in sequence)
+            and sequence == correct
+        )
+
     return False
 
 

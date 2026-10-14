@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Mapping
 from typing import Any
 
@@ -9,7 +10,7 @@ class PublicContentValidationError(ValueError):
 
 FORBIDDEN_KEYS = frozenset({
     "validationconfig", "validation_config", "validator", "acceptedanswers",
-    "correctsequence", "answerhash", "answer_hash", "solutionkey", "solution_key",
+    "correctsequence", "correctcombination", "answerhash", "answer_hash", "solutionkey", "solution_key",
     "hiddenpuzzlestate", "hidden_puzzle_state", "walletbalanceafter",
     "wallet_balance_after", "awardamount", "award_amount", "inventorymutation",
     "inventory_mutation", "completionflag", "completion_flag", "entryfee",
@@ -49,9 +50,45 @@ def _integer(value: Any, path: str, maximum: int) -> None:
         _fail(path, f"must be an integer between 1 and {maximum}")
 
 
+def _integer_between(value: Any, path: str, minimum: int, maximum: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        _fail(path, f"must be an integer between {minimum} and {maximum}")
+
+
 def _schema_version_one(value: Any, path: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value != 1:
         _fail(path, "must equal integer 1")
+
+
+def _ambiguity_key(value: str) -> str:
+    """Fold a display symbol for duplicate detection.
+
+    Mirrors ``app/runtime_policy_contract._ambiguity_key``: NFKC folds full-width
+    and compatibility forms; casefold folds case. This intentionally does not
+    cover visual lookalikes across scripts (O/0, l/1, I/1); those are checked
+    separately in the cipher alphabet rules.
+    """
+    return unicodedata.normalize("NFKC", value).casefold()
+
+
+# Pairs that must never coexist in a public cipher alphabet because the player
+# cannot reliably tell them apart in the drum UI.
+VISUAL_CONFLICT_PAIRS = frozenset({
+    ("o", "0"),
+    ("l", "1"),
+    ("i", "1"),
+})
+
+
+def _visual_conflict(a: str, b: str) -> bool:
+    """Return True when any character of ``a`` and ``b`` look alike."""
+    a_chars = {char.casefold() for char in a}
+    b_chars = {char.casefold() for char in b}
+    for left in a_chars:
+        for right in b_chars:
+            if (left, right) in VISUAL_CONFLICT_PAIRS or (right, left) in VISUAL_CONFLICT_PAIRS:
+                return True
+    return False
 
 
 def _reject_hidden(value: Any, path: str = "content") -> None:
@@ -114,6 +151,79 @@ def validate_segment_content(content: Any) -> None:
         _text(scene["qrMode"], "segment.content.arScene.qrMode", 128)
 
 
+# Bounds for the public cipher mission schema version 1
+# (docs/minigame-cipher.md, "Схема данных").
+CIPHER_DRUM_COUNT_MIN = 2
+CIPHER_DRUM_COUNT_MAX = 12
+CIPHER_FALSE_CHOICES_MIN = 0
+CIPHER_FALSE_CHOICES_MAX = 10
+CIPHER_ALPHABET_MAX = 64
+CIPHER_SYMBOL_MAX_LENGTH = 2
+CIPHER_COMBINATION_MAX = 64
+CIPHER_TIME_LIMIT_MIN = 1
+CIPHER_TIME_LIMIT_MAX = 3600
+
+
+def _validate_cipher_ui(ui: Mapping[str, Any]) -> None:
+    """Validate public cipher-mission content.ui (schemaVersion 1)."""
+    drum_count = ui.get("drumCount")
+    _integer_between(drum_count, "mission.content.ui.drumCount", CIPHER_DRUM_COUNT_MIN, CIPHER_DRUM_COUNT_MAX)
+
+    false_choices = ui.get("falseChoicesPerDrum")
+    _integer_between(false_choices, "mission.content.ui.falseChoicesPerDrum", CIPHER_FALSE_CHOICES_MIN, CIPHER_FALSE_CHOICES_MAX)
+
+    alphabet = ui.get("alphabet")
+    if not isinstance(alphabet, list) or not 1 <= len(alphabet) <= CIPHER_ALPHABET_MAX:
+        _fail(
+            "mission.content.ui.alphabet",
+            "must be a list containing 1 to 64 display symbols",
+        )
+    if len(alphabet) < drum_count + false_choices:
+        _fail(
+            "mission.content.ui.alphabet",
+            "must contain at least drumCount + falseChoicesPerDrum display symbols",
+        )
+    seen_keys: set[str] = set()
+    seen_symbols: list[str] = []
+    for index, symbol in enumerate(alphabet):
+        path = f"mission.content.ui.alphabet[{index}]"
+        if (
+            not isinstance(symbol, str)
+            or not symbol.strip()
+            or len(symbol) > CIPHER_SYMBOL_MAX_LENGTH
+        ):
+            _fail(path, "must be a non-empty display symbol of at most 2 characters")
+        key = _ambiguity_key(symbol)
+        if key in seen_keys:
+            _fail(
+                "mission.content.ui.alphabet",
+                "must not contain visually or case equivalent entries",
+            )
+        for previous in seen_symbols:
+            if _visual_conflict(symbol, previous):
+                _fail(
+                    "mission.content.ui.alphabet",
+                    "must not contain visually conflicting symbols",
+                )
+        seen_keys.add(key)
+        seen_symbols.append(symbol)
+
+    combination = ui.get("combination")
+    if not isinstance(combination, str) or not combination.strip() or len(combination) > CIPHER_COMBINATION_MAX:
+        _fail(
+            "mission.content.ui.combination",
+            "must be a non-empty string of at most 64 characters",
+        )
+
+    if "timeLimitSeconds" in ui and ui["timeLimitSeconds"] is not None:
+        _integer_between(
+            ui["timeLimitSeconds"],
+            "mission.content.ui.timeLimitSeconds",
+            CIPHER_TIME_LIMIT_MIN,
+            CIPHER_TIME_LIMIT_MAX,
+        )
+
+
 def validate_mission_content(mission_type: str, content: Any) -> None:
     _reject_hidden(content)
     root = _object(content, "mission.content")
@@ -143,8 +253,23 @@ def validate_mission_content(mission_type: str, content: Any) -> None:
             "rewardPreview",
         }
         text_keys = allowed - {"rewardPreview"}
+    elif mission_type == "cipher":
+        allowed = {
+            "label",
+            "instruction",
+            "drumCount",
+            "alphabet",
+            "falseChoicesPerDrum",
+            "combination",
+            "timeLimitSeconds",
+            "successTitle",
+            "successText",
+            "wrongAnswerText",
+            "rewardPreview",
+        }
+        text_keys = {"label", "instruction", "combination", "successTitle", "successText", "wrongAnswerText"}
     else:
-        _fail("mission.missionType", "must be text_answer, code_repair, or team for public content schemaVersion 1")
+        _fail("mission.missionType", "must be text_answer, code_repair, team, or cipher for public content schemaVersion 1")
     _only(ui, allowed, "mission.content.ui")
     for key in text_keys:
         if key in ui:
@@ -161,3 +286,5 @@ def validate_mission_content(mission_type: str, content: Any) -> None:
         preview = _object(ui["rewardPreview"], "mission.content.ui.rewardPreview")
         _only(preview, {"text"}, "mission.content.ui.rewardPreview")
         _text(preview.get("text"), "mission.content.ui.rewardPreview.text", 512)
+    if mission_type == "cipher":
+        _validate_cipher_ui(ui)

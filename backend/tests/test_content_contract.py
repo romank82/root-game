@@ -78,6 +78,25 @@ def valid_code_repair_content() -> dict:
     }
 
 
+def valid_cipher_content() -> dict:
+    return {
+        "schemaVersion": 1,
+        "ui": {
+            "label": "КОДОВЫЙ ЗАМОК",
+            "instruction": "Набери комбинацию",
+            "drumCount": 4,
+            "alphabet": ["R", "O", "T", "G", "A", "M", "E", "1", "2", "3"],
+            "falseChoicesPerDrum": 3,
+            "combination": "ROOT",
+            "timeLimitSeconds": 60,
+            "successTitle": "OK",
+            "successText": "Собрано",
+            "wrongAnswerText": "Неверно",
+            "rewardPreview": {"text": "100 ROOT"},
+        },
+    }
+
+
 class SegmentContentContractTests(unittest.TestCase):
     def test_accepts_documented_minimal_segment_content(self) -> None:
         validate_segment_content(valid_segment_content())
@@ -173,6 +192,48 @@ class MissionContentContractTests(unittest.TestCase):
 
         with self.assertRaises(PublicContentValidationError):
             validate_mission_content("text_answer", content)
+
+
+class CipherMissionContentContractTests(unittest.TestCase):
+    def test_accepts_public_cipher_content(self) -> None:
+        validate_mission_content("cipher", valid_cipher_content())
+
+    def test_rejects_cipher_without_combination(self) -> None:
+        content = valid_cipher_content()
+        del content["ui"]["combination"]
+
+        with self.assertRaises(PublicContentValidationError):
+            validate_mission_content("cipher", content)
+
+    def test_rejects_cipher_with_ambiguous_alphabet(self) -> None:
+        content = valid_cipher_content()
+        content["ui"]["drumCount"] = 2
+        content["ui"]["falseChoicesPerDrum"] = 0
+        content["ui"]["alphabet"] = ["O", "0", "A", "B"]
+
+        with self.assertRaises(PublicContentValidationError):
+            validate_mission_content("cipher", content)
+
+    def test_rejects_cipher_with_short_alphabet(self) -> None:
+        content = valid_cipher_content()
+        content["ui"]["alphabet"] = ["R", "O", "T"]
+
+        with self.assertRaises(PublicContentValidationError):
+            validate_mission_content("cipher", content)
+
+    def test_rejects_cipher_with_wrong_drum_count(self) -> None:
+        content = valid_cipher_content()
+        content["ui"]["drumCount"] = 1
+
+        with self.assertRaises(PublicContentValidationError):
+            validate_mission_content("cipher", content)
+
+    def test_rejects_cipher_with_forbidden_keys(self) -> None:
+        content = valid_cipher_content()
+        content["ui"]["correctCombination"] = "ROOT"
+
+        with self.assertRaises(PublicContentValidationError):
+            validate_mission_content("cipher", content)
 
 
 if __name__ == "__main__":

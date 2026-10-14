@@ -90,6 +90,32 @@ def valid_team_validation_config() -> dict:
     }
 
 
+def valid_cipher_content() -> dict:
+    return {
+        "schemaVersion": 1,
+        "ui": {
+            "label": "КОДОВЫЙ ЗАМОК",
+            "instruction": "Набери комбинацию",
+            "drumCount": 4,
+            "alphabet": ["R", "O", "T", "G", "A", "M", "E", "1", "2", "3"],
+            "falseChoicesPerDrum": 3,
+            "combination": "ROOT",
+            "timeLimitSeconds": 60,
+            "successTitle": "OK",
+            "successText": "Собрано",
+            "wrongAnswerText": "Неверно",
+            "rewardPreview": {"text": "100 ROOT"},
+        },
+    }
+
+
+def valid_cipher_validation_config() -> dict:
+    return {
+        "validator": "cipher_match",
+        "correctCombination": ["R", "O", "O", "T"],
+    }
+
+
 class AdminPublicContentValidationTests(unittest.TestCase):
     def test_accepts_valid_mission_content(self) -> None:
         _validate_public_mission_content("text_answer", valid_mission_content())
@@ -189,6 +215,109 @@ class AdminPublicContentValidationTests(unittest.TestCase):
         self.assertEqual(
             captured.exception.detail,
             "Защищённая конфигурация team Mission не соответствует контракту.",
+        )
+
+    @staticmethod
+    def _cipher_mission(validation_config: dict) -> SimpleNamespace:
+        return SimpleNamespace(
+            mission_type="cipher",
+            mission_layer="solo",
+            content=valid_cipher_content(),
+            validation_config=validation_config,
+            chapter_id="chapter-test",
+            story_node_id=None,
+            geo_zone_id="zone-test",
+            ar_object_id="ar-test",
+            id="mission-test",
+        )
+
+    def test_publish_validation_accepts_cipher_configuration(self) -> None:
+        mission = self._cipher_mission(valid_cipher_validation_config())
+        session = SimpleNamespace(
+            scalars=lambda _statement: SimpleNamespace(all=lambda: []),
+        )
+
+        with (
+            patch("app.admin_missions._validate_references") as validate_references,
+            patch("app.admin_missions._validate_rewards") as validate_rewards,
+        ):
+            _validate_for_publish(session, mission)
+
+        validate_references.assert_called_once_with(
+            session,
+            chapter_id="chapter-test",
+            story_node_id=None,
+            geo_zone_id="zone-test",
+            ar_object_id="ar-test",
+        )
+        validate_rewards.assert_called_once_with(session, [])
+
+    def test_publish_validation_rejects_cipher_empty_combination(self) -> None:
+        config = valid_cipher_validation_config()
+        config["correctCombination"] = []
+        mission = self._cipher_mission(config)
+        session = SimpleNamespace()
+
+        with patch("app.admin_missions._validate_references"):
+            with self.assertRaises(HTTPException) as captured:
+                _validate_for_publish(session, mission)
+
+        self.assertEqual(captured.exception.status_code, 422)
+        self.assertEqual(
+            captured.exception.detail,
+            "Для validator=cipher_match требуется непустой "
+            "список validation_config.correctCombination.",
+        )
+
+    def test_publish_validation_rejects_cipher_length_mismatch(self) -> None:
+        config = valid_cipher_validation_config()
+        config["correctCombination"] = ["R", "O"]
+        mission = self._cipher_mission(config)
+        session = SimpleNamespace()
+
+        with patch("app.admin_missions._validate_references"):
+            with self.assertRaises(HTTPException) as captured:
+                _validate_for_publish(session, mission)
+
+        self.assertEqual(captured.exception.status_code, 422)
+        self.assertEqual(
+            captured.exception.detail,
+            "Для validator=cipher_match длина correctCombination "
+            "должна совпадать с content.ui.drumCount.",
+        )
+
+    def test_publish_validation_rejects_cipher_symbol_not_in_alphabet(self) -> None:
+        config = valid_cipher_validation_config()
+        config["correctCombination"] = ["R", "O", "O", "X"]
+        mission = self._cipher_mission(config)
+        session = SimpleNamespace()
+
+        with patch("app.admin_missions._validate_references"):
+            with self.assertRaises(HTTPException) as captured:
+                _validate_for_publish(session, mission)
+
+        self.assertEqual(captured.exception.status_code, 422)
+        self.assertEqual(
+            captured.exception.detail,
+            "Для validator=cipher_match все символы correctCombination "
+            "должны присутствовать в content.ui.alphabet.",
+        )
+
+    def test_publish_validation_rejects_cipher_non_list_combination(self) -> None:
+        config = valid_cipher_validation_config()
+        config["correctCombination"] = "ROOT"
+        mission = self._cipher_mission(config)
+        session = SimpleNamespace()
+
+        with patch("app.admin_missions._validate_references"):
+            with self.assertRaises(HTTPException) as captured:
+                _validate_for_publish(session, mission)
+
+        self.assertEqual(captured.exception.status_code, 422)
+        self.assertEqual(
+            captured.exception.detail,
+            "Для validator=cipher_match требуется непустой "
+            "список validation_config.correctCombination.",
         )
 
     def test_accepts_valid_segment_content(self) -> None:

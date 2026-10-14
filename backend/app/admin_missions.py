@@ -457,12 +457,55 @@ def _validate_for_publish(
                     ),
                 )
 
+        elif validator == "cipher_match":
+            correct_combination = mission.validation_config.get("correctCombination")
+            if (
+                not isinstance(correct_combination, list)
+                or not correct_combination
+                or not all(
+                    isinstance(symbol, str) and symbol.strip()
+                    for symbol in correct_combination
+                )
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Для validator=cipher_match требуется непустой "
+                        "список validation_config.correctCombination."
+                    ),
+                )
+
+            ui = mission.content.get("ui", {}) if isinstance(mission.content, dict) else {}
+            drum_count = ui.get("drumCount")
+            alphabet = ui.get("alphabet")
+
+            if len(correct_combination) != drum_count:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Для validator=cipher_match длина correctCombination "
+                        "должна совпадать с content.ui.drumCount."
+                    ),
+                )
+
+            if isinstance(alphabet, list):
+                alphabet_set = set(alphabet)
+                for symbol in correct_combination:
+                    if symbol not in alphabet_set:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=(
+                                "Для validator=cipher_match все символы correctCombination "
+                                "должны присутствовать в content.ui.alphabet."
+                            ),
+                        )
+
         else:
             raise HTTPException(
                 status_code=422,
                 detail=(
                     "Миссию нельзя опубликовать: validation_config.validator "
-                    "должен быть normalized_text_match или ordered_blocks_match."
+                    "должен быть normalized_text_match, ordered_blocks_match или cipher_match."
                 ),
             )
 
