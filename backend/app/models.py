@@ -217,6 +217,16 @@ class Mission(TimestampMixin, Base):
         default=None,
     )
 
+    # Время перезарядки в секундах до повторного взятия миссии после завершения/провала.
+    # 0 = одноразовая (после завершения/провала больше не появляется).
+    # >0 = через N секунд снова доступна.
+    reentry_cooldown_seconds: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
     __table_args__ = (
         CheckConstraint(
             "mission_category IN ('solo', 'team', 'race', 'co-op')",
@@ -229,6 +239,10 @@ class Mission(TimestampMixin, Base):
         CheckConstraint(
             "execution_time_limit_seconds IS NULL OR execution_time_limit_seconds > 0",
             name="ck_missions_execution_time_limit_positive",
+        ),
+        CheckConstraint(
+            "reentry_cooldown_seconds >= 0",
+            name="ck_missions_reentry_cooldown_nonnegative",
         ),
     )
 
@@ -1106,6 +1120,13 @@ class PlayerMission(TimestampMixin, Base):
     # None = без ограничения. Заполняется при первом accept:
     # started_at + Mission.execution_time_limit_seconds.
     deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Момент, раньше которого миссию нельзя взять повторно (после провала/завершения).
+    # None = либо миссия одноразовая (не возвращается), либо ещё не была завершена.
+    available_again_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
