@@ -14,14 +14,17 @@ import type { ApiStatus, Screen } from '../types/game'
 export function useGameState() {
   const [screen, setScreen] = useState<Screen>(() => {
     const saved = localStorage.getItem('chimera-screen')
-    return saved === 'terminal' ||
-      saved === 'archive' ||
-      saved === 'inventory' ||
-      saved === 'scanner' ||
-      saved === 'map' ||
-      saved === 'camera-test'
-      ? saved
-      : 'briefing'
+    // 'camera-test' НЕ разрешаем как стартовый экран: автозапуск камеры
+    // без жеста пользователя зависает в Android WebView.
+    // Открытие камеры — только по явному действию игрока.
+    if (saved === 'terminal' ||
+        saved === 'archive' ||
+        saved === 'inventory' ||
+        saved === 'scanner' ||
+        saved === 'map') {
+      return saved
+    }
+    return 'terminal'
   })
 
   const [accepted, setAccepted] = useState(() => {

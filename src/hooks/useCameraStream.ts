@@ -26,6 +26,8 @@ export function useCameraStream() {
 
   useEffect(() => {
     let cancelled = false
+    // Объявлен в теле эффекта, чтобы cleanup имел доступ.
+    let timeoutId: number | undefined
 
     async function init() {
       if (cachedStream && cachedStream.active) {
@@ -43,13 +45,25 @@ export function useCameraStream() {
       setStatus('starting')
       setError(null)
 
+      // Таймаут: если getUserMedia не отвечает 10 секунд — считаем ошибкой.
+      // В Telegram Android WebView автозапуск getUserMedia без пользовательского
+      // жеста может висеть бесконечно (промис не resolve и не reject).
+      let timedOut = false
+      timeoutId = window.setTimeout(() => {
+        timedOut = true
+        if (cancelled) return
+        setError('Камера не отвечает. Нажмите кнопку ещё раз или перезагрузите Mini App.')
+        setStatus('error')
+      }, 10_000)
+
       try {
         // Только задняя камера — в AR нужна она.
         const newStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' } },
           audio: false,
         })
-        if (cancelled) {
+        window.clearTimeout(timeoutId)
+        if (cancelled || timedOut) {
           newStream.getTracks().forEach((t) => t.stop())
           return
         }
@@ -57,7 +71,8 @@ export function useCameraStream() {
         setStream(newStream)
         setStatus('ready')
       } catch (err) {
-        if (cancelled) return
+        window.clearTimeout(timeoutId)
+        if (cancelled || timedOut) return
         const message = err instanceof Error ? err.message : 'Ошибка доступа к камере.'
         setError(message)
         setStatus('error')
@@ -70,6 +85,7 @@ export function useCameraStream() {
     // Он закроется через releaseCameraStream() явным вызовом.
     return () => {
       cancelled = true
+      window.clearTimeout(timeoutId)
     }
   }, [])
 

@@ -22,22 +22,23 @@ export function useGeoPosition() {
     let cancelled = false
 
     async function init() {
-      // 1) Проверим разрешение без запроса (если API доступен).
+      // 1) Опрос статуса (информативно, НЕ влияет на поток).
+      // Никогда не делаем ранний return по 'denied' — система может вернуть
+      // устаревший 'denied', а реальный диалог покажет только watchPosition.
       if (navigator.permissions && navigator.permissions.query) {
         try {
-          const status = await navigator.permissions.query({ name: 'geolocation' as PermissionName })
+          const status = await navigator.permissions.query({
+            name: 'geolocation' as PermissionName,
+          })
           if (cancelled) return
           setPermission(status.state as GeoPermissionStatus)
-          if (status.state === 'denied') {
-            setError('Доступ к геолокации запрещён. Разрешите его в настройках браузера или Telegram.')
-            return
-          }
         } catch {
-          // Permissions API не поддерживает geolocation — игнорируем, идём дальше.
+          // Permissions API не поддерживает geolocation — игнорируем.
         }
       }
 
-      // 2) Запускаем один watchPosition на всё приложение.
+      // 2) ВСЕГДА запускаем watchPosition — это единственный вызов,
+      // который триггерит системный диалог разрешений в WebView.
       if (!navigator.geolocation) {
         if (cancelled) return
         setError('Геолокация не поддерживается этим устройством.')
@@ -52,12 +53,16 @@ export function useGeoPosition() {
             lng: pos.coords.longitude,
             accuracy: pos.coords.accuracy,
           })
+          setPermission('granted')
           setError(null)
         },
         (err) => {
           if (cancelled) return
           if (err.code === err.PERMISSION_DENIED) {
-            setError('Доступ к геолокации запрещён.')
+            setPermission('denied')
+            setError(
+              'Доступ к геолокации запрещён. Разрешите его в настройках браузера или Telegram и перезагрузите Mini App.',
+            )
           } else if (err.code === err.POSITION_UNAVAILABLE) {
             setError('Не удалось определить позицию. Проверьте GPS.')
           } else {
