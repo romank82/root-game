@@ -13,6 +13,7 @@ from app.db import SessionLocal
 from app.mission_engine import (
     MissionEngineError,
     accept_mission,
+    expire_mission,
     get_bootstrap as get_engine_bootstrap,
     get_mission_qr_payload,
     process_qr_scan,
@@ -451,6 +452,22 @@ def accept_engine_mission(
             longitude=payload.longitude,
             accuracy=payload.accuracy,
         )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/missions/{mission_id}/expire")
+def expire_engine_mission(
+    request: Request,
+    mission_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return expire_mission(player_id, mission_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

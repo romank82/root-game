@@ -182,6 +182,38 @@ def _synchronize_player_missions(
         if player_mission.status in {"completed", "cancelled"}:
             continue
 
+        # Авто-expire: если deadline истёк, перевести в 'expired'.
+        # Если у миссии есть cooldown > 0 — заполняем available_again_at.
+        now = _utcnow()
+        if (
+            player_mission.status == "in_progress"
+            and player_mission.deadline_at is not None
+            and ensure_utc(player_mission.deadline_at) < now
+        ):
+            player_mission.status = "expired"
+            if mission.reentry_cooldown_seconds and mission.reentry_cooldown_seconds > 0:
+                player_mission.available_again_at = now + timedelta(
+                    seconds=mission.reentry_cooldown_seconds,
+                )
+            player_mission.deadline_at = None
+
+        # Авто-возврат из cooldown: если available_again_at прошёл, вернуть 'available'.
+        if player_mission.status == "expired" and player_mission.available_again_at is not None:
+            if ensure_utc(player_mission.available_again_at) <= now:
+                player_mission.status = "available"
+                player_mission.available_again_at = None
+                player_mission.attempt_count = 0
+                player_mission.started_at = None
+                player_mission.completed_at = None
+                player_mission.progress = {}
+                continue
+
+        # Expired-миссия (на cooldown или одноразовая) — не пересчитываем через
+        # requirements. Иначе при изменении требований админом она бы ушла в
+        # 'locked' и потеряла cooldown-трекинг.
+        if player_mission.status == "expired":
+            continue
+
         if _requirements_met(mission.id, requirements_by_mission, completed):
             if player_mission.status == "locked":
                 player_mission.status = "available"
@@ -360,6 +392,11 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "deadlineAt": (
                     ensure_utc(progress[mission.id].deadline_at).isoformat()
                     if progress[mission.id].deadline_at
+                    else None
+                ),
+                "availableAgainAt": (
+                    ensure_utc(progress[mission.id].available_again_at).isoformat()
+                    if progress[mission.id].available_again_at
                     else None
                 ),
             }
@@ -922,6 +959,23 @@ def _accept_mission_once(
                 "Миссия недоступна: не выполнены требования.",
             )
 
+        if player_mission.status == "expired":
+            # Если cooldown истёк — синхронизация уже должна была вернуть в available.
+            # Если нет — значит ещё на cooldown.
+            if player_mission.available_again_at is not None and ensure_utc(player_mission.available_again_at) > _utcnow():
+                seconds_left = int(
+                    (ensure_utc(player_mission.available_again_at) - _utcnow()).total_seconds()
+                )
+                minutes_left = max(1, seconds_left // 60)
+                raise MissionEngineError(
+                    429,
+                    f"Миссия на перезарядке. Доступна через {minutes_left} мин.",
+                )
+            raise MissionEngineError(
+                409,
+                "Время на выполнение миссии истекло. Миссия больше недоступна.",
+            )
+
         # Идемпотентность: если spawn уже есть в progress — вернуть как есть
         progress = player_mission.progress or {}
         existing_spawn = progress.get("spawn")
@@ -1249,4 +1303,60 @@ def process_qr_scan(
                     "missionType": mission.mission_type,
                     "content": mission.content,
                 },
+            }
+def expire_mission(player_id: str, mission_id: str) -> dict[str, Any]:
+    """
+    Пометить активную миссию как просроченную (ручной expire по клику игрока).
+    Если у миссии cooldown > 0 — установить available_again_at.
+    """
+    with SessionLocal() as session:
+        with session.begin():
+            mission = session.get(Mission, mission_id)
+            if mission is None or mission.status != "published":
+                raise MissionEngineError(404, "Миссия не найдена или не опубликована.")
+
+            player_mission = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == player_id,
+                    PlayerMission.mission_id == mission_id,
+                )
+            ).first()
+            if player_mission is None:
+                raise MissionEngineError(404, "Прогресс по миссии не найден.")
+
+            # Только для in_progress можно expire.
+            if player_mission.status != "in_progress":
+                # Идемпотентность: если уже expired — вернуть как есть.
+                if player_mission.status == "expired":
+                    return {
+                        "expired": True,
+                        "status": "expired",
+                        "availableAgainAt": (
+                            ensure_utc(player_mission.available_again_at).isoformat()
+                            if player_mission.available_again_at
+                            else None
+                        ),
+                    }
+                raise MissionEngineError(
+                    409,
+                    f"Миссия не в статусе in_progress (текущий: {player_mission.status}).",
+                )
+
+            now = _utcnow()
+            player_mission.status = "expired"
+            if mission.reentry_cooldown_seconds and mission.reentry_cooldown_seconds > 0:
+                player_mission.available_again_at = now + timedelta(
+                    seconds=mission.reentry_cooldown_seconds,
+                )
+            player_mission.deadline_at = None
+            session.flush()
+
+            return {
+                "expired": True,
+                "status": "expired",
+                "availableAgainAt": (
+                    ensure_utc(player_mission.available_again_at).isoformat()
+                    if player_mission.available_again_at
+                    else None
+                ),
             }
