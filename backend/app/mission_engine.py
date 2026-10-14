@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import time
 from typing import Any
 from uuid import uuid4
@@ -354,6 +354,12 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "completedAt": (
                     ensure_utc(progress[mission.id].completed_at).isoformat()
                     if progress[mission.id].completed_at
+                    else None
+                ),
+                "executionTimeLimitSeconds": mission.execution_time_limit_seconds,
+                "deadlineAt": (
+                    ensure_utc(progress[mission.id].deadline_at).isoformat()
+                    if progress[mission.id].deadline_at
                     else None
                 ),
             }
@@ -981,7 +987,14 @@ def _accept_mission_once(
         player_mission.progress = progress
 
         if player_mission.started_at is None:
-            player_mission.started_at = _utcnow()
+            started = _utcnow()
+            player_mission.started_at = started
+            # Лимит времени: deadline_at = started + execution_time_limit_seconds.
+            # None = без ограничения (не пишем deadline).
+            if mission.execution_time_limit_seconds:
+                player_mission.deadline_at = started + timedelta(
+                    seconds=mission.execution_time_limit_seconds,
+                )
         player_mission.status = "in_progress"
 
         session.flush()

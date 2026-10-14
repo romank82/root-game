@@ -30,6 +30,8 @@ export type EngineMission = {
   attemptCount: number
   startedAt: string | null
   completedAt: string | null
+  executionTimeLimitSeconds: number | null
+  deadlineAt: string | null
 }
 
 export type EngineAcceptMissionResponse = {
