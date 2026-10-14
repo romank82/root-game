@@ -227,6 +227,14 @@ class Mission(TimestampMixin, Base):
         server_default="0",
     )
 
+    # Цепочка разблокировки: эта миссия станет available только после того,
+    # как указанная миссия перейдёт в completed. None = нет зависимости.
+    unlock_after_mission_id: Mapped[str | None] = mapped_column(
+        ForeignKey("missions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     __table_args__ = (
         CheckConstraint(
             "mission_category IN ('solo', 'team', 'race', 'co-op')",

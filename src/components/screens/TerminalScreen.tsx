@@ -279,7 +279,7 @@ export function TerminalScreen({
               className="archive-toggle"
               onClick={() => setShowArchive((v) => !v)}
             >
-              {showArchive ? '▼' : '▶'} АРХИВ / ЗАВЕРШЁННЫЕ ({archivedMissions.length})
+              {showArchive ? '▼' : '▶'} ИСТОРИЯ ЗАДАНИЙ ({archivedMissions.length})
             </button>
 
             {showArchive && (
