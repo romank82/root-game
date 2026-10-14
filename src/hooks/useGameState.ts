@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import {
   acceptEngineMission,
+  expireEngineMission,
   getEngineBootstrap,
   submitEngineMission,
   type EngineBootstrap,
@@ -124,6 +125,29 @@ export function useGameState() {
     [applyEngineBootstrap],
   )
 
+  const expireMission = useCallback(
+    async (missionId: string): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        await expireEngineMission(missionId)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Ошибка запроса.'
+        return { ok: false, error: message }
+      }
+
+      try {
+        const fresh = await getEngineBootstrap()
+        applyEngineBootstrap(fresh)
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Не удалось обновить состояние.'
+        return { ok: true, error: message }
+      }
+
+      return { ok: true }
+    },
+    [applyEngineBootstrap],
+  )
+
   const resetProgress = useCallback(() => {
     setAccepted(false)
     setScreen('briefing')
@@ -146,6 +170,7 @@ export function useGameState() {
     applyEngineBootstrap,
     submitMission,
     acceptMission,
+    expireMission,
     resetProgress,
   }
 }

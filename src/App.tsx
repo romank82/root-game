@@ -31,6 +31,7 @@ function App() {
     applyEngineBootstrap,
     submitMission,
     acceptMission,
+    expireMission,
     resetProgress,
   } = useGameState()
 
@@ -108,6 +109,7 @@ function App() {
           onScreenChange={setScreen}
           onSubmitMission={submitMission}
           onAcceptMission={acceptMission}
+          onExpireMission={expireMission}
         />
       )}
 
@@ -130,6 +132,7 @@ function App() {
           onSubmitMission={submitMission}
           geoPosition={geoPosition}
           geoError={geoError}
+          onExpireMission={expireMission}
         />
       )}
 
@@ -143,7 +146,11 @@ function App() {
 
       {/* TEMP: dev-only camera test screen — удалить в Sprint 8.6.g. */}
       {import.meta.env.DEV && screen === 'camera-test' && (
-        <CameraTestScreen missions={missions} geoPosition={geoPosition} />
+        <CameraTestScreen
+          missions={missions}
+          geoPosition={geoPosition}
+          onExpireMission={expireMission}
+        />
       )}
 
       {screen === 'shop' && (

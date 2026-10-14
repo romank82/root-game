@@ -2158,3 +2158,64 @@ h2 {
   pointer-events: none;
 }
 
+/* === Mission timer: clickable when expired (Sprint 8.6.r.5) === */
+.mission-timer-clickable {
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.mission-timer-clickable:hover,
+.mission-timer-clickable:active {
+  transform: scale(1.03);
+  box-shadow: 0 0 14px rgba(255, 92, 92, 0.6);
+}
+
+.mission-timer-action {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255, 92, 92, 0.25);
+  margin-left: 4px;
+}
+
+/* === TerminalScreen: expired file card (Sprint 8.6.r.5) === */
+.expired-file {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: rgba(60, 0, 0, 0.35);
+  border: 1px solid rgba(255, 92, 92, 0.4);
+  color: #ffd0d0;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.expired-file p {
+  margin: 4px 0;
+}
+
+.expired-hint {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.expired-remove {
+  margin-top: 6px;
+  border: 1px solid rgba(255, 92, 92, 0.5);
+  background: rgba(255, 92, 92, 0.18);
+  color: #ffd0d0;
+  font-family: monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.expired-remove:hover {
+  background: rgba(255, 92, 92, 0.35);
+}
+

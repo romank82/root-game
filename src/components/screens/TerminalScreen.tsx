@@ -19,6 +19,9 @@ interface TerminalScreenProps {
   onAcceptMission: (
     missionId: string,
   ) => Promise<{ accepted: boolean; error?: string }>
+  onExpireMission: (
+    missionId: string,
+  ) => Promise<{ ok: boolean; error?: string }>
 }
 
 function missionStatusLabel(status: EngineMission['status']): string {
@@ -31,6 +34,12 @@ function missionStatusLabel(status: EngineMission['status']): string {
   if (status === 'in_progress') {
     return 'В ПРОЦЕССЕ'
   }
+  if (status === 'expired') {
+    return 'ПРОВАЛЕНО'
+  }
+  if (status === 'cancelled') {
+    return 'ОТМЕНЕНО'
+  }
   return 'ДОСТУПНО'
 }
 
@@ -41,6 +50,7 @@ export function TerminalScreen({
   onScreenChange,
   onSubmitMission,
   onAcceptMission,
+  onExpireMission,
 }: TerminalScreenProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [submissionError, setSubmissionError] = useState<string | null>(null)
@@ -131,6 +141,7 @@ export function TerminalScreen({
         ) : (
           textMissions.map((mission) => {
             const isCompleted = mission.status === 'completed'
+            const isExpired = mission.status === 'expired'
             const isLocked = mission.status === 'locked'
             const isInProgress = mission.status === 'in_progress'
 
@@ -160,6 +171,24 @@ export function TerminalScreen({
                         'Прогресс подтверждён сервером.',
                       )}
                     </p>
+                  </div>
+                ) : isExpired ? (
+                  <div className="expired-file">
+                    <p>ВРЕМЯ ВЫШЛО</p>
+                    {mission.availableAgainAt ? (
+                      <p className="expired-hint">
+                        Доступна снова:{' '}
+                        {new Date(mission.availableAgainAt).toLocaleString()}
+                      </p>
+                    ) : (
+                      <p className="expired-hint">Миссия одноразовая.</p>
+                    )}
+                    <button
+                      className="expired-remove"
+                      onClick={() => void onExpireMission(mission.id)}
+                    >
+                      УБРАТЬ
+                    </button>
                   </div>
                 ) : isLocked ? (
                   <div className="locked-file">

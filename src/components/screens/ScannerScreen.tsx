@@ -50,6 +50,9 @@ interface ScannerScreenProps {
   ) => Promise<MissionSubmission | null>
   geoPosition: { lat: number; lng: number; accuracy: number } | null
   geoError: string | null
+  onExpireMission: (
+    missionId: string,
+  ) => Promise<{ ok: boolean; error?: string }>
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -184,6 +187,7 @@ export function ScannerScreen({
   onSubmitMission,
   geoPosition,
   geoError,
+  onExpireMission,
 }: ScannerScreenProps) {
   const [distanceToSegment, setDistanceToSegment] = useState<number | null>(null)
   const [isCheckingLocation, setIsCheckingLocation] = useState(false)
@@ -260,6 +264,7 @@ export function ScannerScreen({
               <MissionTimer
                 deadlineAt={spawnMission.deadlineAt}
                 label="до конца задания"
+                onClick={() => void onExpireMission(spawnMission.id)}
               />
             )}
 

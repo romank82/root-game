@@ -12,6 +12,9 @@ import { MissionTimer } from '../MissionTimer'
 interface CameraTestScreenProps {
   missions: EngineMission[]
   geoPosition: { lat: number; lng: number; accuracy: number } | null
+  onExpireMission: (
+    missionId: string,
+  ) => Promise<{ ok: boolean; error?: string }>
 }
 
 // Радиус, до которого куб виден и активен (в метрах).
@@ -61,6 +64,7 @@ function calculateDistanceM(
 export function CameraTestScreen({
   missions,
   geoPosition,
+  onExpireMission,
 }: CameraTestScreenProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const { stream, status, error } = useCameraStream()
@@ -307,7 +311,10 @@ export function CameraTestScreen({
 
         {mission?.deadlineAt && (
           <div className="camera-timer-wrapper">
-            <MissionTimer deadlineAt={mission.deadlineAt} />
+            <MissionTimer
+              deadlineAt={mission.deadlineAt}
+              onClick={() => void onExpireMission(mission.id)}
+            />
           </div>
         )}
 

@@ -3,6 +3,8 @@ export type EngineMissionStatus =
   | 'available'
   | 'in_progress'
   | 'completed'
+  | 'cancelled'
+  | 'expired'
 
 export type EngineMissionSpawn = {
   latitude: number
@@ -32,6 +34,7 @@ export type EngineMission = {
   completedAt: string | null
   executionTimeLimitSeconds: number | null
   deadlineAt: string | null
+  availableAgainAt: string | null
 }
 
 export type EngineAcceptMissionResponse = {
@@ -284,6 +287,27 @@ export async function acceptEngineMission(
   }
 
   return response.json() as Promise<EngineAcceptMissionResponse>
+}
+
+export type EngineExpireMissionResponse = {
+  expired: boolean
+  status: string
+  availableAgainAt: string | null
+}
+
+export async function expireEngineMission(
+  missionId: string,
+): Promise<EngineExpireMissionResponse> {
+  const response = await apiFetch(
+    `/api/v1/engine/missions/${missionId}/expire`,
+    { method: 'POST' },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineExpireMissionResponse>
 }
 
 export async function getMissionQrPayload(

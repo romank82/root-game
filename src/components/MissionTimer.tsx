@@ -4,6 +4,8 @@ interface MissionTimerProps {
   deadlineAt: string | null
   // Опциональная подпись (например, «до конца задания»).
   label?: string
+  // Опциональный обработчик: если задан и время вышло — таймер кликабелен.
+  onClick?: () => void
 }
 
 function formatRemaining(ms: number): string {
@@ -19,7 +21,7 @@ function formatRemaining(ms: number): string {
   return `${pad(m)}:${pad(s)}`
 }
 
-export function MissionTimer({ deadlineAt, label }: MissionTimerProps) {
+export function MissionTimer({ deadlineAt, label, onClick }: MissionTimerProps) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -43,12 +45,20 @@ export function MissionTimer({ deadlineAt, label }: MissionTimerProps) {
     isCritical ? 'mission-timer-critical' : '',
   ].filter(Boolean).join(' ')
 
+  const isClickable = isExpired && onClick !== undefined
+
   return (
-    <div className={className}>
+    <div
+      className={`${className}${isClickable ? ' mission-timer-clickable' : ''}`}
+      onClick={isClickable ? onClick : undefined}
+      role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+    >
       <span className="mission-timer-icon">⏱</span>
       <span className="mission-timer-value">
         {isExpired ? 'ВРЕМЯ ВЫШЛО' : formatRemaining(remaining)}
       </span>
+      {isClickable && <span className="mission-timer-action">убрать</span>}
       {label && <span className="mission-timer-label">{label}</span>}
     </div>
   )
