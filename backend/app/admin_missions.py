@@ -88,6 +88,7 @@ class AdminMissionCreatePayload(BaseModel):
     slug: str = Field(min_length=3, max_length=128)
     mission_type: str = Field(min_length=1, max_length=64)
     mission_category: str = Field(default="solo", min_length=1, max_length=32)
+    mission_layer: str = Field(default="solo", min_length=1, max_length=32)
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
     content: dict[str, Any] = Field(default_factory=dict)
@@ -104,6 +105,7 @@ class AdminMissionUpdatePayload(BaseModel):
     slug: str | None = Field(default=None, min_length=3, max_length=128)
     mission_type: str | None = Field(default=None, min_length=1, max_length=64)
     mission_category: str | None = Field(default=None, max_length=32)
+    mission_layer: str | None = Field(default=None, max_length=32)
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
     content: dict[str, Any] | None = None
@@ -152,6 +154,7 @@ def _serialize_mission(
         "slug": mission.slug,
         "missionType": mission.mission_type,
         "missionCategory": mission.mission_category,
+        "missionLayer": mission.mission_layer,
         "title": mission.title,
         "description": mission.description,
         "content": mission.content,
@@ -318,6 +321,24 @@ def _validate_for_publish(
             detail="Для публикации миссии обязательна привязка AR-объекта (ar_object_id).",
         )
 
+    if mission.mission_layer not in ("story", "team", "solo"):
+        raise HTTPException(
+            status_code=422,
+            detail="mission_layer должен быть одним из: story, team, solo.",
+        )
+
+    # Согласованность: слой team ↔ mission_type team.
+    if mission.mission_layer == "team" and mission.mission_type != "team":
+        raise HTTPException(
+            status_code=422,
+            detail="Слой team требует mission_type=team.",
+        )
+    if mission.mission_layer != "team" and mission.mission_type == "team":
+        raise HTTPException(
+            status_code=422,
+            detail="mission_type=team требует mission_layer=team.",
+        )
+
     if mission.mission_type == "team":
         _validate_team_mission_config(mission.validation_config)
     else:
@@ -481,6 +502,7 @@ def create_admin_mission(
             slug=slug,
             mission_type=payload.mission_type.strip(),
             mission_category=payload.mission_category,
+            mission_layer=payload.mission_layer,
             title=payload.title.strip(),
             description=payload.description.strip() if payload.description else None,
             content=payload.content,
@@ -583,6 +605,10 @@ def update_admin_mission(
                 _validate_mission_category(category_value)
                 mission.mission_category = category_value
                 changed_fields.append("missionCategory")
+
+        if "mission_layer" in updates:
+            mission.mission_layer = updates["mission_layer"]
+            changed_fields.append("missionLayer")
 
         scalar_fields = {
             "mission_type": "missionType",

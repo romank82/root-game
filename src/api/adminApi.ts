@@ -28,6 +28,7 @@ export type AdminMission = {
   slug: string
   missionType: string
   missionCategory: string
+  missionLayer: string
   title: string
   description: string | null
   content: Record<string, unknown>
@@ -47,6 +48,7 @@ export type AdminMissionPayload = {
   slug: string
   mission_type: string
   mission_category?: string
+  mission_layer?: string
   title: string
   description?: string | null
   content?: Record<string, unknown>

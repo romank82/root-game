@@ -125,6 +125,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
     def test_publish_validation_accepts_complete_team_configuration(self) -> None:
         mission = SimpleNamespace(
             mission_type="team",
+            mission_layer="team",
             content={
                 "schemaVersion": 1,
                 "ui": {"label": "TEAM", "instruction": "Join nearby players."},
@@ -167,6 +168,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
     def test_publish_validation_rejects_invalid_team_configuration_safely(self) -> None:
         mission = SimpleNamespace(
             mission_type="team",
+            mission_layer="team",
             content={
                 "schemaVersion": 1,
                 "ui": {"label": "TEAM", "instruction": "Join nearby players."},

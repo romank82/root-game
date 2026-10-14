@@ -69,6 +69,7 @@ type MissionForm = {
   slug: string
   missionType: string
   missionCategory: string
+  missionLayer: string
   title: string
   description: string
   content: string
@@ -107,6 +108,7 @@ const emptyForm = (): MissionForm => ({
   slug: '',
   missionType: 'text_answer',
   missionCategory: 'solo',
+  missionLayer: 'solo',
   title: '',
   description: '',
   content: '{}',
@@ -214,6 +216,7 @@ function formFromMission(mission: AdminMission): MissionForm {
     slug: mission.slug,
     missionType: mission.missionType,
     missionCategory: mission.missionCategory ?? 'solo',
+    missionLayer: mission.missionLayer ?? 'solo',
     title: mission.title,
     description: mission.description ?? '',
     content:
@@ -336,6 +339,7 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     slug: form.slug.trim(),
     mission_type: form.missionType.trim(),
     mission_category: form.missionCategory,
+    mission_layer: form.missionLayer,
     title: form.title.trim(),
     description: form.description.trim() || null,
     content,
@@ -2151,8 +2155,21 @@ function AdminApp() {
               >
                 <option value="solo">solo — один игрок</option>
                 <option value="team">team — команда</option>
-                <option value="race">race — гонка (первый победил)</option>
-                <option value="co-op">co-op — кооператив</option>
+              </select>
+            </label>
+
+            <label>
+              Слой (где в интерфейсе)
+              <select
+                value={form.missionLayer}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, missionLayer: event.target.value })
+                }
+              >
+                <option value="solo">solo — индивидуальные</option>
+                <option value="team">team — командные</option>
+                <option value="story">story — сюжетные</option>
               </select>
             </label>
 
