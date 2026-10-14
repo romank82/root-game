@@ -2043,3 +2043,61 @@ h2 {
   font-size: 12px !important;
 }
 
+/* === Layer switch buttons (Sprint 8.6.o.4.d) === */
+.layer-switch {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  width: 100%;
+}
+
+.layer-switch-btn {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid;
+  transition: background 0.15s, color 0.15s;
+}
+
+/* Solo = yellow */
+.layer-switch-solo {
+  border-color: #ffcc00;
+  color: #ffcc00;
+}
+.layer-switch-solo.is-active {
+  background: #ffcc00;
+  color: #000;
+}
+
+/* Team = blue */
+.layer-switch-team {
+  border-color: #4da6ff;
+  color: #4da6ff;
+}
+.layer-switch-team.is-active {
+  background: #4da6ff;
+  color: #000;
+}
+
+/* Story = red */
+.layer-switch-story {
+  border-color: #ff5c5c;
+  color: #ff5c5c;
+}
+.layer-switch-story.is-active {
+  background: #ff5c5c;
+  color: #000;
+}
+
+.layer-empty {
+  color: #b7ffdb;
+  font-family: monospace;
+  font-size: 13px;
+  text-align: center;
+  margin: 12px 0;
+}

@@ -1,5 +1,7 @@
 import type { EngineMission } from '../api/engineApi'
 
+export type MissionLayer = 'solo' | 'team' | 'story'
+
 type GeoPosition = { lat: number; lng: number; accuracy: number } | null
 
 function toRadians(deg: number): number {
@@ -34,12 +36,16 @@ function calculateDistanceM(
 export function useActiveMission(
   missions: EngineMission[],
   geoPosition: GeoPosition,
+  layer?: MissionLayer,
 ): EngineMission | null {
+  const matchesLayer = (m: EngineMission): boolean =>
+    layer === undefined || m.missionLayer === layer
+
   if (!geoPosition) {
     // Без GPS — первая in_progress со spawn (порядок не важен для UI).
     return (
       missions.find(
-        (m) => m.status === 'in_progress' && m.spawn !== null,
+        (m) => m.status === 'in_progress' && m.spawn !== null && matchesLayer(m),
       ) ?? null
     )
   }
@@ -48,6 +54,7 @@ export function useActiveMission(
   let closestDist = Infinity
   for (const m of missions) {
     if (m.status !== 'in_progress' || m.spawn === null) continue
+    if (!matchesLayer(m)) continue
     const d = calculateDistanceM(
       geoPosition.lat,
       geoPosition.lng,

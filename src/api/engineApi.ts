@@ -19,6 +19,7 @@ export type EngineMission = {
   id: string
   slug: string
   missionType: 'text_answer' | 'code_repair' | string
+  missionLayer: string
   title: string
   description: string
   content: Record<string, unknown>

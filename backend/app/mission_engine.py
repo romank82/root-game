@@ -337,6 +337,7 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "id": mission.id,
                 "slug": mission.slug,
                 "missionType": mission.mission_type,
+                "missionLayer": mission.mission_layer,
                 "title": mission.title,
                 "description": mission.description,
                 "content": mission.content,

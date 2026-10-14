@@ -10,7 +10,7 @@ import {
   openRouteInNavigator,
 } from '../../utils/geolocation'
 import { EchoRadar } from '../EchoRadar'
-import { useActiveMission } from '../../hooks/useActiveMission'
+import { useActiveMission, type MissionLayer } from '../../hooks/useActiveMission'
 
 type SegmentContent = {
   code: string
@@ -188,8 +188,9 @@ export function ScannerScreen({
   const [repairSequence, setRepairSequence] = useState<string[]>([])
   const [repairError, setRepairError] = useState('')
   const [confirmedAward, setConfirmedAward] = useState<string | null>(null)
+  const [selectedLayer, setSelectedLayer] = useState<MissionLayer>('solo')
 
-  const spawnMission = useActiveMission(missions, geoPosition)
+  const spawnMission = useActiveMission(missions, geoPosition, selectedLayer)
 
   const activeMission = missions.find(
     (mission) =>
@@ -236,6 +237,18 @@ export function ScannerScreen({
           </section>
         ) : (
           <>
+            <div className="layer-switch">
+              {(['solo', 'team', 'story'] as const).map((layer) => (
+                <button
+                  key={layer}
+                  className={`layer-switch-btn layer-switch-${layer}${selectedLayer === layer ? ' is-active' : ''}`}
+                  onClick={() => setSelectedLayer(layer)}
+                >
+                  {layer === 'solo' ? 'СОЛО' : layer === 'team' ? 'КОМАНДА' : 'СЮЖЕТ'}
+                </button>
+              ))}
+            </div>
+
             <EchoRadar
               playerLat={geoPosition.lat}
               playerLng={geoPosition.lng}
