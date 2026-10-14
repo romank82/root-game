@@ -31,6 +31,7 @@ export type AdminMission = {
   missionLayer: string
   executionTimeLimitSeconds: number | null
   reentryCooldownSeconds: number
+  unlockAfterMissionId: string | null
   title: string
   description: string | null
   content: Record<string, unknown>
@@ -53,6 +54,7 @@ export type AdminMissionPayload = {
   mission_layer?: string
   execution_time_limit_seconds?: number | null
   reentry_cooldown_seconds?: number | null
+  unlock_after_mission_id?: string | null
   title: string
   description?: string | null
   content?: Record<string, unknown>

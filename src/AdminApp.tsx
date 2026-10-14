@@ -72,6 +72,7 @@ type MissionForm = {
   missionLayer: string
   executionTimeLimitSeconds: string
   reentryCooldownSeconds: string
+  unlockAfterMissionId: string
   title: string
   description: string
   content: string
@@ -113,6 +114,7 @@ const emptyForm = (): MissionForm => ({
   missionLayer: 'solo',
   executionTimeLimitSeconds: '',
   reentryCooldownSeconds: '0',
+  unlockAfterMissionId: '',
   title: '',
   description: '',
   content: '{}',
@@ -227,6 +229,7 @@ function formFromMission(mission: AdminMission): MissionForm {
         ? ''
         : String(mission.executionTimeLimitSeconds),
     reentryCooldownSeconds: String(mission.reentryCooldownSeconds ?? 0),
+    unlockAfterMissionId: mission.unlockAfterMissionId ?? '',
     title: mission.title,
     description: mission.description ?? '',
     content:
@@ -364,6 +367,7 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
       if (!Number.isFinite(n) || n < 0) return 0
       return n
     })(),
+    unlock_after_mission_id: form.unlockAfterMissionId.trim() || null,
     title: form.title.trim(),
     description: form.description.trim() || null,
     content,
@@ -2268,6 +2272,29 @@ function AdminApp() {
               </select>
               <small className="admin-muted">
                 «Одноразовая» — после завершения или провала миссия больше не появляется.
+              </small>
+            </label>
+
+            <label className="admin-span-2">
+              Разблокируется после
+              <select
+                value={form.unlockAfterMissionId}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, unlockAfterMissionId: event.target.value })
+                }
+              >
+                <option value="">— без зависимости (доступна сразу) —</option>
+                {missions
+                  .filter((m) => m.id !== selectedMission?.id)
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.title} · {m.slug} [{m.status}]
+                    </option>
+                  ))}
+              </select>
+              <small className="admin-muted">
+                Миссия станет доступной игроку только после выполнения выбранной.
               </small>
             </label>
           </div>

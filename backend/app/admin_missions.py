@@ -99,6 +99,7 @@ class AdminMissionCreatePayload(BaseModel):
         ge=0,
         le=7 * 24 * 3600,
     )
+    unlock_after_mission_id: str | None = Field(default=None, max_length=64)
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
     content: dict[str, Any] = Field(default_factory=dict)
@@ -126,6 +127,7 @@ class AdminMissionUpdatePayload(BaseModel):
         ge=0,
         le=7 * 24 * 3600,
     )
+    unlock_after_mission_id: str | None = Field(default=None, max_length=64)
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
     content: dict[str, Any] | None = None
@@ -177,6 +179,7 @@ def _serialize_mission(
         "missionLayer": mission.mission_layer,
         "executionTimeLimitSeconds": mission.execution_time_limit_seconds,
         "reentryCooldownSeconds": mission.reentry_cooldown_seconds,
+        "unlockAfterMissionId": mission.unlock_after_mission_id,
         "title": mission.title,
         "description": mission.description,
         "content": mission.content,
@@ -259,6 +262,58 @@ def _validate_references(
             status_code=422,
             detail="Указанный AR-объект (ar_object_id) не существует.",
         )
+
+
+def _validate_unlock_chain(
+    session: Session,
+    *,
+    mission_id: str | None,
+    unlock_after_mission_id: str | None,
+    chapter_id: str,
+) -> None:
+    """Проверить, что unlock_after_mission_id не создаёт self-ref, cross-chapter или цикл."""
+    if unlock_after_mission_id is None or unlock_after_mission_id == "":
+        return
+
+    # Self-reference
+    if mission_id is not None and unlock_after_mission_id == mission_id:
+        raise HTTPException(
+            status_code=422,
+            detail="Миссия не может разблокироваться после самой себя.",
+        )
+
+    # Существует?
+    target = session.get(Mission, unlock_after_mission_id)
+    if target is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Указанная миссия для разблокировки (unlock_after_mission_id) не существует.",
+        )
+
+    # Та же глава?
+    if target.chapter_id != chapter_id:
+        raise HTTPException(
+            status_code=422,
+            detail="Разблокирующая миссия должна быть в той же главе.",
+        )
+
+    # Цикл — пройти по цепочке вверх, до 20 шагов
+    seen: set[str] = set()
+    cursor: Mission | None = target
+    steps = 0
+    while cursor is not None and steps < 20:
+        if cursor.id in seen:
+            break
+        seen.add(cursor.id)
+        if mission_id is not None and cursor.id == mission_id:
+            raise HTTPException(
+                status_code=422,
+                detail="Обнаружен цикл в цепочке разблокировки.",
+            )
+        if cursor.unlock_after_mission_id is None:
+            break
+        cursor = session.get(Mission, cursor.unlock_after_mission_id)
+        steps += 1
 
 
 def _validate_rewards(
@@ -512,6 +567,12 @@ def create_admin_mission(
             geo_zone_id=payload.geo_zone_id,
             ar_object_id=payload.ar_object_id,
         )
+        _validate_unlock_chain(
+            session,
+            mission_id=None,
+            unlock_after_mission_id=payload.unlock_after_mission_id,
+            chapter_id=payload.chapter_id,
+        )
         _validate_rewards(session, payload.rewards)
         _validate_mission_category(payload.mission_category)
 
@@ -532,6 +593,7 @@ def create_admin_mission(
                 else None
             ),
             reentry_cooldown_seconds=payload.reentry_cooldown_seconds,
+            unlock_after_mission_id=payload.unlock_after_mission_id or None,
             title=payload.title.strip(),
             description=payload.description.strip() if payload.description else None,
             content=payload.content,
@@ -650,6 +712,18 @@ def update_admin_mission(
             raw = updates["reentry_cooldown_seconds"]
             mission.reentry_cooldown_seconds = raw if raw is not None and raw >= 0 else 0
             changed_fields.append("reentryCooldownSeconds")
+
+        if "unlock_after_mission_id" in updates:
+            raw = updates["unlock_after_mission_id"]
+            mission.unlock_after_mission_id = raw if raw else None
+            changed_fields.append("unlockAfterMissionId")
+
+        _validate_unlock_chain(
+            session,
+            mission_id=mission.id,
+            unlock_after_mission_id=mission.unlock_after_mission_id,
+            chapter_id=mission.chapter_id,
+        )
 
         scalar_fields = {
             "mission_type": "missionType",
