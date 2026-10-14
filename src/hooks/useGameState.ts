@@ -13,6 +13,15 @@ import type { ApiStatus, Screen } from '../types/game'
 
 export function useGameState() {
   const [screen, setScreen] = useState<Screen>(() => {
+    // Если игрок не активировал протокол — всегда показываем брифинг.
+    // Иначе можно застрять в состоянии accepted=false + screen=<не briefing>:
+    // таб-бар скрыт (условие accepted && ...), брифинг тоже не рендерится
+    // (условие screen === 'briefing'), игрок застревает без навигации.
+    const accepted = localStorage.getItem('chimera-accepted') === 'true'
+    if (!accepted) {
+      return 'briefing'
+    }
+
     const saved = localStorage.getItem('chimera-screen')
     // 'camera-test' НЕ разрешаем как стартовый экран: автозапуск камеры
     // без жеста пользователя зависает в Android WebView.
