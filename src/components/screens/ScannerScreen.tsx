@@ -10,6 +10,7 @@ import {
   openRouteInNavigator,
 } from '../../utils/geolocation'
 import { EchoRadar } from '../EchoRadar'
+import { MissionTimer } from '../MissionTimer'
 import { useActiveMission, type MissionLayer } from '../../hooks/useActiveMission'
 
 const LAYER_COLORS: Record<'solo' | 'team' | 'story', string> = {
@@ -254,6 +255,13 @@ export function ScannerScreen({
                 </button>
               ))}
             </div>
+
+            {spawnMission.deadlineAt && (
+              <MissionTimer
+                deadlineAt={spawnMission.deadlineAt}
+                label="до конца задания"
+              />
+            )}
 
             <EchoRadar
               playerLat={geoPosition.lat}

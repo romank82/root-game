@@ -1,0 +1,55 @@
+import { useEffect, useState } from 'react'
+
+interface MissionTimerProps {
+  deadlineAt: string | null
+  // Опциональная подпись (например, «до конца задания»).
+  label?: string
+}
+
+function formatRemaining(ms: number): string {
+  if (ms <= 0) return '00:00'
+  const total = Math.floor(ms / 1000)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  if (h > 0) {
+    return `${h}:${pad(m)}:${pad(s)}`
+  }
+  return `${pad(m)}:${pad(s)}`
+}
+
+export function MissionTimer({ deadlineAt, label }: MissionTimerProps) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!deadlineAt) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [deadlineAt])
+
+  if (!deadlineAt) return null
+
+  const deadlineMs = new Date(deadlineAt).getTime()
+  if (!Number.isFinite(deadlineMs)) return null
+
+  const remaining = deadlineMs - now
+  const isExpired = remaining <= 0
+  const isCritical = !isExpired && remaining < 60_000
+
+  const className = [
+    'mission-timer',
+    isExpired ? 'mission-timer-expired' : '',
+    isCritical ? 'mission-timer-critical' : '',
+  ].filter(Boolean).join(' ')
+
+  return (
+    <div className={className}>
+      <span className="mission-timer-icon">⏱</span>
+      <span className="mission-timer-value">
+        {isExpired ? 'ВРЕМЯ ВЫШЛО' : formatRemaining(remaining)}
+      </span>
+      {label && <span className="mission-timer-label">{label}</span>}
+    </div>
+  )
+}

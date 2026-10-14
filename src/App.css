@@ -2101,3 +2101,60 @@ h2 {
   text-align: center;
   margin: 12px 0;
 }
+
+/* === Mission timer (Sprint 8.6.q.5) === */
+.mission-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(0, 255, 136, 0.4);
+  color: #00ff88;
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.mission-timer-icon {
+  font-size: 16px;
+}
+
+.mission-timer-value {
+  letter-spacing: 1px;
+}
+
+.mission-timer-label {
+  font-size: 11px;
+  font-weight: normal;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.mission-timer-critical {
+  color: #ffcc00;
+  border-color: rgba(255, 204, 0, 0.6);
+  animation: mission-timer-pulse 1s ease-in-out infinite;
+}
+
+.mission-timer-expired {
+  color: #ff5c5c;
+  border-color: rgba(255, 92, 92, 0.8);
+  background: rgba(60, 0, 0, 0.75);
+  animation: none;
+}
+
+@keyframes mission-timer-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.camera-timer-wrapper {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  pointer-events: none;
+}
+

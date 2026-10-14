@@ -7,6 +7,7 @@ import type { EngineMission } from '../../api/engineApi'
 import { getMissionQrPayload } from '../../api/engineApi'
 import { useCameraStream } from '../../hooks/useCameraStream'
 import { useActiveMission } from '../../hooks/useActiveMission'
+import { MissionTimer } from '../MissionTimer'
 
 interface CameraTestScreenProps {
   missions: EngineMission[]
@@ -303,6 +304,12 @@ export function CameraTestScreen({
           autoPlay
           className="camera-test-video"
         />
+
+        {mission?.deadlineAt && (
+          <div className="camera-timer-wrapper">
+            <MissionTimer deadlineAt={mission.deadlineAt} />
+          </div>
+        )}
 
         {status === 'starting' && (
           <div className="camera-test-overlay">Запуск камеры…</div>
