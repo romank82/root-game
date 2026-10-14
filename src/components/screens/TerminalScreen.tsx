@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type {
   EngineMission,
   MissionSubmission,
@@ -58,6 +58,20 @@ export function TerminalScreen({
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
   const [acceptError, setAcceptError] = useState<string | null>(null)
   const [showArchive, setShowArchive] = useState(false)
+  const [openLayer, setOpenLayer] = useState<'story' | 'team' | 'solo'>('story')
+
+  useEffect(() => {
+    // Автовыбор: первая непустая папка (story → team → solo).
+    // Если у всех пусто — остаётся story.
+    const order: Array<'story' | 'team' | 'solo'> = ['story', 'team', 'solo']
+    const firstNonEmpty = order.find(
+      (layer) => missionsByLayer[layer].length > 0,
+    )
+    if (firstNonEmpty !== undefined) {
+      setOpenLayer(firstNonEmpty)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missions])
 
   // Ordering and player-visible status come from authenticated bootstrap.
   // This screen only renders public text-answer presentation data.
@@ -305,29 +319,41 @@ export function TerminalScreen({
             </div>
           </section>
         ) : (
-          LAYER_ORDER.map((layer) => (
-            <section
-              key={layer}
-              className="layer-group"
-              style={{ borderLeftColor: LAYER_COLOR[layer] }}
-            >
-              <h3
-                className="layer-heading"
-                style={{ color: LAYER_COLOR[layer] }}
-              >
-                {LAYER_LABEL[layer]}{' '}
-                <span className="layer-heading-count">
-                  ({layerCounts[layer].available} из {layerCounts[layer].total})
-                </span>
-              </h3>
+          LAYER_ORDER.map((layer) => {
+            const isOpen = openLayer === layer
+            const total = layerCounts[layer].total
+            const isEmpty = total === 0
 
-              {missionsByLayer[layer].length === 0 ? (
-                <p className="layer-empty">Пока пусто</p>
-              ) : (
-                missionsByLayer[layer].map((mission) => renderMissionCard(mission))
-              )}
-            </section>
-          ))
+            return (
+              <section key={layer} className="layer-folder">
+                <button
+                  type="button"
+                  className={`layer-folder-toggle${isOpen ? ' is-open' : ''}${isEmpty ? ' is-empty' : ''}`}
+                  style={{ color: LAYER_COLOR[layer] }}
+                  onClick={() => setOpenLayer(layer)}
+                >
+                  <span className="layer-folder-icon">{isOpen ? '📂' : '📁'}</span>
+                  <span className="layer-folder-name">{LAYER_LABEL[layer]}</span>
+                  <span className="layer-folder-count">({total})</span>
+                </button>
+
+                {isOpen && (
+                  <div
+                    className="layer-folder-body"
+                    style={{ borderLeftColor: LAYER_COLOR[layer] }}
+                  >
+                    {isEmpty ? (
+                      <p className="layer-empty">Пока пусто</p>
+                    ) : (
+                      missionsByLayer[layer].map((mission) =>
+                        renderMissionCard(mission),
+                      )
+                    )}
+                  </div>
+                )}
+              </section>
+            )
+          })
         )}
 
         {/* АРХИВ */}

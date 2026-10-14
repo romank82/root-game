@@ -2288,25 +2288,61 @@ h2 {
 }
 
 
-/* === Terminal layer groups (Sprint 8.6.u.1) === */
-.layer-group {
-  margin-bottom: 24px;
-  padding-left: 14px;
-  border-left: 3px solid transparent;
+/* === Terminal layer folders (Sprint 8.6.u.2) === */
+.layer-folder {
+  margin-bottom: 12px;
 }
 
-.layer-heading {
-  margin: 0 0 12px;
+.layer-folder-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 16px;
+  background: rgba(15, 37, 29, 0.55);
+  border: 1px solid rgba(174, 255, 219, 0.18);
+  border-radius: 8px;
   font-family: monospace;
   font-size: 13px;
   font-weight: bold;
   letter-spacing: 2px;
   text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
 }
 
-.layer-heading-count {
+.layer-folder-toggle:hover {
+  background: rgba(15, 37, 29, 0.85);
+  border-color: rgba(174, 255, 219, 0.35);
+}
+
+.layer-folder-toggle.is-open {
+  border-color: currentColor;
+  background: rgba(15, 37, 29, 0.85);
+}
+
+.layer-folder-toggle.is-empty {
+  opacity: 0.55;
+}
+
+.layer-folder-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.layer-folder-name {
+  flex: 1;
+}
+
+.layer-folder-count {
   font-weight: normal;
-  opacity: 0.65;
-  margin-left: 4px;
+  opacity: 0.7;
+}
+
+.layer-folder-body {
+  margin-top: 8px;
+  padding-left: 14px;
+  border-left: 3px solid transparent;
 }
 
