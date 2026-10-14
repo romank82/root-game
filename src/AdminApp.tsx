@@ -70,6 +70,7 @@ type MissionForm = {
   missionType: string
   missionCategory: string
   missionLayer: string
+  executionTimeLimitSeconds: string
   title: string
   description: string
   content: string
@@ -109,6 +110,7 @@ const emptyForm = (): MissionForm => ({
   missionType: 'text_answer',
   missionCategory: 'solo',
   missionLayer: 'solo',
+  executionTimeLimitSeconds: '',
   title: '',
   description: '',
   content: '{}',
@@ -217,6 +219,11 @@ function formFromMission(mission: AdminMission): MissionForm {
     missionType: mission.missionType,
     missionCategory: mission.missionCategory ?? 'solo',
     missionLayer: mission.missionLayer ?? 'solo',
+    executionTimeLimitSeconds:
+      mission.executionTimeLimitSeconds === null ||
+      mission.executionTimeLimitSeconds === undefined
+        ? ''
+        : String(mission.executionTimeLimitSeconds),
     title: mission.title,
     description: mission.description ?? '',
     content:
@@ -340,6 +347,13 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     mission_type: form.missionType.trim(),
     mission_category: form.missionCategory,
     mission_layer: form.missionLayer,
+    execution_time_limit_seconds: (() => {
+      const raw = form.executionTimeLimitSeconds.trim()
+      if (raw === '') return null
+      const n = Number.parseInt(raw, 10)
+      if (!Number.isFinite(n) || n < 0) return null
+      return n
+    })(),
     title: form.title.trim(),
     description: form.description.trim() || null,
     content,
@@ -2205,6 +2219,25 @@ function AdminApp() {
                   setForm({ ...form, sortOrder: event.target.value })
                 }
               />
+            </label>
+
+            <label>
+              Время на выполнение
+              <select
+                value={form.executionTimeLimitSeconds}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, executionTimeLimitSeconds: event.target.value })
+                }
+              >
+                <option value="">— без лимита —</option>
+                <option value="300">5 минут</option>
+                <option value="900">15 минут</option>
+                <option value="3600">1 час</option>
+                <option value="21600">6 часов</option>
+                <option value="86400">24 часа</option>
+                <option value="604800">7 дней</option>
+              </select>
             </label>
           </div>
 

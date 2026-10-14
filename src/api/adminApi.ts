@@ -29,6 +29,7 @@ export type AdminMission = {
   missionType: string
   missionCategory: string
   missionLayer: string
+  executionTimeLimitSeconds: number | null
   title: string
   description: string | null
   content: Record<string, unknown>
@@ -49,6 +50,7 @@ export type AdminMissionPayload = {
   mission_type: string
   mission_category?: string
   mission_layer?: string
+  execution_time_limit_seconds?: number | null
   title: string
   description?: string | null
   content?: Record<string, unknown>
