@@ -209,6 +209,14 @@ class Mission(TimestampMixin, Base):
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # Лимит времени на выполнение задания в секундах.
+    # None = без ограничения. Устанавливается админом в CMS.
+    execution_time_limit_seconds: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None,
+    )
+
     __table_args__ = (
         CheckConstraint(
             "mission_category IN ('solo', 'team', 'race', 'co-op')",
@@ -217,6 +225,10 @@ class Mission(TimestampMixin, Base):
         CheckConstraint(
             "mission_layer IN ('story', 'team', 'solo')",
             name="ck_missions_mission_layer",
+        ),
+        CheckConstraint(
+            "execution_time_limit_seconds IS NULL OR execution_time_limit_seconds > 0",
+            name="ck_missions_execution_time_limit_positive",
         ),
     )
 
@@ -1086,6 +1098,14 @@ class PlayerMission(TimestampMixin, Base):
         nullable=True,
     )
     completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Абсолютный момент времени, до которого игрок должен выполнить миссию.
+    # None = без ограничения. Заполняется при первом accept:
+    # started_at + Mission.execution_time_limit_seconds.
+    deadline_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
