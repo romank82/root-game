@@ -79,6 +79,40 @@ export function TerminalScreen({
       (mission.status === 'expired' && mission.availableAgainAt === null),
   )
 
+  // Группировка активных миссий по слоям.
+  const LAYER_ORDER = ['story', 'team', 'solo'] as const
+  const LAYER_LABEL: Record<typeof LAYER_ORDER[number], string> = {
+    story: 'СЮЖЕТНЫЕ',
+    team: 'КОМАНДНЫЕ',
+    solo: 'ИНДИВИДУАЛЬНЫЕ',
+  }
+  const LAYER_COLOR: Record<typeof LAYER_ORDER[number], string> = {
+    story: '#ff5c5c',
+    team: '#4da6ff',
+    solo: '#ffcc00',
+  }
+  const missionsByLayer = {
+    story: activeMissions.filter((m) => m.missionLayer === 'story'),
+    team: activeMissions.filter((m) => m.missionLayer === 'team'),
+    solo: activeMissions.filter((m) => m.missionLayer === 'solo'),
+  }
+
+  // Счётчик доступных/всего для заголовка секции.
+  const layerCounts = {
+    story: {
+      available: missionsByLayer.story.filter((m) => m.status === 'available' || m.status === 'in_progress').length,
+      total: missionsByLayer.story.length,
+    },
+    team: {
+      available: missionsByLayer.team.filter((m) => m.status === 'available' || m.status === 'in_progress').length,
+      total: missionsByLayer.team.length,
+    },
+    solo: {
+      available: missionsByLayer.solo.filter((m) => m.status === 'available' || m.status === 'in_progress').length,
+      total: missionsByLayer.solo.length,
+    },
+  }
+
   async function submitAnswer(mission: EngineMission) {
     const answer = answers[mission.id] ?? ''
     const response = await onSubmitMission(mission.id, { answer })
@@ -110,6 +144,122 @@ export function TerminalScreen({
     }
     // После accept переходим на карту — там будут круги.
     onScreenChange('map')
+  }
+
+  function renderMissionCard(mission: EngineMission) {
+    const isCompleted = mission.status === 'completed'
+    const isExpired = mission.status === 'expired'
+    const isLocked = mission.status === 'locked'
+    const isInProgress = mission.status === 'in_progress'
+
+    return (
+      <article className="puzzle" key={mission.id}>
+        <span className="file-label">
+          {missionText(mission, 'label', mission.title)}
+        </span>
+        <small>СТАТУС: {missionStatusLabel(mission.status)}</small>
+        <h3>
+          {missionText(mission, 'question', mission.description)}
+        </h3>
+
+        {isCompleted ? (
+          <div className="success">
+            <strong>
+              {missionText(
+                mission,
+                'successTitle',
+                '✓ ПАКЕТ ПОДТВЕРЖДЁН',
+              )}
+            </strong>
+            <p>
+              {missionText(
+                mission,
+                'successText',
+                'Прогресс подтверждён сервером.',
+              )}
+            </p>
+          </div>
+        ) : isExpired ? (
+          <div className="expired-file">
+            <p>ВРЕМЯ ВЫШЛО</p>
+            {mission.availableAgainAt ? (
+              <p className="expired-hint">
+                Доступна снова через:{' '}
+                <CooldownCountdown
+                  availableAgainAt={mission.availableAgainAt}
+                />
+              </p>
+            ) : (
+              <p className="expired-hint">Миссия одноразовая.</p>
+            )}
+            <button
+              className="expired-remove"
+              onClick={() => void onExpireMission(mission.id)}
+            >
+              УБРАТЬ
+            </button>
+          </div>
+        ) : isLocked ? (
+          <div className="locked-file">
+            <span>?</span>
+            <div>
+              <strong>ПАКЕТ НЕДОСТУПЕН</strong>
+              <small>
+                Сервер откроет задание после выполнения необходимых
+                условий.
+              </small>
+            </div>
+          </div>
+        ) : isInProgress ? (
+          <div className="accept-row">
+            <p className="in-progress-hint">
+              Миссия активна. Зона поиска уже на карте.
+            </p>
+            <button onClick={() => onScreenChange('map')}>
+              ОТКРЫТЬ КАРТУ
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="accept-row">
+              <button
+                onClick={() => void handleAccept(mission)}
+                disabled={acceptingId === mission.id}
+              >
+                {acceptingId === mission.id
+                  ? 'ПОЛУЧЕНИЕ GPS…'
+                  : 'ВЗЯТЬ МИССИЮ'}
+              </button>
+            </div>
+            <div className="answer-row">
+              <input
+                value={answers[mission.id] ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setAnswers((current) => ({
+                    ...current,
+                    [mission.id]: value,
+                  }))
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    void submitAnswer(mission)
+                  }
+                }}
+                placeholder={missionText(
+                  mission,
+                  'inputPlaceholder',
+                  'Введите ответ...',
+                )}
+              />
+              <button onClick={() => void submitAnswer(mission)}>
+                ПРОВЕРИТЬ
+              </button>
+            </div>
+          </>
+        )}
+      </article>
+    )
   }
 
   return (
@@ -150,126 +300,34 @@ export function TerminalScreen({
               <strong>НЕТ ДОСТУПНЫХ ТЕКСТОВЫХ ПАКЕТОВ</strong>
               <p>
                 Опубликованный сюжетный пакет ещё не получен из игрового
-                bootstrap, либо все доступные пакеты уже в архиве.
+                bootstrap, либо все доступные пакеты уже в истории заданий.
               </p>
             </div>
           </section>
         ) : (
-          activeMissions.map((mission) => {
-            const isCompleted = mission.status === 'completed'
-            const isExpired = mission.status === 'expired'
-            const isLocked = mission.status === 'locked'
-            const isInProgress = mission.status === 'in_progress'
-
-            return (
-              <article className="puzzle" key={mission.id}>
-                <span className="file-label">
-                  {missionText(mission, 'label', mission.title)}
+          LAYER_ORDER.map((layer) => (
+            <section
+              key={layer}
+              className="layer-group"
+              style={{ borderLeftColor: LAYER_COLOR[layer] }}
+            >
+              <h3
+                className="layer-heading"
+                style={{ color: LAYER_COLOR[layer] }}
+              >
+                {LAYER_LABEL[layer]}{' '}
+                <span className="layer-heading-count">
+                  ({layerCounts[layer].available} из {layerCounts[layer].total})
                 </span>
-                <small>СТАТУС: {missionStatusLabel(mission.status)}</small>
-                <h3>
-                  {missionText(mission, 'question', mission.description)}
-                </h3>
+              </h3>
 
-                {isCompleted ? (
-                  <div className="success">
-                    <strong>
-                      {missionText(
-                        mission,
-                        'successTitle',
-                        '✓ ПАКЕТ ПОДТВЕРЖДЁН',
-                      )}
-                    </strong>
-                    <p>
-                      {missionText(
-                        mission,
-                        'successText',
-                        'Прогресс подтверждён сервером.',
-                      )}
-                    </p>
-                  </div>
-                ) : isExpired ? (
-                  <div className="expired-file">
-                    <p>ВРЕМЯ ВЫШЛО</p>
-                    {mission.availableAgainAt ? (
-                      <p className="expired-hint">
-                        Доступна снова через:{' '}
-                        <CooldownCountdown
-                          availableAgainAt={mission.availableAgainAt}
-                        />
-                      </p>
-                    ) : (
-                      <p className="expired-hint">Миссия одноразовая.</p>
-                    )}
-                    <button
-                      className="expired-remove"
-                      onClick={() => void onExpireMission(mission.id)}
-                    >
-                      УБРАТЬ
-                    </button>
-                  </div>
-                ) : isLocked ? (
-                  <div className="locked-file">
-                    <span>?</span>
-                    <div>
-                      <strong>ПАКЕТ НЕДОСТУПЕН</strong>
-                      <small>
-                        Сервер откроет задание после выполнения необходимых
-                        условий.
-                      </small>
-                    </div>
-                  </div>
-                ) : isInProgress ? (
-                  <div className="accept-row">
-                    <p className="in-progress-hint">
-                      Миссия активна. Зона поиска уже на карте.
-                    </p>
-                    <button onClick={() => onScreenChange('map')}>
-                      ОТКРЫТЬ КАРТУ
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="accept-row">
-                      <button
-                        onClick={() => void handleAccept(mission)}
-                        disabled={acceptingId === mission.id}
-                      >
-                        {acceptingId === mission.id
-                          ? 'ПОЛУЧЕНИЕ GPS…'
-                          : 'ВЗЯТЬ МИССИЮ'}
-                      </button>
-                    </div>
-                    <div className="answer-row">
-                      <input
-                        value={answers[mission.id] ?? ''}
-                        onChange={(event) => {
-                          const value = event.target.value
-                          setAnswers((current) => ({
-                            ...current,
-                            [mission.id]: value,
-                          }))
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            void submitAnswer(mission)
-                          }
-                        }}
-                        placeholder={missionText(
-                          mission,
-                          'inputPlaceholder',
-                          'Введите ответ...',
-                        )}
-                      />
-                      <button onClick={() => void submitAnswer(mission)}>
-                        ПРОВЕРИТЬ
-                      </button>
-                    </div>
-                  </>
-                )}
-              </article>
-            )
-          })
+              {missionsByLayer[layer].length === 0 ? (
+                <p className="layer-empty">Пока пусто</p>
+              ) : (
+                missionsByLayer[layer].map((mission) => renderMissionCard(mission))
+              )}
+            </section>
+          ))
         )}
 
         {/* АРХИВ */}
