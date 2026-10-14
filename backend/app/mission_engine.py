@@ -923,6 +923,32 @@ def _accept_mission_once(
                 mission, player_mission, existing_spawn
             )
 
+        # Правило: ≤1 активной миссии на слой (story/team/solo).
+        # Проверяем, нет ли у игрока другой in_progress миссии того же layer.
+        conflicting = session.scalars(
+            select(PlayerMission)
+            .join(Mission, Mission.id == PlayerMission.mission_id)
+            .where(
+                PlayerMission.player_id == player_id,
+                PlayerMission.status == "in_progress",
+                Mission.mission_layer == mission.mission_layer,
+                Mission.id != mission.id,
+            )
+            .limit(1)
+        ).first()
+        if conflicting is not None:
+            conflicting_mission = session.get(Mission, conflicting.mission_id)
+            layer_label = {
+                "story": "сюжетного слоя",
+                "team": "командного слоя",
+                "solo": "индивидуального слоя",
+            }.get(mission.mission_layer, mission.mission_layer)
+            raise MissionEngineError(
+                409,
+                f"У вас уже есть активная миссия {layer_label}. "
+                f"Завершите её, прежде чем брать новую.",
+            )
+
         # Загрузить GeoZone-шаблон
         zone_template = session.get(GeoZone, mission.geo_zone_id)
         if zone_template is None or zone_template.search_radius_meters is None:
