@@ -292,8 +292,8 @@ export function EchoRadar({
           fill="#00ff88"
         />
 
-        {/* Точка цели (spawn) */}
-        {distanceM <= MAX_DISTANCE_M * 2 && (
+        {/* Цель БЛИЗКО (≤70 м) — залитая точка как сейчас */}
+        {distanceM <= MAX_DISTANCE_M && (
           <circle
             cx={dotX}
             cy={dotY}
@@ -305,17 +305,19 @@ export function EchoRadar({
           />
         )}
 
-        {/* Если цель далеко — показываем стрелку-указатель на краю */}
+        {/* Цель ДАЛЕКО (>70 м) — стрелка на границе радара */}
         {distanceM > MAX_DISTANCE_M && (
-          <g>
-            <circle
-              cx={dotX}
-              cy={dotY}
-              r={7}
-              fill="none"
-              stroke="#ffcc00"
-              strokeWidth={2}
-              style={{ transition: 'cx 0.2s linear, cy 0.2s linear' }}
+          <g
+            transform={`translate(${dotX}, ${dotY}) rotate(${(dotAngleRad * 180) / Math.PI})`}
+            style={{ transition: 'transform 0.2s linear' }}
+          >
+            {/* Треугольник указывает ВПРАВО в локальных координатах.
+                rotate(dotAngleRad) поворачивает его в нужную сторону. */}
+            <polygon
+              points="-9,-8 -9,8 11,0"
+              fill="#ffcc00"
+              stroke="#000"
+              strokeWidth={1}
             />
           </g>
         )}
@@ -325,6 +327,11 @@ export function EchoRadar({
         <p className="echo-radar-line">
           РАССТОЯНИЕ: {Math.round(distanceM)} м
         </p>
+        {distanceM > MAX_DISTANCE_M && (
+          <p className="echo-radar-line echo-radar-far">
+            Цель далеко — идите по стрелке
+          </p>
+        )}
         <p className="echo-radar-line">
           ТОЧНОСТЬ: ±{Math.round(playerAccuracy)} м
         </p>

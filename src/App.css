@@ -2038,3 +2038,8 @@ h2 {
   align-self: flex-end;
 }
 
+.echo-radar-far {
+  color: #ffcc00 !important;
+  font-size: 12px !important;
+}
+
