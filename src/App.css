@@ -2030,21 +2030,4 @@ h2 {
   opacity: 0.8;
   line-height: 1.4;
 }
-.ar-debug-overlay {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  background: rgba(0, 0, 0, 0.8);
-  color: #00ff88;
-  padding: 8px 10px;
-  border-radius: 4px;
-  font-family: monospace;
-  font-size: 11px;
-  line-height: 1.4;
-  z-index: 100;
-  pointer-events: none;
-}
 
-.ar-debug-overlay p {
-  margin: 0;
-}

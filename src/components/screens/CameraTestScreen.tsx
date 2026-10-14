@@ -70,14 +70,6 @@ export function CameraTestScreen({
     hmac: string
   } | null>(null)
 
-  // TEMP (8.6.i.6): тик debug-оверлея — удалить вместе с 8.6.j.
-  const [debugNow, setDebugNow] = useState(Date.now())
-
-  useEffect(() => {
-    const t = setInterval(() => setDebugNow(Date.now()), 200)
-    return () => clearInterval(t)
-  }, [])
-
   // Единый выбор активной миссии: ближайшая in_progress со spawn.
   const mission = useActiveMission(missions, geoPosition)
 
@@ -379,21 +371,7 @@ export function CameraTestScreen({
             </div>
           )}
 
-        {import.meta.env.DEV && (
-          <div className="ar-debug-overlay">
-            <p>heading: {heading === null ? '—' : heading.toFixed(1)}°</p>
-            <p>anchored: {anchoredBearingRef.current === null ? 'нет' : anchoredBearingRef.current.toFixed(1) + '°'}</p>
-            <p>delta: {deltaDeg === null ? '—' : deltaDeg.toFixed(1)}°</p>
-            <p>dist: {distanceM === null ? '—' : distanceM.toFixed(1)} м</p>
-            <p>scale: {scale.toFixed(2)}</p>
-            <p>left: {leftPercent.toFixed(0)}%</p>
-            <p>accuracy: {geoPosition?.accuracy?.toFixed(0) ?? '—'} м</p>
-            <p>jumps: {jumpCounterRef.current}</p>
-            <p>abs: {lastAbsoluteAtRef.current === 0 ? 'never' : Math.round((Date.now() - lastAbsoluteAtRef.current) / 1000) + 's ago'}</p>
-            <p>tick: {debugNow % 1000}</p>
-          </div>
-        )}
-      </div>
+        </div>
     </section>
   )
 }
