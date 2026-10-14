@@ -5,6 +5,7 @@ import type {
 } from '../../api/engineApi'
 import type { ApiStatus, Screen } from '../../types/game'
 import { Sidebar } from '../Sidebar'
+import { CooldownCountdown } from '../CooldownCountdown'
 import { missionText } from '../../utils/missionHelpers'
 
 interface TerminalScreenProps {
@@ -177,8 +178,10 @@ export function TerminalScreen({
                     <p>ВРЕМЯ ВЫШЛО</p>
                     {mission.availableAgainAt ? (
                       <p className="expired-hint">
-                        Доступна снова:{' '}
-                        {new Date(mission.availableAgainAt).toLocaleString()}
+                        Доступна снова через:{' '}
+                        <CooldownCountdown
+                          availableAgainAt={mission.availableAgainAt}
+                        />
                       </p>
                     ) : (
                       <p className="expired-hint">Миссия одноразовая.</p>

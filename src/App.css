@@ -2219,3 +2219,11 @@ h2 {
   background: rgba(255, 92, 92, 0.35);
 }
 
+/* === TerminalScreen: live cooldown countdown (Sprint 8.6.r.6) === */
+.cooldown-countdown {
+  font-family: monospace;
+  font-weight: bold;
+  color: #ffcc00;
+  letter-spacing: 1px;
+}
+
