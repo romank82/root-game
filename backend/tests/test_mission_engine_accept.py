@@ -106,12 +106,14 @@ class MissionEngineAcceptTests(unittest.TestCase):
         with_zone: bool = True,
         execution_time_limit_seconds: int | None = None,
         reentry_cooldown_seconds: int = 0,
+        unlock_after_mission_id: str | None = None,
+        player_id: str | None = None,
     ) -> dict[str, str]:
         from app.models import ARObject, Chapter, GamePlayer, GeoZone, Mission, Season
 
         suffix = uuid.uuid4().hex
         ids = {
-            "player": f"player-{suffix}",
+            "player": player_id or f"player-{suffix}",
             "season": f"season-{suffix}",
             "chapter": f"chapter-{suffix}",
             "zone": f"zone-{suffix}",
@@ -132,26 +134,32 @@ class MissionEngineAcceptTests(unittest.TestCase):
             )
             session.flush()
 
-            session.add_all(
-                [
-                    Chapter(
-                        id=ids["chapter"],
-                        season_id=ids["season"],
-                        slug=f"chapter-{suffix}",
-                        title="Accept test chapter",
-                        description="Isolated accept fixture",
-                        status="published",
-                        sort_order=1,
-                    ),
+            session.add(
+                Chapter(
+                    id=ids["chapter"],
+                    season_id=ids["season"],
+                    slug=f"chapter-{suffix}",
+                    title="Accept test chapter",
+                    description="Isolated accept fixture",
+                    status="published",
+                    sort_order=1,
+                )
+            )
+
+            if player_id is None:
+                session.add(
                     GamePlayer(
                         id=ids["player"],
                         display_name=f"Accept Player-{ids['player'][-6:]}",
                         auth_provider="telegram",
                         external_id=f"tg-{uuid.uuid4().hex}",
                         status="active",
-                    ),
-                ]
-            )
+                    )
+                )
+            else:
+                # Общий игрок для цепочки разблокировки: переиспользуем
+                # существующего, нового не создаём.
+                self.assertIsNotNone(session.get(GamePlayer, player_id))
             session.flush()
 
             if with_zone:
@@ -212,6 +220,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
                     ar_object_id=ids["ar_object"] if with_zone else None,
                     execution_time_limit_seconds=execution_time_limit_seconds,
                     reentry_cooldown_seconds=reentry_cooldown_seconds,
+                    unlock_after_mission_id=unlock_after_mission_id,
                 )
             )
 
@@ -585,3 +594,143 @@ class MissionEngineAcceptTests(unittest.TestCase):
         bootstrap = get_bootstrap(ids["player"])
         m = next(x for x in bootstrap["missions"] if x["id"] == ids["mission"])
         self.assertIsNotNone(m["availableAgainAt"])
+
+    # ---- 8.6.x: цепочка разблокировки (unlock_after_mission_id) ---------
+    def test_unlock_chain_locks_mission_until_predecessor_completes(self) -> None:
+        from app.mission_engine import get_bootstrap
+
+        # Создать A (без цепочки) и B (зависит от A) для одного игрока.
+        ids_a = self._fixture()
+        ids_b = self._fixture(
+            unlock_after_mission_id=ids_a["mission"],
+            player_id=ids_a["player"],
+        )
+
+        bootstrap = get_bootstrap(ids_b["player"])
+
+        # Санity: A без зависимостей доступна — лок B вызван именно цепочкой.
+        mission_a = next(
+            (m for m in bootstrap["missions"] if m["id"] == ids_a["mission"]),
+            None,
+        )
+        self.assertIsNotNone(mission_a)
+        self.assertEqual(mission_a["status"], "available")
+
+        # B заблокирована, пока A не completed.
+        mission_b = next(
+            (m for m in bootstrap["missions"] if m["id"] == ids_b["mission"]),
+            None,
+        )
+        self.assertIsNotNone(mission_b)
+        self.assertEqual(mission_b["status"], "locked")
+
+    def test_unlock_chain_unlocks_after_predecessor_completed(self) -> None:
+        from datetime import datetime, timezone
+
+        from app.mission_engine import get_bootstrap
+        from app.models import PlayerMission
+        from sqlalchemy import select
+
+        ids_a = self._fixture()
+        ids_b = self._fixture(
+            unlock_after_mission_id=ids_a["mission"],
+            player_id=ids_a["player"],
+        )
+
+        # Синхронизация создаёт PlayerMission для A — без этого пометить её
+        # completed вручную нечем.
+        bootstrap = get_bootstrap(ids_a["player"])
+        mission_before = next(
+            (m for m in bootstrap["missions"] if m["id"] == ids_b["mission"]),
+            None,
+        )
+        self.assertIsNotNone(mission_before)
+        self.assertEqual(mission_before["status"], "locked")
+
+        # Вручную отметить A как completed.
+        with self.SessionLocal.begin() as session:
+            pm_a = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids_a["player"],
+                    PlayerMission.mission_id == ids_a["mission"],
+                )
+            ).first()
+            self.assertIsNotNone(pm_a)
+            pm_a.status = "completed"
+            pm_a.completed_at = pm_a.started_at or datetime.now(timezone.utc)
+
+        # После completed предшественника B становится available.
+        bootstrap = get_bootstrap(ids_a["player"])
+        mission_b = next(
+            (m for m in bootstrap["missions"] if m["id"] == ids_b["mission"]),
+            None,
+        )
+        self.assertIsNotNone(mission_b)
+        self.assertEqual(mission_b["status"], "available")
+
+    def test_expired_mission_not_recalculated_by_unlock_chain(self) -> None:
+        from datetime import datetime, timezone
+
+        from app.mission_engine import get_bootstrap
+        from app.models import PlayerMission
+        from sqlalchemy import select
+
+        # A — предшественник: завершаем заранее, чтобы B стала available.
+        ids_a = self._fixture()
+        get_bootstrap(ids_a["player"])  # создаёт PlayerMission для A
+        with self.SessionLocal.begin() as session:
+            pm_a = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids_a["player"],
+                    PlayerMission.mission_id == ids_a["mission"],
+                )
+            ).first()
+            self.assertIsNotNone(pm_a)
+            pm_a.status = "completed"
+            pm_a.completed_at = pm_a.started_at or datetime.now(timezone.utc)
+
+        ids_b = self._fixture(
+            unlock_after_mission_id=ids_a["mission"],
+            player_id=ids_a["player"],
+            reentry_cooldown_seconds=3600,
+        )
+
+        bootstrap = get_bootstrap(ids_a["player"])
+        mission_b = next(
+            (m for m in bootstrap["missions"] if m["id"] == ids_b["mission"]),
+            None,
+        )
+        self.assertIsNotNone(mission_b)
+        self.assertEqual(mission_b["status"], "available")
+
+        # Берём B и экспайрим её.
+        self.mission_engine.accept_mission(
+            ids_b["player"],
+            ids_b["mission"],
+            self.PLAYER_LATITUDE,
+            self.PLAYER_LONGITUDE,
+        )
+        self.mission_engine.expire_mission(ids_b["player"], ids_b["mission"])
+
+        # Ломаем цепочку: A больше не completed. Если бы expired-миссии
+        # пересчитывались через unlock-цепочку, B ушла бы в locked и
+        # потеряла cooldown-трекинг.
+        with self.SessionLocal.begin() as session:
+            pm_a = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids_a["player"],
+                    PlayerMission.mission_id == ids_a["mission"],
+                )
+            ).first()
+            self.assertIsNotNone(pm_a)
+            pm_a.status = "available"
+            pm_a.completed_at = None
+
+        bootstrap = get_bootstrap(ids_a["player"])
+        mission_b = next(
+            (m for m in bootstrap["missions"] if m["id"] == ids_b["mission"]),
+            None,
+        )
+        self.assertIsNotNone(mission_b)
+        self.assertEqual(mission_b["status"], "expired")
+        self.assertIsNotNone(mission_b["availableAgainAt"])
