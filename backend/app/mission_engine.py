@@ -214,7 +214,14 @@ def _synchronize_player_missions(
         if player_mission.status == "expired":
             continue
 
-        if _requirements_met(mission.id, requirements_by_mission, completed):
+        # Цепочка разблокировки: если задан unlock_after_mission_id и его
+        # PlayerMission ещё не в completed — миссия locked (независимо от
+        # MissionRequirement).
+        unlock_ok = True
+        if mission.unlock_after_mission_id:
+            unlock_ok = mission.unlock_after_mission_id in completed
+
+        if unlock_ok and _requirements_met(mission.id, requirements_by_mission, completed):
             if player_mission.status == "locked":
                 player_mission.status = "available"
         else:
