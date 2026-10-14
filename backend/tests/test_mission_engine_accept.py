@@ -105,6 +105,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
         mission_type: str = "text_answer",
         with_zone: bool = True,
         execution_time_limit_seconds: int | None = None,
+        reentry_cooldown_seconds: int = 0,
     ) -> dict[str, str]:
         from app.models import ARObject, Chapter, GamePlayer, GeoZone, Mission, Season
 
@@ -210,6 +211,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
                     geo_zone_id=ids["zone"] if with_zone else None,
                     ar_object_id=ids["ar_object"] if with_zone else None,
                     execution_time_limit_seconds=execution_time_limit_seconds,
+                    reentry_cooldown_seconds=reentry_cooldown_seconds,
                 )
             )
 
@@ -449,3 +451,137 @@ class MissionEngineAcceptTests(unittest.TestCase):
         with self.assertRaises(MissionEngineError) as error:
             self._call_accept(ids, accuracy=-1.0)
         self.assertEqual(error.exception.status_code, 422)
+
+    # ---- 8.6.r.3: expiry + cooldown -------------------------------------
+    def test_expire_mission_sets_expired(self) -> None:
+        from app.models import PlayerMission
+        from sqlalchemy import select
+
+        ids = self._fixture(reentry_cooldown_seconds=3600)
+        self._call_accept(ids)
+
+        self.mission_engine.expire_mission(ids["player"], ids["mission"])
+
+        with self.SessionLocal() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            self.assertEqual(pm.status, "expired")
+            self.assertIsNotNone(pm.available_again_at)
+
+    def test_expire_mission_is_idempotent(self) -> None:
+        from app.models import PlayerMission
+        from sqlalchemy import select
+
+        ids = self._fixture(reentry_cooldown_seconds=3600)
+        self._call_accept(ids)
+
+        self.mission_engine.expire_mission(ids["player"], ids["mission"])
+        with self.SessionLocal() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            first_available = pm.available_again_at
+
+        # Второй вызов не должен менять available_again_at
+        self.mission_engine.expire_mission(ids["player"], ids["mission"])
+        with self.SessionLocal() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            self.assertEqual(pm.available_again_at, first_available)
+
+    def test_expire_mission_on_available_returns_409(self) -> None:
+        ids = self._fixture()
+        # PlayerMission создаётся в _fixture со статусом по умолчанию (locked или available).
+        # Сначала отправим её в available через _synchronize.
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.mission_engine.expire_mission(ids["player"], ids["mission"])
+        # Если PM нет — 404, если есть в locked/available — 409
+        self.assertIn(ctx.exception.status_code, (404, 409))
+
+    def test_expire_mission_without_player_mission_returns_404(self) -> None:
+        with self.assertRaises(MissionEngineError) as ctx:
+            self.mission_engine.expire_mission("no-player", "no-mission")
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_accept_on_cooldown_returns_429(self) -> None:
+        ids = self._fixture(reentry_cooldown_seconds=3600)
+        self._call_accept(ids)
+        self.mission_engine.expire_mission(ids["player"], ids["mission"])
+
+        with self.assertRaises(MissionEngineError) as ctx:
+            self._call_accept(ids)
+        self.assertEqual(ctx.exception.status_code, 429)
+
+    def test_cooldown_expires_returns_to_available(self) -> None:
+        from app.models import PlayerMission
+        from sqlalchemy import select
+        from datetime import timedelta
+
+        ids = self._fixture(reentry_cooldown_seconds=10)  # 10 сек
+        self._call_accept(ids)
+        self.mission_engine.expire_mission(ids["player"], ids["mission"])
+
+        # Сдвигаем available_again_at в прошлое
+        with self.SessionLocal.begin() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            pm.available_again_at = pm.available_again_at - timedelta(seconds=20)
+
+        # Bootstrap должен вернуть available
+        from app.mission_engine import get_bootstrap
+        bootstrap = get_bootstrap(ids["player"])
+        m = next(x for x in bootstrap["missions"] if x["id"] == ids["mission"])
+        self.assertEqual(m["status"], "available")
+
+    def test_deadline_expired_auto_expires(self) -> None:
+        from app.models import PlayerMission
+        from sqlalchemy import select
+        from datetime import timedelta
+
+        ids = self._fixture(
+            execution_time_limit_seconds=60,
+            reentry_cooldown_seconds=3600,
+        )
+        self._call_accept(ids)
+
+        # Сдвигаем deadline в прошлое
+        with self.SessionLocal.begin() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            pm.deadline_at = pm.deadline_at - timedelta(seconds=120)
+
+        from app.mission_engine import get_bootstrap
+        bootstrap = get_bootstrap(ids["player"])
+        m = next(x for x in bootstrap["missions"] if x["id"] == ids["mission"])
+        self.assertEqual(m["status"], "expired")
+        self.assertIsNotNone(m["availableAgainAt"])
+
+    def test_bootstrap_includes_available_again_at(self) -> None:
+        ids = self._fixture(reentry_cooldown_seconds=3600)
+        self._call_accept(ids)
+        self.mission_engine.expire_mission(ids["player"], ids["mission"])
+
+        from app.mission_engine import get_bootstrap
+        bootstrap = get_bootstrap(ids["player"])
+        m = next(x for x in bootstrap["missions"] if x["id"] == ids["mission"])
+        self.assertIsNotNone(m["availableAgainAt"])
