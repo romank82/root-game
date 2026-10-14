@@ -180,6 +180,17 @@ class Mission(TimestampMixin, Base):
         comment=("Категория участия: solo / team / race / co-op. "
                  "Определяет флоу прохождения."),
     )
+    mission_layer: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="solo",
+        index=True,
+        comment=(
+            "Слой миссии: story (сюжетная), team (командная), solo "
+            "(индивидуальная). Используется для UI-группировки, цветов "
+            "и правила '≤1 активной на слой для игрока'."
+        ),
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -202,6 +213,10 @@ class Mission(TimestampMixin, Base):
         CheckConstraint(
             "mission_category IN ('solo', 'team', 'race', 'co-op')",
             name="ck_missions_mission_category",
+        ),
+        CheckConstraint(
+            "mission_layer IN ('story', 'team', 'solo')",
+            name="ck_missions_mission_layer",
         ),
     )
 
