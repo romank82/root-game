@@ -8,6 +8,7 @@ interface EchoRadarProps {
   targetLng: number
   // Опционально: подпись под радаром.
   hint?: string
+  color?: string
 }
 
 // Радиусы концентрических кругов (в метрах).
@@ -79,6 +80,7 @@ export function EchoRadar({
   targetLat,
   targetLng,
   hint,
+  color = '#ffcc00',
 }: EchoRadarProps) {
   const [heading, setHeading] = useState<number | null>(null)
   const [compassError, setCompassError] = useState<string | null>(null)
@@ -298,7 +300,7 @@ export function EchoRadar({
             cx={dotX}
             cy={dotY}
             r={7}
-            fill="#ffcc00"
+            fill={color}
             stroke="#000"
             strokeWidth={1}
             style={{ transition: 'cx 0.2s linear, cy 0.2s linear' }}
@@ -315,7 +317,7 @@ export function EchoRadar({
                 rotate(dotAngleRad) поворачивает его в нужную сторону. */}
             <polygon
               points="-9,-8 -9,8 11,0"
-              fill="#ffcc00"
+              fill={color}
               stroke="#000"
               strokeWidth={1}
             />
