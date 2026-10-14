@@ -2227,3 +2227,63 @@ h2 {
   letter-spacing: 1px;
 }
 
+/* === Terminal archive section (Sprint 8.6.s.1) === */
+.archive-section {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(174, 255, 219, 0.13);
+}
+
+.archive-toggle {
+  background: transparent;
+  border: 1px solid rgba(174, 255, 219, 0.25);
+  color: #b7ffdb;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 1px;
+  width: 100%;
+  text-align: left;
+}
+
+.archive-toggle:hover {
+  border-color: rgba(174, 255, 219, 0.45);
+}
+
+.archive-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.archive-card {
+  padding: 14px 18px;
+  border: 1px solid rgba(174, 255, 219, 0.08);
+  background: rgba(15, 37, 29, 0.35);
+  border-radius: 6px;
+  opacity: 0.75;
+}
+
+.archive-card h3 {
+  margin: 6px 0 0;
+  font-size: 15px;
+  color: #cfe9dc;
+}
+
+.archive-card small {
+  color: #7fa791;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.archive-hint {
+  margin: 6px 0 0;
+  color: #7fa791;
+  font-size: 11px;
+  font-family: monospace;
+}
+

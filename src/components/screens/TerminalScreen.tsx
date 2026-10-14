@@ -57,11 +57,26 @@ export function TerminalScreen({
   const [submissionError, setSubmissionError] = useState<string | null>(null)
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
   const [acceptError, setAcceptError] = useState<string | null>(null)
+  const [showArchive, setShowArchive] = useState(false)
 
   // Ordering and player-visible status come from authenticated bootstrap.
   // This screen only renders public text-answer presentation data.
   const textMissions = missions.filter(
     (mission) => mission.missionType === 'text_answer',
+  )
+
+  // Активные (в основном списке): всё, кроме завершённых и одноразовых провалов.
+  const activeMissions = textMissions.filter(
+    (mission) =>
+      mission.status !== 'completed' &&
+      !(mission.status === 'expired' && mission.availableAgainAt === null),
+  )
+
+  // Архив: завершённые + одноразовые провалы.
+  const archivedMissions = textMissions.filter(
+    (mission) =>
+      mission.status === 'completed' ||
+      (mission.status === 'expired' && mission.availableAgainAt === null),
   )
 
   async function submitAnswer(mission: EngineMission) {
@@ -128,19 +143,19 @@ export function TerminalScreen({
           <p className="repair-error">{acceptError}</p>
         )}
 
-        {textMissions.length === 0 ? (
+        {activeMissions.length === 0 ? (
           <section className="location-status">
             <span className="location-status-icon">⌖</span>
             <div>
               <strong>НЕТ ДОСТУПНЫХ ТЕКСТОВЫХ ПАКЕТОВ</strong>
               <p>
-                Опубликованные задания этого типа ещё не получены из игрового
-                bootstrap.
+                Опубликованный сюжетный пакет ещё не получен из игрового
+                bootstrap, либо все доступные пакеты уже в архиве.
               </p>
             </div>
           </section>
         ) : (
-          textMissions.map((mission) => {
+          activeMissions.map((mission) => {
             const isCompleted = mission.status === 'completed'
             const isExpired = mission.status === 'expired'
             const isLocked = mission.status === 'locked'
@@ -255,6 +270,41 @@ export function TerminalScreen({
               </article>
             )
           })
+        )}
+
+        {/* АРХИВ */}
+        {archivedMissions.length > 0 && (
+          <section className="archive-section">
+            <button
+              className="archive-toggle"
+              onClick={() => setShowArchive((v) => !v)}
+            >
+              {showArchive ? '▼' : '▶'} АРХИВ / ЗАВЕРШЁННЫЕ ({archivedMissions.length})
+            </button>
+
+            {showArchive && (
+              <div className="archive-list">
+                {archivedMissions.map((mission) => (
+                  <article className="archive-card" key={mission.id}>
+                    <span className="file-label">
+                      {missionText(mission, 'label', mission.title)}
+                    </span>
+                    <small>
+                      СТАТУС:{' '}
+                      {mission.status === 'completed' ? 'РАСШИФРОВАНО' : 'ПРОВАЛЕНО'}
+                    </small>
+                    <h3>{mission.title}</h3>
+                    {mission.completedAt && (
+                      <p className="archive-hint">
+                        Завершено:{' '}
+                        {new Date(mission.completedAt).toLocaleString()}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
         )}
       </div>
     </section>
