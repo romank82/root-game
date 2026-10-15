@@ -263,6 +263,57 @@ export function CipherScreen({
     setSuccessAward(formatAwarded(response))
   }
 
+  // 1. Сначала — финальные состояния (успех, тайм-аут).
+  //    Они не зависят от mission — используют локальный state.
+  if (successAward) {
+    return (
+      <section className="segment-screen">
+        <p className="eyebrow">АКТИВНАЯ МИССИЯ / ЗАВЕРШЕНА</p>
+        <section className="mission-success-card">
+          <span className="file-label">ЗАМОК ОТКРЫТ</span>
+          <div className="mission-success-symbol">✓</div>
+          <h3>{content?.successTitle ?? 'Комбинация принята'}</h3>
+          <p>
+            {content?.successText ?? 'Прогресс и награды подтверждены сервером.'}
+          </p>
+          <div className="mission-reward-grid">
+            <div>
+              <span>ПОЛУЧЕНО</span>
+              <strong>{successAward}</strong>
+            </div>
+          </div>
+          <button
+            className="repair-submit-button"
+            onClick={() => onScreenChange('terminal')}
+          >
+            В КОНТУР →
+          </button>
+        </section>
+      </section>
+    )
+  }
+
+  if (timedOut) {
+    return (
+      <section className="segment-screen">
+        <p className="eyebrow">АКТИВНАЯ МИССИЯ / ВРЕМЯ ВЫШЛО</p>
+        <section className="mission-success-card">
+          <span className="file-label">ВРЕМЯ ВЫШЛО</span>
+          <div className="mission-success-symbol">!</div>
+          <h3>Комбинация не собрана</h3>
+          <p>{content?.wrongAnswerText ?? 'Попытка не засчитана.'}</p>
+          <button
+            className="repair-submit-button"
+            onClick={() => onScreenChange('terminal')}
+          >
+            В КОНТУР →
+          </button>
+        </section>
+      </section>
+    )
+  }
+
+  // 2. Только потом — проверка активной миссии.
   if (!mission || !content) {
     return (
       <section className="segment-screen">
@@ -284,6 +335,7 @@ export function CipherScreen({
     )
   }
 
+  // 3. Иначе — игровой UI.
   return (
     <section className="segment-screen">
       <p className="eyebrow">АКТИВНАЯ МИССИЯ / {mission.id.toUpperCase()}</p>
@@ -307,125 +359,80 @@ export function CipherScreen({
           <p>{mission.description}</p>
         </div>
       </div>
+      <div className="cipher-instruction">
+        {content.label && <span className="file-label">{content.label}</span>}
+        {content.instruction && <p>{content.instruction}</p>}
+      </div>
 
-      {timedOut ? (
-        <section className="mission-success-card">
-          <span className="file-label">ВРЕМЯ ВЫШЛО</span>
-          <div className="mission-success-symbol">!</div>
-          <h3>Комбинация не собрана</h3>
-          <p>{content.wrongAnswerText ?? 'Попытка не засчитана.'}</p>
-          <div className="mission-reward-grid">
-            <div>
-              <span>СТАТУС</span>
-              <strong>ПОПЫТКА ПОТЕРЯНА</strong>
-            </div>
-          </div>
-          <button
-            className="repair-submit-button"
-            onClick={() => onScreenChange('terminal')}
-          >
-            В КОНТУР →
-          </button>
-        </section>
-      ) : successAward ? (
-        <section className="mission-success-card">
-          <span className="file-label">ЗАМОК ОТКРЫТ</span>
-          <div className="mission-success-symbol">✓</div>
-          <h3>{content.successTitle ?? 'Комбинация принята'}</h3>
-          <p>
-            {content.successText ?? 'Прогресс и награды подтверждены сервером.'}
-          </p>
-          <div className="mission-reward-grid">
-            <div>
-              <span>ПОЛУЧЕНО</span>
-              <strong>{successAward}</strong>
-            </div>
-          </div>
-          <button
-            className="repair-submit-button"
-            onClick={() => onScreenChange('terminal')}
-          >
-            В КОНТУР →
-          </button>
-        </section>
-      ) : (
-        <>
-          <div className="cipher-instruction">
-            {content.label && <span className="file-label">{content.label}</span>}
-            {content.instruction && <p>{content.instruction}</p>}
-          </div>
+      <div className="cipher-combination" aria-label="Правильная комбинация">
+        {Array.from(content.combination).map((char, index) => (
+          <span key={`${char}-${index}`} className="cipher-combination-char">
+            {char}
+          </span>
+        ))}
+      </div>
 
-          <div className="cipher-combination" aria-label="Правильная комбинация">
-            {Array.from(content.combination).map((char, index) => (
-              <span key={`${char}-${index}`} className="cipher-combination-char">
-                {char}
-              </span>
-            ))}
-          </div>
-
-          {timeLeft !== null && (
-            <div
-              className={`cipher-timer${
-                timeLeft <= 10 ? ' cipher-timer-critical' : ''
-              }`}
-            >
-              ⏱ {Math.max(timeLeft, 0)} сек
-            </div>
-          )}
-
-          <div className="cipher-drums">
-            {drums.map((drum, drumIndex) => {
-              const length = drum.symbols.length
-              const prev =
-                drum.symbols[(drum.currentIndex - 1 + length) % length]
-              const current = drum.symbols[drum.currentIndex]
-              const next = drum.symbols[(drum.currentIndex + 1) % length]
-              return (
-                <div
-                  key={`${drumIndex}-${drum.symbols.join('')}`}
-                  className="cipher-drum"
-                  style={{ touchAction: 'none' }}
-                  onTouchStart={(e) => handleTouchStart(e, drumIndex)}
-                  onTouchMove={(e) => handleTouchMove(e, drumIndex)}
-                  onTouchEnd={handleTouchEnd}
-                >
-                  <span className="cipher-drum-symbol cipher-drum-muted">
-                    {prev}
-                  </span>
-                  <span className="cipher-drum-symbol cipher-drum-current">
-                    {current}
-                  </span>
-                  <span className="cipher-drum-symbol cipher-drum-muted">
-                    {next}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-
-          {error && <p className="repair-error">{error}</p>}
-
-          <div className="repair-actions">
-            <button
-              className="repair-clear-button"
-              onClick={() => {
-                const next = buildDrums(content)
-                if (next) setDrums(next)
-                setError(null)
-              }}
-            >
-              ЗАНОВО
-            </button>
-            <button
-              className="repair-submit-button"
-              onClick={() => void handleSubmit()}
-              disabled={submitting || drums.length === 0}
-            >
-              {submitting ? 'ПРОВЕРЯЕМ…' : 'ГОТОВО →'}
-            </button>
-          </div>
-        </>
+      {timeLeft !== null && (
+        <div
+          className={`cipher-timer${
+            timeLeft <= 10 ? ' cipher-timer-critical' : ''
+          }`}
+        >
+          ⏱ {Math.max(timeLeft, 0)} сек
+        </div>
       )}
+
+      <div className="cipher-drums">
+        {drums.map((drum, drumIndex) => {
+          const length = drum.symbols.length
+          const prev =
+            drum.symbols[(drum.currentIndex - 1 + length) % length]
+          const current = drum.symbols[drum.currentIndex]
+          const next = drum.symbols[(drum.currentIndex + 1) % length]
+          return (
+            <div
+              key={`${drumIndex}-${drum.symbols.join('')}`}
+              className="cipher-drum"
+              style={{ touchAction: 'none' }}
+              onTouchStart={(e) => handleTouchStart(e, drumIndex)}
+              onTouchMove={(e) => handleTouchMove(e, drumIndex)}
+              onTouchEnd={handleTouchEnd}
+            >
+              <span className="cipher-drum-symbol cipher-drum-muted">
+                {prev}
+              </span>
+              <span className="cipher-drum-symbol cipher-drum-current">
+                {current}
+              </span>
+              <span className="cipher-drum-symbol cipher-drum-muted">
+                {next}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+
+      {error && <p className="repair-error">{error}</p>}
+
+      <div className="repair-actions">
+        <button
+          className="repair-clear-button"
+          onClick={() => {
+            const next = buildDrums(content)
+            if (next) setDrums(next)
+            setError(null)
+          }}
+        >
+          ЗАНОВО
+        </button>
+        <button
+          className="repair-submit-button"
+          onClick={() => void handleSubmit()}
+          disabled={submitting || drums.length === 0}
+        >
+          {submitting ? 'ПРОВЕРЯЕМ…' : 'ГОТОВО →'}
+        </button>
+      </div>
     </section>
   )
 }
