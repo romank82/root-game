@@ -1,6 +1,7 @@
 import type { EngineMission } from '../api/engineApi'
+import type { MissionLayer } from '../constants/missionLayerColors'
 
-export type MissionLayer = 'solo' | 'team' | 'story'
+export type { MissionLayer }
 
 type GeoPosition = { lat: number; lng: number; accuracy: number } | null
 

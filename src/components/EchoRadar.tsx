@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { DEFAULT_MISSION_LAYER_COLOR } from '../constants/missionLayerColors'
 
 interface EchoRadarProps {
   playerLat: number
@@ -80,7 +81,7 @@ export function EchoRadar({
   targetLat,
   targetLng,
   hint,
-  color = '#ffcc00',
+  color = DEFAULT_MISSION_LAYER_COLOR,
 }: EchoRadarProps) {
   const [heading, setHeading] = useState<number | null>(null)
   const [compassError, setCompassError] = useState<string | null>(null)
