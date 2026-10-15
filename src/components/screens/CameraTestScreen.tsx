@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import type { EngineMission } from '../../api/engineApi'
 import { getMissionQrPayload } from '../../api/engineApi'
+import type { Screen } from '../../types/game'
 import { useCameraStream } from '../../hooks/useCameraStream'
 import { useActiveMission } from '../../hooks/useActiveMission'
 import { MissionTimer } from '../MissionTimer'
@@ -15,6 +16,7 @@ interface CameraTestScreenProps {
   onExpireMission: (
     missionId: string,
   ) => Promise<{ ok: boolean; error?: string }>
+  onScreenChange: (screen: Screen) => void
 }
 
 // Радиус, до которого куб виден и активен (в метрах).
@@ -65,6 +67,7 @@ export function CameraTestScreen({
   missions,
   geoPosition,
   onExpireMission,
+  onScreenChange,
 }: CameraTestScreenProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const { stream, status, error } = useCameraStream()
@@ -298,6 +301,13 @@ export function CameraTestScreen({
   const isNear = distanceM !== null && distanceM <= VISIBLE_RANGE_M
   const isCentered = deltaDeg !== null && Math.abs(deltaDeg) < 15
 
+  // Тап по кубу открывает мини-игру cipher (только для миссий типа cipher).
+  const handleCubeTap = () => {
+    if (!isNear || !isCentered) return
+    if (!mission || mission.missionType !== 'cipher') return
+    onScreenChange('cipher')
+  }
+
   return (
     <section className="camera-test-screen">
       <div className="camera-video-area">
@@ -330,7 +340,12 @@ export function CameraTestScreen({
 
         {status === 'ready' && isNear && qrPayload && (
           <div
-            className={`ar-cube-world${isCentered ? ' is-centered' : ''}`}
+            className={`ar-cube-world${isCentered ? ' is-centered' : ''}${
+              isNear && isCentered && mission?.missionType === 'cipher'
+                ? ' is-tappable'
+                : ''
+            }`}
+            onClick={handleCubeTap}
             style={{
               left: `${leftPercent}%`,
               transform: `translate(-50%, -50%) scale(${scale})`,

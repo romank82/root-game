@@ -14,6 +14,7 @@ import { ShopScreen } from './components/screens/ShopScreen'
 import { MapScreen } from './components/screens/MapScreen'
 // TEMP: dev-only camera test screen — удалить в Sprint 8.6.g.
 import { CameraTestScreen } from './components/screens/CameraTestScreen'
+import { CipherScreen } from './components/screens/CipherScreen'
 
 function App() {
   const {
@@ -149,6 +150,16 @@ function App() {
         <CameraTestScreen
           missions={missions}
           geoPosition={geoPosition}
+          onScreenChange={setScreen}
+          onExpireMission={expireMission}
+        />
+      )}
+
+      {screen === 'cipher' && (
+        <CipherScreen
+          missions={missions}
+          onScreenChange={setScreen}
+          onSubmitMission={submitMission}
           onExpireMission={expireMission}
         />
       )}
