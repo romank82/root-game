@@ -1891,7 +1891,7 @@ h2 {
 
 .ar-cube-world.is-centered {
   /* лёгкое свечение-ориентир; яркий сигнал — у .is-tappable */
-  filter: drop-shadow(0 0 8px rgba(0, 255, 136, 0.35));
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--cube-color, #00ff88) 35%, transparent));
 }
 
 .ar-cube-3d {
@@ -1906,17 +1906,17 @@ h2 {
   position: absolute;
   width: 100%;
   height: 100%;
-  border: 1px solid #00ff88;
-  background: rgba(0, 255, 136, 0.15);
-  box-shadow: inset 0 0 15px rgba(0, 255, 136, 0.35);
+  border: 1px solid var(--cube-color, #00ff88);
+  background: color-mix(in srgb, var(--cube-color, #00ff88) 15%, transparent);
+  box-shadow: inset 0 0 15px color-mix(in srgb, var(--cube-color, #00ff88) 35%, transparent);
   box-sizing: border-box;
 }
 
 .ar-cube-world.is-tappable .ar-cube-3d-face {
-  border-color: #7dffc8;
-  box-shadow: 0 0 12px rgba(0, 255, 136, 0.9),
-              inset 0 0 20px rgba(0, 255, 136, 0.6);
-  background: rgba(0, 255, 136, 0.25);
+  border-color: var(--cube-color, #00ff88);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--cube-color, #00ff88) 90%, transparent),
+              inset 0 0 20px color-mix(in srgb, var(--cube-color, #00ff88) 60%, transparent);
+  background: color-mix(in srgb, var(--cube-color, #00ff88) 25%, transparent);
 }
 
 .ar-cube-3d-front  { transform: rotateY(0deg)   translateZ(calc(min(22vmin, 110px) / 2)); }
@@ -2461,18 +2461,18 @@ h2 {
   cursor: pointer;
   pointer-events: auto;
   /* заметное свечение — сильнее, чем у .is-centered */
-  filter: drop-shadow(0 0 20px rgba(0, 255, 136, 1))
-          drop-shadow(0 0 40px rgba(0, 255, 136, 0.7));
+  filter: drop-shadow(0 0 20px var(--cube-color, #00ff88))
+          drop-shadow(0 0 40px color-mix(in srgb, var(--cube-color, #00ff88) 70%, transparent));
   animation: ar-cube-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes ar-cube-pulse {
   0%, 100% {
-    filter: drop-shadow(0 0 16px rgba(0, 255, 136, 0.85))
-            drop-shadow(0 0 32px rgba(0, 255, 136, 0.5));
+    filter: drop-shadow(0 0 16px color-mix(in srgb, var(--cube-color, #00ff88) 85%, transparent))
+            drop-shadow(0 0 32px color-mix(in srgb, var(--cube-color, #00ff88) 50%, transparent));
   }
   50% {
-    filter: drop-shadow(0 0 28px rgba(0, 255, 136, 1))
-            drop-shadow(0 0 56px rgba(0, 255, 136, 0.9));
+    filter: drop-shadow(0 0 28px var(--cube-color, #00ff88))
+            drop-shadow(0 0 56px color-mix(in srgb, var(--cube-color, #00ff88) 90%, transparent));
   }
 }

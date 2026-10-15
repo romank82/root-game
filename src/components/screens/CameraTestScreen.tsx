@@ -2,12 +2,13 @@
 // Единый AR-режим: камера + куб, позиционированный по компасу и GPS.
 // QR удалён в Sprint 8.13 (контент мини-игры берётся из bootstrap миссии).
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { EngineMission } from '../../api/engineApi'
 import type { Screen } from '../../types/game'
 import { useCameraStream } from '../../hooks/useCameraStream'
 import { useActiveMission } from '../../hooks/useActiveMission'
 import { MissionTimer } from '../MissionTimer'
+import { getMissionLayerColor } from '../../constants/missionLayerColors'
 
 interface CameraTestScreenProps {
   missions: EngineMission[]
@@ -275,6 +276,9 @@ export function CameraTestScreen({
   const isNear = distanceM !== null && distanceM <= VISIBLE_RANGE_M
   const isCentered = deltaDeg !== null && Math.abs(deltaDeg) < 15
 
+  // Цвет рёбер куба по слою миссии (story/team/solo) — единый источник правды.
+  const cubeColor = getMissionLayerColor(mission?.missionLayer)
+
   // Тап по кубу открывает мини-игру cipher (только для миссий типа cipher).
   const handleCubeTap = () => {
     if (!isNear || !isCentered) return
@@ -320,10 +324,13 @@ export function CameraTestScreen({
                 : ''
             }`}
             onClick={handleCubeTap}
-            style={{
-              left: `${leftPercent}%`,
-              transform: `translate(-50%, -50%) scale(${scale})`,
-            }}
+            style={
+              {
+                '--cube-color': cubeColor,
+                left: `${leftPercent}%`,
+                transform: `translate(-50%, -50%) scale(${scale})`,
+              } as CSSProperties
+            }
           >
             <div className="ar-cube-3d">
               <div className="ar-cube-3d-face ar-cube-3d-front" />
