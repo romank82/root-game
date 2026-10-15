@@ -2295,9 +2295,22 @@ function AdminApp() {
               <select
                 value={form.missionType}
                 disabled={!canWrite}
-                onChange={(event) =>
-                  setForm({ ...form, missionType: event.target.value })
-                }
+                onChange={(event) => {
+                  const nextType = event.target.value
+                  // Авто-выбор validator под тип миссии. Админ может
+                  // переопределить вручную после, но дефолт согласован с типом.
+                  const defaultValidator =
+                    nextType === 'code_repair'
+                      ? 'ordered_blocks_match'
+                      : nextType === 'cipher'
+                        ? 'cipher_match'
+                        : 'normalized_text_match'
+                  setForm({
+                    ...form,
+                    missionType: nextType,
+                    validationValidator: defaultValidator,
+                  })
+                }}
               >
                 <option value="text_answer">
                   text_answer — текстовый ответ
