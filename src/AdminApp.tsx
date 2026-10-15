@@ -277,12 +277,14 @@ function formFromMission(mission: AdminMission): MissionForm {
     contentInputPlaceholder: uiEntry('inputPlaceholder'),
     contentSuccessTitle: uiEntry('successTitle'),
     contentSuccessText: uiEntry('successText'),
-    contentInstruction: isCodeRepair ? uiEntry('instruction') : '',
+    contentInstruction:
+      isCodeRepair || isCipher ? uiEntry('instruction') : '',
     contentBlocks:
       isCodeRepair && cleanBlocks.length > 0 ? cleanBlocks : [''],
     contentLineNumber: isCodeRepair ? uiEntry('lineNumber') : '',
     contentPlaceholder: isCodeRepair ? uiEntry('placeholder') : '',
-    contentWrongAnswerText: isCodeRepair ? uiEntry('wrongAnswerText') : '',
+    contentWrongAnswerText:
+      isCodeRepair || isCipher ? uiEntry('wrongAnswerText') : '',
     contentDrumCount:
       isCipher && ui.drumCount !== undefined ? String(ui.drumCount) : '4',
     contentAlphabet: isCipher ? cleanCipherAlphabet : cipherAlphabetFallback,

@@ -74,9 +74,10 @@ export function TerminalScreen({
   }, [missions])
 
   // Ordering and player-visible status come from authenticated bootstrap.
-  // This screen only renders public text-answer presentation data.
+  // Показываем в Контуре все миссии, кроме team (у team отдельный флоу).
+  // Sprint 8.13: раньше фильтр был === 'text_answer' и отсекал cipher/code_repair.
   const textMissions = missions.filter(
-    (mission) => mission.missionType === 'text_answer',
+    (mission) => mission.missionType !== 'team',
   )
 
   // Активные (в основном списке): всё, кроме завершённых и одноразовых провалов.
