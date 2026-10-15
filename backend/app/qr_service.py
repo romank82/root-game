@@ -1,4 +1,9 @@
 """
+DEPRECATED (Sprint 8.13, 2026-10-15): не используется в solo-flow.
+Контент мини-игры берётся из bootstrap миссии (mission.content).
+Оставлен для team-flow и возможного физического QR в будущем.
+Спецификация: docs/minigame-cipher.md, раздел 8.
+
 Генерация подписанных QR-payload для миссий (Sprint 8.6.c).
 
 Игрок в статусе in_progress получает payload + HMAC-подпись. QR рисуется

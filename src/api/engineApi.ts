@@ -310,6 +310,11 @@ export async function expireEngineMission(
   return response.json() as Promise<EngineExpireMissionResponse>
 }
 
+/**
+ * @deprecated Sprint 8.13: не используется в solo-flow.
+ * Контент мини-игры берётся из mission.content (bootstrap).
+ * Оставлено для team-flow / будущего применения.
+ */
 export async function getMissionQrPayload(
   missionId: string,
 ): Promise<EngineMissionQrPayload> {
@@ -325,6 +330,11 @@ export async function getMissionQrPayload(
   return response.json() as Promise<EngineMissionQrPayload>
 }
 
+/**
+ * @deprecated Sprint 8.13: не используется в solo-flow.
+ * Контент мини-игры берётся из mission.content (bootstrap).
+ * Оставлено для team-flow / будущего применения.
+ */
 export async function scanMissionQr(
   missionId: string,
   payloadAndHmac: string,

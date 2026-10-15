@@ -485,6 +485,7 @@ def get_engine_mission_qr_payload(
     mission_id: str,
     player_id: str = Depends(get_current_player_id),
 ):
+    """DEPRECATED (Sprint 8.13): не используется в solo-flow."""
     try:
         return get_mission_qr_payload(
             player_id=player_id,
@@ -508,6 +509,7 @@ def scan_qr_route(
     payload: ScanQrPayload,
     player_id: str = Depends(get_current_player_id),
 ):
+    """DEPRECATED (Sprint 8.13): не используется в solo-flow."""
     try:
         return process_qr_scan(
             player_id,
