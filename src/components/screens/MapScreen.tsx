@@ -4,12 +4,7 @@ import type { Map as LeafletMap } from 'leaflet'
 import type { EngineMission } from '../../api/engineApi'
 import 'leaflet/dist/leaflet.css'
 import { useActiveMission } from '../../hooks/useActiveMission'
-
-const LAYER_COLORS: Record<string, string> = {
-  solo: '#ffcc00',
-  team: '#4da6ff',
-  story: '#ff5c5c',
-}
+import { getMissionLayerColor } from '../../constants/missionLayerColors'
 
 // Приближение, когда знаем позицию игрока.
 const FOCUS_ZOOM = 16
@@ -95,8 +90,8 @@ export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
             center={[activeMission.spawn.latitude, activeMission.spawn.longitude]}
             radius={activeMission.spawn.zoneRadiusMeters ?? 50}
             pathOptions={{
-              color: LAYER_COLORS[activeMission.missionLayer] ?? '#ffcc00',
-              fillColor: LAYER_COLORS[activeMission.missionLayer] ?? '#ffcc00',
+              color: getMissionLayerColor(activeMission.missionLayer),
+              fillColor: getMissionLayerColor(activeMission.missionLayer),
               fillOpacity: 0.5,
               weight: 3,
             }}

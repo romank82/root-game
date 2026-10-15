@@ -12,12 +12,7 @@ import {
 import { EchoRadar } from '../EchoRadar'
 import { MissionTimer } from '../MissionTimer'
 import { useActiveMission, type MissionLayer } from '../../hooks/useActiveMission'
-
-const LAYER_COLORS: Record<'solo' | 'team' | 'story', string> = {
-  solo: '#ffcc00',
-  team: '#4da6ff',
-  story: '#ff5c5c',
-}
+import { MISSION_LAYER_COLORS } from '../../constants/missionLayerColors'
 
 type SegmentContent = {
   code: string
@@ -275,7 +270,7 @@ export function ScannerScreen({
               targetLat={spawnMission.spawn!.latitude}
               targetLng={spawnMission.spawn!.longitude}
               hint="Идите по радару. Когда приблизитесь — откройте камеру."
-              color={LAYER_COLORS[selectedLayer]}
+              color={MISSION_LAYER_COLORS[selectedLayer]}
             />
             <button
               className="ar-start-button"

@@ -7,6 +7,10 @@ import type { ApiStatus, Screen } from '../../types/game'
 import { Sidebar } from '../Sidebar'
 import { CooldownCountdown } from '../CooldownCountdown'
 import { missionText } from '../../utils/missionHelpers'
+import {
+  MISSION_LAYER_COLORS,
+  MISSION_LAYER_ORDER as LAYER_ORDER,
+} from '../../constants/missionLayerColors'
 
 interface TerminalScreenProps {
   echo: number
@@ -95,16 +99,10 @@ export function TerminalScreen({
   )
 
   // Группировка активных миссий по слоям.
-  const LAYER_ORDER = ['story', 'team', 'solo'] as const
   const LAYER_LABEL: Record<typeof LAYER_ORDER[number], string> = {
     story: 'СЮЖЕТНЫЕ',
     team: 'КОМАНДНЫЕ',
     solo: 'ИНДИВИДУАЛЬНЫЕ',
-  }
-  const LAYER_COLOR: Record<typeof LAYER_ORDER[number], string> = {
-    story: '#ff5c5c',
-    team: '#4da6ff',
-    solo: '#ffcc00',
   }
   const missionsByLayer = {
     story: activeMissions.filter((m) => m.missionLayer === 'story'),
@@ -330,7 +328,7 @@ export function TerminalScreen({
                 <button
                   type="button"
                   className={`layer-folder-toggle${isOpen ? ' is-open' : ''}${isEmpty ? ' is-empty' : ''}`}
-                  style={{ color: LAYER_COLOR[layer] }}
+                  style={{ color: MISSION_LAYER_COLORS[layer] }}
                   onClick={() => setOpenLayer(layer)}
                 >
                   <span className="layer-folder-icon">{isOpen ? '📂' : '📁'}</span>
@@ -341,7 +339,7 @@ export function TerminalScreen({
                 {isOpen && (
                   <div
                     className="layer-folder-body"
-                    style={{ borderLeftColor: LAYER_COLOR[layer] }}
+                    style={{ borderLeftColor: MISSION_LAYER_COLORS[layer] }}
                   >
                     {isEmpty ? (
                       <p className="layer-empty">Пока пусто</p>
