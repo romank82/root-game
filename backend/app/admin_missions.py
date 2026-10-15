@@ -421,6 +421,24 @@ def _validate_for_publish(
     else:
         validator = mission.validation_config.get("validator")
 
+        # Проверка совместимости mission_type ↔ validator.
+        # См. Sprint 8.13 (fix): без этой проверки можно опубликовать
+        # cipher с normalized_text_match, и миссия станет нерешаемой.
+        expected_validator_by_type = {
+            "text_answer": "normalized_text_match",
+            "code_repair": "ordered_blocks_match",
+            "cipher": "cipher_match",
+        }
+        expected_validator = expected_validator_by_type.get(mission.mission_type)
+        if expected_validator is not None and validator != expected_validator:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Миссия типа {mission.mission_type} требует validator="
+                    f"{expected_validator}, получено: {validator or 'не задан'}."
+                ),
+            )
+
         if validator == "normalized_text_match":
             accepted_answers = mission.validation_config.get("acceptedAnswers")
             if (

@@ -116,6 +116,21 @@ def valid_cipher_validation_config() -> dict:
     }
 
 
+def valid_code_repair_content() -> dict:
+    return {
+        "schemaVersion": 1,
+        "ui": {
+            "label": "CODE REPAIR",
+            "instruction": "Arrange public blocks.",
+            "blocks": ["packet.", "signature", "return "],
+            "maxBlocks": 3,
+            "lineNumber": "017",
+            "placeholder": "Select blocks",
+            "wrongAnswerText": "Try again.",
+        },
+    }
+
+
 class AdminPublicContentValidationTests(unittest.TestCase):
     def test_accepts_valid_mission_content(self) -> None:
         _validate_public_mission_content("text_answer", valid_mission_content())
@@ -231,6 +246,34 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             id="mission-test",
         )
 
+    @staticmethod
+    def _text_answer_mission(validation_config: dict) -> SimpleNamespace:
+        return SimpleNamespace(
+            mission_type="text_answer",
+            mission_layer="solo",
+            content=valid_mission_content(),
+            validation_config=validation_config,
+            chapter_id="chapter-test",
+            story_node_id=None,
+            geo_zone_id="zone-test",
+            ar_object_id="ar-test",
+            id="mission-test",
+        )
+
+    @staticmethod
+    def _code_repair_mission(validation_config: dict) -> SimpleNamespace:
+        return SimpleNamespace(
+            mission_type="code_repair",
+            mission_layer="solo",
+            content=valid_code_repair_content(),
+            validation_config=validation_config,
+            chapter_id="chapter-test",
+            story_node_id=None,
+            geo_zone_id="zone-test",
+            ar_object_id="ar-test",
+            id="mission-test",
+        )
+
     def test_publish_validation_accepts_cipher_configuration(self) -> None:
         mission = self._cipher_mission(valid_cipher_validation_config())
         session = SimpleNamespace(
@@ -319,6 +362,68 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             "Для validator=cipher_match требуется непустой "
             "список validation_config.correctCombination.",
         )
+
+    def test_publish_rejects_cipher_with_wrong_validator(self) -> None:
+        mission = self._cipher_mission(
+            {"validator": "normalized_text_match", "acceptedAnswers": ["test"]}
+        )
+        session = SimpleNamespace()
+
+        with patch("app.admin_missions._validate_references"):
+            with self.assertRaises(HTTPException) as captured:
+                _validate_for_publish(session, mission)
+
+        self.assertEqual(captured.exception.status_code, 422)
+        self.assertIn("cipher_match", captured.exception.detail)
+
+    def test_publish_rejects_code_repair_with_wrong_validator(self) -> None:
+        mission = self._code_repair_mission(
+            {"validator": "normalized_text_match", "acceptedAnswers": ["test"]}
+        )
+        session = SimpleNamespace()
+
+        with patch("app.admin_missions._validate_references"):
+            with self.assertRaises(HTTPException) as captured:
+                _validate_for_publish(session, mission)
+
+        self.assertEqual(captured.exception.status_code, 422)
+        self.assertIn("ordered_blocks_match", captured.exception.detail)
+
+    def test_publish_rejects_text_answer_with_wrong_validator(self) -> None:
+        mission = self._text_answer_mission(
+            {"validator": "cipher_match", "correctCombination": ["R"]}
+        )
+        session = SimpleNamespace()
+
+        with patch("app.admin_missions._validate_references"):
+            with self.assertRaises(HTTPException) as captured:
+                _validate_for_publish(session, mission)
+
+        self.assertEqual(captured.exception.status_code, 422)
+        self.assertIn("normalized_text_match", captured.exception.detail)
+
+    def test_publish_accepts_text_answer_with_normalized_text_match(self) -> None:
+        mission = self._text_answer_mission(
+            {"validator": "normalized_text_match", "acceptedAnswers": ["16"]}
+        )
+        session = SimpleNamespace(
+            scalars=lambda _statement: SimpleNamespace(all=lambda: []),
+        )
+
+        with (
+            patch("app.admin_missions._validate_references") as validate_references,
+            patch("app.admin_missions._validate_rewards") as validate_rewards,
+        ):
+            _validate_for_publish(session, mission)
+
+        validate_references.assert_called_once_with(
+            session,
+            chapter_id="chapter-test",
+            story_node_id=None,
+            geo_zone_id="zone-test",
+            ar_object_id="ar-test",
+        )
+        validate_rewards.assert_called_once_with(session, [])
 
     def test_accepts_valid_segment_content(self) -> None:
         _validate_public_segment_content(valid_segment_content())
