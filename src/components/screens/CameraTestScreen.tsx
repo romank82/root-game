@@ -1,10 +1,9 @@
 // TEMP: dev-only AR camera — удалить в Sprint 8.6.j.
-// Единый AR-режим: камера + куб с QR, позиционированный по компасу и GPS.
+// Единый AR-режим: камера + куб, позиционированный по компасу и GPS.
+// QR удалён в Sprint 8.13 (контент мини-игры берётся из bootstrap миссии).
 
 import { useEffect, useRef, useState } from 'react'
-import { QRCodeSVG } from 'qrcode.react'
 import type { EngineMission } from '../../api/engineApi'
-import { getMissionQrPayload } from '../../api/engineApi'
 import type { Screen } from '../../types/game'
 import { useCameraStream } from '../../hooks/useCameraStream'
 import { useActiveMission } from '../../hooks/useActiveMission'
@@ -73,10 +72,6 @@ export function CameraTestScreen({
   const { stream, status, error } = useCameraStream()
 
   const [heading, setHeading] = useState<number | null>(null)
-  const [qrPayload, setQrPayload] = useState<{
-    payload: string
-    hmac: string
-  } | null>(null)
 
   // Единый выбор активной миссии: ближайшая in_progress со spawn.
   const mission = useActiveMission(missions, geoPosition)
@@ -188,27 +183,6 @@ export function CameraTestScreen({
       )
     }
   }, [])
-
-  // Загрузка QR-payload один раз при готовности камеры.
-  useEffect(() => {
-    if (status !== 'ready') return
-    if (!mission) return
-    let cancelled = false
-    async function load() {
-      try {
-        const data = await getMissionQrPayload(mission!.id)
-        if (cancelled) return
-        setQrPayload({ payload: data.payload, hmac: data.hmac })
-      } catch {
-        // Тихо: QR не готов — куб просто не покажется.
-      }
-    }
-    setQrPayload(null)
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [status, mission?.id])
 
   // Сброс anchor и сглаживания при смене миссии — иначе куб «застрянет» с прошлого.
   useEffect(() => {
@@ -338,7 +312,7 @@ export function CameraTestScreen({
           </div>
         )}
 
-        {status === 'ready' && isNear && qrPayload && (
+        {status === 'ready' && isNear && (
           <div
             className={`ar-cube-world${isCentered ? ' is-centered' : ''}${
               isNear && isCentered && mission?.missionType === 'cipher'
@@ -352,26 +326,8 @@ export function CameraTestScreen({
             }}
           >
             <div className="ar-cube-3d">
-              <div className="ar-cube-3d-face ar-cube-3d-front">
-                <QRCodeSVG
-                  value={`${qrPayload.payload}.${qrPayload.hmac}`}
-                  size={120}
-                  bgColor="#000000"
-                  fgColor="#00ff88"
-                  level="M"
-                  style={{ width: '100%', height: '100%' }}
-                />
-              </div>
-              <div className="ar-cube-3d-face ar-cube-3d-back">
-                <QRCodeSVG
-                  value={`${qrPayload.payload}.${qrPayload.hmac}`}
-                  size={120}
-                  bgColor="#000000"
-                  fgColor="#00ff88"
-                  level="M"
-                  style={{ width: '100%', height: '100%' }}
-                />
-              </div>
+              <div className="ar-cube-3d-face ar-cube-3d-front" />
+              <div className="ar-cube-3d-face ar-cube-3d-back" />
               <div className="ar-cube-3d-face ar-cube-3d-right" />
               <div className="ar-cube-3d-face ar-cube-3d-left" />
               <div className="ar-cube-3d-face ar-cube-3d-top" />
