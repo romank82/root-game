@@ -403,6 +403,32 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 )
             )
 
+    def _attach_geo_zone(self, ids: dict[str, str]) -> None:
+        """Настроить target-миссии геозону, чтобы accept_mission прошёл."""
+        from app.models import GeoZone, Mission
+
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            zone_id = f"zone-{uuid.uuid4().hex}"
+            session.add(
+                GeoZone(
+                    id=zone_id,
+                    slug=f"zone-{uuid.uuid4().hex}",
+                    title="Fixture geo zone",
+                    description="Accept fixture geo zone",
+                    zone_type="radius",
+                    status="published",
+                    sort_order=1,
+                    latitude=55.751244,
+                    longitude=37.618423,
+                    radius_meters=500,
+                    search_radius_meters=1500,
+                    location_constraints={},
+                )
+            )
+            mission.geo_zone_id = zone_id
+
     def _unlock(self, ids: dict[str, str]) -> dict:
         """Пройти prerequisite-миссию, чтобы target стал available."""
         result = self.mission_engine.submit_mission(
@@ -639,7 +665,8 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
             self.assertIsNotNone(player_mission)
             self.assertEqual(player_mission.successful_completions, 1)
-            # Debit создан до инкремента successful_completions → _entry_0.
+            # accept не вызывался (submit напрямую) → entry_count=0 → _entry_0.
+            self.assertEqual(player_mission.entry_count, 0)
             entry_reference_id = f"{player_mission.id}_entry_0"
 
             debits = session.scalars(
@@ -802,7 +829,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
 
         # Sprint 8.14 (fix): охранник идемпотентности теперь per-run.
         # Прямой повторный вызов consume в рамках одного захода
-        # (successful_completions ещё 0) не создаёт второй debit — тот же
+        # (entry_count=0, accept не вызывался) не создаёт второй debit — тот же
         # reference_id "<pm.id>_entry_0".
         with self.SessionLocal.begin() as session:
             mission = session.get(Mission, ids["target"])
@@ -814,6 +841,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
             self.assertIsNotNone(player_mission)
             self.assertEqual(player_mission.successful_completions, 0)
+            self.assertEqual(player_mission.entry_count, 0)
             entry_reference_id = f"{player_mission.id}_entry_0"
             self.mission_engine._consume_entry_resources(
                 session,
@@ -1102,7 +1130,8 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             # ROOT списан и не восстановлен: 50 - 5 = 45.
             self.assertEqual(wallet.available_balance, 45)
 
-            # Sprint 8.14 (fix): entry-дебит per-run (успехов ещё не было).
+            # Sprint 8.14 (fix): entry-дебит per-run (entry_count=0,
+            # submit без accept) → "_entry_0".
             player_mission = session.scalar(
                 select(PlayerMission).where(
                     PlayerMission.player_id == ids["player"],
@@ -1112,6 +1141,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self.assertEqual(player_mission.status, "in_progress")
             self.assertEqual(player_mission.attempt_count, 1)
             self.assertEqual(player_mission.successful_completions, 0)
+            self.assertEqual(player_mission.entry_count, 0)
             entry_reference_id = f"{player_mission.id}_entry_0"
 
             # Debit-проводка входа осталась, не отменена и ровно одна.
@@ -1194,8 +1224,8 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             wallet = session.scalar(
                 select(Wallet).where(Wallet.player_id == ids["player"])
             )
-            # Sprint 8.14 (fix): обе попытки — один заход (успехов ещё нет),
-            # entry-дебит один на тот же per-run reference_id.
+            # Sprint 8.14 (fix): обе попытки — один заход (entry_count=0,
+            # submit без accept), entry-дебит один на тот же "_entry_0".
             player_mission = session.scalar(
                 select(PlayerMission).where(
                     PlayerMission.player_id == ids["player"],
@@ -1205,6 +1235,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self.assertEqual(player_mission.status, "in_progress")
             self.assertEqual(player_mission.attempt_count, 2)
             self.assertEqual(player_mission.successful_completions, 0)
+            self.assertEqual(player_mission.entry_count, 0)
             entry_reference_id = f"{player_mission.id}_entry_0"
 
             # Вторая провальная попытка не списывает повторно.
@@ -1318,7 +1349,8 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 )
             )
             self.assertIsNotNone(player_mission)
-            # Sprint 8.14 (fix): entry-дебит per-run (успехов ещё не было).
+            # Sprint 8.14 (fix): entry-дебит per-run (entry_count=0,
+            # submit без accept) → "_entry_0".
             entry_reference_id = f"{player_mission.id}_entry_0"
 
         def assert_immutable(sql: str, params: dict[str, str]) -> None:
@@ -1374,8 +1406,9 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
 
 
-    def test_entry_debit_per_run(self) -> None:
-        """Sprint 8.14 (fix): повторный заход списывает entry заново per-run."""
+    def test_entry_debit_after_success(self) -> None:
+        """Sprint 8.14 (fix): после успеха entry_count=1; после сброса в
+        available повторный accept (entry_count=2) списывает entry заново."""
         from app.geo_team_runtime_models import InventoryEvent
         from app.models import PlayerItem, PlayerMission, Wallet, WalletTransaction
 
@@ -1387,9 +1420,17 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             entry_root_atomic=5,
             required_items=[(ids["item"], 1)],
         )
+        self._attach_geo_zone(ids)
         self._unlock(ids)
 
-        # Первый заход: entry списывается с reference_id "<pm.id>_entry_0".
+        # Первый заход: accept → entry_count=1 → submit списывает "_entry_1".
+        accepted = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", accepted)
         first = self.mission_engine.submit_mission(
             ids["player"],
             ids["target"],
@@ -1399,7 +1440,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         self.assertTrue(first["accepted"])
 
         # Сброс в available — временный суррогат шага 5 (after_terminal):
-        # attempt_count=0, successful_completions НЕ трогаем.
+        # attempt_count=0, successful_completions и entry_count НЕ трогаем.
         with self.SessionLocal.begin() as session:
             player_mission = session.scalar(
                 select(PlayerMission).where(
@@ -1409,10 +1450,21 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
             self.assertIsNotNone(player_mission)
             self.assertEqual(player_mission.successful_completions, 1)
+            self.assertEqual(player_mission.entry_count, 1)
             player_mission.status = "available"
             player_mission.attempt_count = 0
+            player_mission.started_at = None
+            player_mission.completed_at = None
+            player_mission.progress = {}
 
-        # Второй заход: entry списывается заново с reference_id "_entry_1".
+        # Второй заход: accept → entry_count=2 → submit списывает "_entry_2".
+        accepted = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", accepted)
         second = self.mission_engine.submit_mission(
             ids["player"],
             ids["target"],
@@ -1431,9 +1483,10 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
             self.assertIsNotNone(player_mission)
             self.assertEqual(player_mission.successful_completions, 2)
+            self.assertEqual(player_mission.entry_count, 2)
 
-            first_entry_reference = f"{player_mission.id}_entry_0"
-            second_entry_reference = f"{player_mission.id}_entry_1"
+            first_entry_reference = f"{player_mission.id}_entry_1"
+            second_entry_reference = f"{player_mission.id}_entry_2"
             entry_references = {
                 first_entry_reference,
                 second_entry_reference,
@@ -1502,7 +1555,17 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             entry_root_atomic=5,
             required_items=[(ids["item"], 1)],
         )
+        self._attach_geo_zone(ids)
         self._unlock(ids)
+
+        # Accept: начало захода → entry_count=1.
+        accepted = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", accepted)
 
         # Провальная попытка: entry списан, заход остаётся in_progress.
         rejected = self.mission_engine.submit_mission(
@@ -1513,7 +1576,8 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         )
         self.assertFalse(rejected["accepted"])
 
-        # Retry того же захода: consume вызывается с тем же reference_id.
+        # Retry того же захода: consume вызывается с тем же reference_id
+        # "_entry_1" (entry_count при submit-rety не инкрементируется).
         accepted = self.mission_engine.submit_mission(
             ids["player"],
             ids["target"],
@@ -1531,7 +1595,10 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
             self.assertIsNotNone(player_mission)
             self.assertEqual(player_mission.successful_completions, 1)
-            entry_reference_id = f"{player_mission.id}_entry_0"
+            # attempt_count вырос (retry), но entry_count тот же → один debit.
+            self.assertEqual(player_mission.entry_count, 1)
+            self.assertEqual(player_mission.attempt_count, 2)
+            entry_reference_id = f"{player_mission.id}_entry_1"
 
             wallet = session.scalar(
                 select(Wallet).where(Wallet.player_id == ids["player"])
@@ -1571,6 +1638,190 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
             self.assertIsNotNone(item)
             self.assertEqual(item.quantity, 3)
+
+
+    def test_entry_debit_per_new_accept(self) -> None:
+        """Sprint 8.14 (fix): заход ПОСЛЕ ПРОВАЛА (expire → cooldown →
+        available) снова списывает entry: заход 1 → "_entry_1", заход 2 →
+        "_entry_2". Идемпотентный повторный accept НЕ инкрементирует."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import (
+            Mission,
+            PlayerItem,
+            PlayerMission,
+            Wallet,
+            WalletTransaction,
+        )
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._attach_geo_zone(ids)
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            mission.reentry_cooldown_seconds = 300
+        self._unlock(ids)
+
+        # Первый accept → entry_count=1. Идемпотентный повторный accept
+        # (in_progress + spawn уже есть) НЕ инкрементирует entry_count.
+        first_accept = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", first_accept)
+        repeated_accept = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", repeated_accept)
+
+        # Провал захода: 3 неверные попытки → 4-я блокируется (max_attempts=3)
+        # → expired + available_again_at (cooldown 300).
+        for _ in range(3):
+            rejected = self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="wrong_answer",
+                sequence=None,
+            )
+            self.assertFalse(rejected["accepted"])
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as error:
+            self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="wrong_answer",
+                sequence=None,
+            )
+        self.assertEqual(error.exception.status_code, 409)
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "expired")
+            self.assertEqual(player_mission.entry_count, 1)
+            self.assertIsNotNone(player_mission.available_again_at)
+
+        # Кулдаун прошёл: сдвигаем available_again_at в прошлое; следующий
+        # accept через _synchronize_player_missions вернёт миссию в available.
+        with self.SessionLocal.begin() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.available_again_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None)
+                - timedelta(seconds=1)
+            )
+
+        # Второй accept ПОСЛЕ провала → entry_count=2 → submit списывает
+        # "_entry_2" (другой reference_id — новый заход).
+        second_accept = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", second_accept)
+        completed = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(completed["accepted"])
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "completed")
+            self.assertEqual(player_mission.entry_count, 2)
+            # attempt_count сброшен при возврате из cooldown → 1 успешная
+            # попытка во втором заходе.
+            self.assertEqual(player_mission.attempt_count, 1)
+
+            first_entry_reference = f"{player_mission.id}_entry_1"
+            second_entry_reference = f"{player_mission.id}_entry_2"
+            entry_references = {
+                first_entry_reference,
+                second_entry_reference,
+            }
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            # 50 - 5 (вход захода 1) - 5 (вход захода 2) + 15 (награда) = 55.
+            self.assertEqual(wallet.available_balance, 55)
+
+            # Ровно два debit с разными per-run reference_id.
+            debits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type
+                    == "mission_entry_debit",
+                    WalletTransaction.reference_id.in_(entry_references),
+                )
+            ).all()
+            self.assertEqual(len(debits), 2)
+            self.assertEqual(
+                {debit.reference_id for debit in debits},
+                entry_references,
+            )
+            self.assertEqual(
+                {debit.amount for debit in debits},
+                {5},
+            )
+
+            # Ключи: 2 (seed) - 1 (вход захода 1) - 1 (вход захода 2)
+            # + 2 (награда) = 2. Попытки 2-3 того же захода не списывали
+            # повторно (тот же reference_id → unique index).
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(item)
+            self.assertEqual(item.quantity, 2)
+
+            # Два consumed-события — по одному на каждый заход.
+            entry_events = session.scalars(
+                select(InventoryEvent).where(
+                    InventoryEvent.reference_type == "mission_entry",
+                    InventoryEvent.reference_id.in_(entry_references),
+                )
+            ).all()
+            self.assertEqual(len(entry_events), 2)
+            self.assertEqual(
+                {event.reference_id for event in entry_events},
+                entry_references,
+            )
 
 
     def test_cipher_reward_per_run_reference_id(self) -> None:

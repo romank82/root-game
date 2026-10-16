@@ -1120,6 +1120,16 @@ class PlayerMission(TimestampMixin, Base):
         default=0,
         server_default=text("0"),
     )
+    # Sprint 8.14 (fix): монотонный счётчик заходов. Инкрементится при каждом
+    # НОВОМ accept (переходе из не-in_progress). Используется как per-run
+    # reference_id для списания entry ("<pm.id>_entry_<entry_count>"), чтобы
+    # после провала/кулдауна повторный заход списывался заново. Не сбрасывается.
+    entry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
 
     progress: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     started_at: Mapped[datetime | None] = mapped_column(

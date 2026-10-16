@@ -697,8 +697,9 @@ def _apply_entry_debit(
       reference_type=ENTRY_ITEM_REFERENCE_TYPE, reference_id=reference_id).
 
     reference_id:
-    - solo → "<player_mission.id>_entry_<successful_completions>" (per-run;
-      Sprint 8.14 fix: повторный заход списывает entry заново)
+    - solo → "<player_mission.id>_entry_<entry_count>" (per-run;
+      Sprint 8.14 fix: entry_count инкрементится на каждом новом accept,
+      поэтому после провала/успеха повторный заход списывает entry заново)
     - team → team_session.id
 
     Порядок: 1) баланс ROOT, 2) наличие/количество PlayerItem,
@@ -839,12 +840,12 @@ def _consume_entry_resources(
     root_debit = policy.entry_root_atomic
 
     # Sprint 8.14 (fix): per-run reference_id для entry, чтобы повторный заход
-    # списывал цену входа заново (unique index не блокировал). Счётчик
-    # successful_completions на момент входа = число уже завершённых проходов:
-    # первый заход → "<player_mission.id>_entry_0", второй → "_entry_1".
-    entry_reference_id = (
-        f"{player_mission.id}_entry_{player_mission.successful_completions}"
-    )
+    # списывал цену входа заново (unique index не блокировал). entry_count
+    # инкрементится при каждом НОВОМ accept (см. _accept_mission_once) →
+    # каждый заход (в т.ч. после провала → кулдауна) получает уникальный
+    # "<player_mission.id>_entry_<entry_count>". Внутри одного захода retry
+    # использует тот же reference_id → второй debit не создаётся.
+    entry_reference_id = f"{player_mission.id}_entry_{player_mission.entry_count}"
     _apply_entry_debit(
         session,
         player_id=player_id,
@@ -1094,6 +1095,15 @@ def _accept_mission_once(
                 mission, player_mission, existing_spawn
             )
 
+        # Sprint 8.14 (fix): entry списывается при КАЖДОМ новом заходе.
+        # Инкремент entry_count делаем только при переходе из НЕ-in_progress.
+        # Идемпотентный повторный accept (in_progress + spawn) уже отсечён
+        # early-return выше; was_in_progress — страховка на случай
+        # статуса in_progress без spawn в progress.
+        was_in_progress = player_mission.status == "in_progress" and (
+            progress.get("spawn") is not None
+        )
+
         # Правило: ≤1 активной миссии на слой (story/team/solo).
         # Проверяем, нет ли у игрока другой in_progress миссии того же layer.
         conflicting = session.scalars(
@@ -1159,6 +1169,12 @@ def _accept_mission_once(
                 player_mission.deadline_at = started + timedelta(
                     seconds=mission.execution_time_limit_seconds,
                 )
+        # Sprint 8.14 (fix): новый заход (НЕ идемпотентный повторный accept)
+        # инкрементирует entry_count → per-run reference_id входа
+        # "_entry_<entry_count>" будет уникальным для каждого взятия миссии.
+        if not was_in_progress:
+            player_mission.entry_count += 1
+
         player_mission.status = "in_progress"
 
         session.flush()
