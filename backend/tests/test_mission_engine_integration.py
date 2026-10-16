@@ -481,7 +481,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         )
 
     def test_reward_submit_is_atomic_and_duplicate_safe(self) -> None:
-        from app.models import PlayerItem, Wallet, WalletTransaction
+        from app.models import PlayerItem, PlayerMission, Wallet, WalletTransaction
 
         ids = self._fixture()
 
@@ -501,14 +501,23 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         self.assertFalse(rejected["accepted"])
 
         with self.SessionLocal() as session:
+            # Проверки изолированы по игроку фикстуры: disposable SQLite-БД
+            # общая на весь класс, поэтому глобальный count(...) задевал бы
+            # данные соседних тестов (порядко-зависимость).
             self.assertEqual(
                 session.scalar(
                     select(func.count(WalletTransaction.id))
+                    .join(Wallet, WalletTransaction.wallet_id == Wallet.id)
+                    .where(Wallet.player_id == ids["player"])
                 ),
                 0,
             )
             self.assertEqual(
-                session.scalar(select(func.count(PlayerItem.id))),
+                session.scalar(
+                    select(func.count(PlayerItem.id)).where(
+                        PlayerItem.player_id == ids["player"]
+                    )
+                ),
                 0,
             )
 
@@ -547,6 +556,17 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         )
 
         with self.SessionLocal() as session:
+            # Sprint 8.14 (шаг 2): solo-награда помечается per-run
+            # reference_id "<player_mission.id>_<successful_completions>".
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.successful_completions, 1)
+
             wallet = session.scalar(
                 select(Wallet).where(Wallet.player_id == ids["player"])
             )
@@ -557,7 +577,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 select(func.count(WalletTransaction.id)).where(
                     WalletTransaction.wallet_id == wallet.id,
                     WalletTransaction.reference_type == "mission_reward",
-                    WalletTransaction.reference_id == ids["target"],
+                    WalletTransaction.reference_id == f"{player_mission.id}_1",
                 )
             )
             self.assertEqual(transaction_count, 1)
@@ -1294,6 +1314,191 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 ),
                 1,
             )
+
+
+    def test_cipher_reward_per_run_reference_id(self) -> None:
+        """Sprint 8.14 (шаг 2): первый успех помечает награду "<pm.id>_1"."""
+        from app.models import PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["unlock"],
+            answer="unlock",
+            sequence=None,
+        )
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+        self.assertFalse(accepted["alreadyCompleted"])
+        self.assertEqual(accepted["awarded"]["root"], 15)
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.successful_completions, 1)
+
+            run_reference_id = f"{player_mission.id}_1"
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            self.assertEqual(wallet.available_balance, 15)
+
+            credits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_reward",
+                    WalletTransaction.reference_id == run_reference_id,
+                )
+            ).all()
+            self.assertEqual(len(credits), 1)
+            self.assertEqual(credits[0].transaction_type, "credit")
+            self.assertEqual(credits[0].amount, 15)
+
+    def test_cipher_second_run_creates_new_transaction(self) -> None:
+        """Sprint 8.14 (шаг 2): второй проход — новый reference_id "<pm.id>_2"."""
+        from app.models import PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["unlock"],
+            answer="unlock",
+            sequence=None,
+        )
+
+        first = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertEqual(first["awarded"]["root"], 15)
+
+        # Новый run: статус сбрасывается в available (after_terminal-поведение
+        # появится на шаге 5), накопленный счётчик проходов НЕ обнуляется.
+        with self.SessionLocal.begin() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.successful_completions, 1)
+            player_mission.status = "available"
+
+        second = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(second["accepted"])
+        self.assertFalse(second["alreadyCompleted"])
+        self.assertEqual(second["awarded"]["root"], 15)
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.successful_completions, 2)
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            self.assertEqual(wallet.available_balance, 30)
+
+            run_reference_ids = {f"{player_mission.id}_1", f"{player_mission.id}_2"}
+            transactions = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_reward",
+                    WalletTransaction.reference_id.in_(run_reference_ids),
+                )
+            ).all()
+            self.assertEqual(len(transactions), 2)
+            self.assertEqual(
+                {transaction.reference_id for transaction in transactions},
+                run_reference_ids,
+            )
+
+    def test_cipher_same_run_idempotent(self) -> None:
+        """Sprint 8.14 (шаг 2): retry того же прохода не создаёт вторую награду."""
+        from app.models import PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["unlock"],
+            answer="unlock",
+            sequence=None,
+        )
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertEqual(accepted["awarded"]["root"], 15)
+
+        # Симуляция retry: повторный submit уже завершённого прохода.
+        retry = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(retry["accepted"])
+        self.assertTrue(retry["alreadyCompleted"])
+        self.assertEqual(
+            retry["awarded"],
+            {"root": 0, "items": [], "storyNodeIds": []},
+        )
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            # Счётчик не инкрементирован повторно — reference_id тот же.
+            self.assertEqual(player_mission.successful_completions, 1)
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            self.assertEqual(wallet.available_balance, 15)
+
+            transaction_count = session.scalar(
+                select(func.count(WalletTransaction.id)).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_reward",
+                    WalletTransaction.reference_id == f"{player_mission.id}_1",
+                )
+            )
+            self.assertEqual(transaction_count, 1)
 
 
 class CipherMatchValidatorUnitTests(unittest.TestCase):

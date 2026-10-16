@@ -903,7 +903,20 @@ def _submit_mission_once(
         player_mission.status = "completed"
         player_mission.completed_at = _utcnow()
 
-        awarded = _award_mission_rewards(session, player_id, mission)
+        # Sprint 8.14 (шаг 2): per-run награда для solo.
+        # Счётчик успешных проходов инкрементируется до награды, чтобы
+        # reference_id включал его. Уникальный индекс (wallet_id,
+        # reference_type, reference_id) гарантирует идемпотентность
+        # повторного submit одной и той же попытки.
+        player_mission.successful_completions += 1
+        run_reference_id = f"{player_mission.id}_{player_mission.successful_completions}"
+
+        awarded = _award_mission_rewards(
+            session,
+            player_id,
+            mission,
+            reference_id=run_reference_id,
+        )
 
         return {
             "accepted": True,
