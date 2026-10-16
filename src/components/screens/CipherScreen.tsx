@@ -201,11 +201,16 @@ export function CipherScreen({
     setTimeLeft(active.timeLimitSeconds)
   }, [mission?.id])
 
-  // Обратный отсчёт. timeLeft === 0 → провал.
+  // Обратный отсчёт. timeLeft <= 0 → провал.
   useEffect(() => {
     if (timeLeft === null || timedOut) return
     if (timeLeft <= 0) {
       setTimedOut(true)
+      // Sprint 8.14 (fix): сообщаем серверу о тайм-ауте, чтобы
+      // миссия ушла в expired + available_again_at.
+      if (mission) {
+        void onExpireMission(mission.id)
+      }
       return
     }
     const id = setInterval(
@@ -213,7 +218,7 @@ export function CipherScreen({
       1000,
     )
     return () => clearInterval(id)
-  }, [timeLeft, timedOut])
+  }, [timeLeft, timedOut, mission?.id, onExpireMission])
 
   function stepDrum(drumIndex: number, direction: -1 | 1) {
     setDrums((current) =>
@@ -261,6 +266,11 @@ export function CipherScreen({
     }
     if (!response.accepted) {
       setError(response.message ?? content?.wrongAnswerText ?? 'НЕВЕРНО, ПОПРОБУЙ ЕЩЁ')
+      // Sprint 8.14 (fix): новая попытка — свежий таймер мини-игры.
+      if (content?.timeLimitSeconds != null) {
+        setTimeLeft(content.timeLimitSeconds)
+      }
+      setTimedOut(false)
       return
     }
 
