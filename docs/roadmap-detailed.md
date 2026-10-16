@@ -523,7 +523,7 @@
 
 ---
 
-## Этап 8. Гео-AR пайплайн — ⚠️ в работе (8.6 Content UX закрыт 2026-10-14)
+## Этап 8. Гео-AR пайплайн — ⚠️ в работе (8.6 Content UX закрыт 2026-10-14; 8.13 Cipher закрыт 2026-10-16; 8.14 Multi-run в работе)
 
 Базовая механика игры: игрок берёт задание → на карте появляется зона → идёт к ней → сканер показывает направление → камера + AR-куб с QR → мини-игра. Миссии без гео-AR пайплайна игроку не выдаются. Работаем вертикальными срезами: каждый спринт = БД + API + admin UI + client UI + проверка.
 
@@ -622,6 +622,48 @@
 - **Статус**: ⚠️ частично — прототип работает (accept → spawn → радар → AR-куб с QR → scan-qr), но мини-игра и награды после QR не запускаются.
 - Полный путь: взял миссию → GPS → зона → скенер → AR → QR → мини-игра.
 - **Проверка:** игрок проходит одну миссию от начала до конца на реальной карте.
+
+### Спринт 8.13. Cipher (drum-lock мини-игра) — ✅ закрыт (2026-10-16)
+
+- **Статус**: ✅ закрыт (2026-10-16).
+- Спецификация: docs/minigame-cipher.md.
+- Backend: content_contract (schema cipher), mission_engine (cipher_match), admin_missions (publish-валидация).
+- Admin UI: форма cipher + авто-переключение валидатора при смене mission_type.
+- Frontend: CipherScreen (drum-lock), интеграция в App.tsx, тап по кубу.
+- QR: frontend удалён, backend помечен deprecated (qr_service.py).
+- CSS: CipherScreen + .is-tappable.
+- TerminalScreen: фильтр !== 'team' (пропускает cipher).
+- Единый модуль цветов слоёв: src/constants/missionLayerColors.ts.
+- Цвет куба от слоя (через CSS-переменную --cube-color).
+- Унификация цветов в TerminalScreen, MapScreen, ScannerScreen, EchoRadar.
+- Тесты: 547 OK (было 519 на 2026-10-14).
+
+### Спринт 8.14. Multi-run миссии (повторное прохождение) ⚠️ в работе
+
+- **Статус**: ⚠️ в работе (план — docs/sprint-8.14-plan.md).
+- **8.14.1** ✅ PlayerMission.successful_completions (миграция d77ea4701199).
+- **8.14.2** ✅ per-run reference_id для solo-наград.
+- **8.14.3** ✅ max_attempts enforcement (409 + expired).
+- **8.14.4** ✅ attemptMultipliers (подключён scaled_attempt_multipliers, убран хардкод).
+- **8.14.5** ⏳ after_terminal для solo — миссия не возвращается в available после completed.
+- **8.14.6** ⏳ Timer per-attempt (attempt_deadline_seconds).
+- **8.14.7** ⏳ Инвариант status ↔ attempt_count.
+- **Известный баг**: entry debit (mission_entry_debit) использует reference_id=mission.id (не per-run) — при повторном заходе debit не создаётся (unique index). Требует reference_id = f"{player_mission.id}_entry_{N}". Не исправлено.
+
+### Спринт 8.15. Админ-форма UX — ❌ запланирован
+
+- **Статус**: ❌ запланирован.
+- Автозаполнение, справочники (Chapter, Story node, Slug, reward value JSON).
+- Блокировка невалидных значений (falseChoicesPerDrum > 10).
+- Проброс detail 422 в UI.
+- Правка контракта: правильная комбинация вводится дважды (cipher-блок + validation).
+- Алфавит символов — генерировать автоматически.
+
+### Спринт 8.16. Fallback per-key цена + offer_id из миссии — ❌ запланирован
+
+- **Статус**: ❌ запланирован.
+- Per-key цена fallback-магазина (сейчас только глобальная shop.fallback.default_price_root).
+- Fallback offer_id — брать из миссии, а не из глобальной настройки.
 
 ### Спринт 8.6 — Content UX (закрыт 2026-10-14)
 

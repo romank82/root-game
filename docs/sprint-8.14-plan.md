@@ -152,15 +152,15 @@ reference_id`).
 
 ## Порядок работ
 
-1. План (этот документ) — обновление.
-2. Миграция: `PlayerMission.successful_completions`.
-3. Per-run `reference_id` + инкремент `successful_completions`.
-4. `max_attempts` enforcement.
-5. `attemptMultipliers` подключение + убрать хардкод.
-6. `after_terminal` для solo (sync).
-7. Timer per-attempt.
-8. Инвариант `status ↔ attempt_count`.
-9. Обновление docs: roadmap + audit.
+1. План (этот документ) — обновление. ✅
+2. Миграция: `PlayerMission.successful_completions`. ✅
+3. Per-run `reference_id` + инкремент `successful_completions`. ✅
+4. `max_attempts` enforcement. ✅
+5. `attemptMultipliers` подключение + убрать хардкод. ✅
+6. `after_terminal` для solo (sync). ⏳
+7. Timer per-attempt. ⏳
+8. Инвариант `status ↔ attempt_count`. ⏳
+9. Обновление docs: roadmap + audit. ✅ (этот шаг)
 
 ## Принятые решения
 
@@ -173,3 +173,15 @@ reference_id`).
 - LocationProof в solo (Sprint 8.5).
 - UI админки для multi-attempt policy (отдельно, если понадобится).
 
+## Известный баг (требует фикса)
+
+**Entry debit не per-run:** _apply_entry_debit использует reference_id=mission.id.
+При повторном заходе debit не создаётся (unique index).
+Решение: reference_id = f"{player_mission.id}_entry_{successful_completions}".
+Статус: не исправлено.
+
+## Открытые долги
+
+- Per-key цена fallback.
+- Fallback offer_id из миссии.
+- UX админ-формы.
