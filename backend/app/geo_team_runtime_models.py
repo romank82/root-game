@@ -112,7 +112,6 @@ class MissionRuntimePolicy(RuntimeTimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     entry_root_atomic: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
-    attempt_deadline_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     repeatability_policy: Mapped[str] = mapped_column(String(64), nullable=False)
     required_items_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     challenge_policy_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
@@ -141,10 +140,6 @@ class MissionRuntimePolicy(RuntimeTimestampMixin, Base):
         CheckConstraint(
             "max_attempts >= 1",
             name="ck_mission_runtime_policies_max_attempts_positive",
-        ),
-        CheckConstraint(
-            "attempt_deadline_seconds >= 1",
-            name="ck_mission_runtime_policies_deadline_positive",
         ),
         Index(
             "uq_mission_runtime_policies_one_published_per_mission",
