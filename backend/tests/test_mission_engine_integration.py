@@ -333,6 +333,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         entry_root_atomic: int = 0,
         required_items: list[tuple[str, int]] | None = None,
         reward_policy_json: dict | None = None,
+        repeatability_policy: str = "one_time",
     ) -> None:
         """Создать published policy напрямую через SQLAlchemy (без admin API)."""
         from app.geo_team_runtime_models import MissionRuntimePolicy
@@ -347,7 +348,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                     entry_root_atomic=entry_root_atomic,
                     max_attempts=3,
                     attempt_deadline_seconds=600,
-                    repeatability_policy="one_time",
+                    repeatability_policy=repeatability_policy,
                     required_items_json={
                         "schemaVersion": 1,
                         "items": [
@@ -1823,6 +1824,162 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 entry_references,
             )
 
+
+    def test_zz_after_terminal_completed_to_available_no_cooldown(self) -> None:
+        """Sprint 8.14 (шаг 5): after_terminal + cooldown=0 → completed сразу в available."""
+        from app.models import PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], repeatability_policy="after_terminal")
+        self._unlock(ids)
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "available")
+            self.assertEqual(player_mission.attempt_count, 0)
+            # entry_count и successful_completions НЕ сбрасываются —
+            # они накопительные (для reference_id).
+            self.assertEqual(player_mission.successful_completions, 1)
+            self.assertEqual(player_mission.entry_count, 0)
+            self.assertIsNone(player_mission.available_again_at)
+            self.assertIsNone(player_mission.completed_at)
+            self.assertIsNone(player_mission.started_at)
+            self.assertEqual(player_mission.progress, {})
+
+    def test_zz_after_terminal_completed_to_available_with_cooldown(self) -> None:
+        """Sprint 8.14 (шаг 5): after_terminal + cooldown=300 → ждём cooldown,
+        затем sync возвращает в available."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import Mission, PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], repeatability_policy="after_terminal")
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            mission.reentry_cooldown_seconds = 300
+        self._unlock(ids)
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+
+        # Первый sync: completed → ставим available_again_at=completed_at+300,
+        # статус остаётся completed (ещё в cooldown).
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "completed")
+            self.assertIsNotNone(player_mission.available_again_at)
+            self.assertIsNotNone(player_mission.completed_at)
+            self.assertEqual(player_mission.successful_completions, 1)
+            self.assertEqual(player_mission.entry_count, 0)
+
+        # Перемотка cooldown в прошлое → следующий sync возвращает available.
+        with self.SessionLocal.begin() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.available_again_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None)
+                - timedelta(seconds=1)
+            )
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "available")
+            self.assertEqual(player_mission.attempt_count, 0)
+            self.assertIsNone(player_mission.available_again_at)
+            self.assertIsNone(player_mission.completed_at)
+            self.assertEqual(player_mission.successful_completions, 1)
+            self.assertEqual(player_mission.entry_count, 0)
+
+    def test_zz_once_policy_stays_completed(self) -> None:
+        """Sprint 8.14 (шаг 5): one_time → после completed остаётся completed."""
+        from app.models import PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], repeatability_policy="one_time")
+        self._unlock(ids)
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "completed")
+            self.assertEqual(player_mission.successful_completions, 1)
+            self.assertEqual(player_mission.entry_count, 0)
+
+    def test_zz_no_policy_stays_completed(self) -> None:
+        """Sprint 8.14 (шаг 5): legacy без policy → после completed остаётся completed."""
+        from app.models import PlayerMission
+
+        ids = self._fixture()
+        # Без _seed_policy — published policy отсутствует (legacy-миссия).
+        self._unlock(ids)
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "completed")
+            self.assertEqual(player_mission.successful_completions, 1)
+            self.assertEqual(player_mission.entry_count, 0)
 
     def test_cipher_reward_per_run_reference_id(self) -> None:
         """Sprint 8.14 (шаг 2): первый успех помечает награду "<pm.id>_1"."""

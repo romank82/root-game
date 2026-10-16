@@ -178,14 +178,48 @@ def _synchronize_player_missions(
             session.add(player_mission)
             progress[mission.id] = player_mission
 
-        # Терминальные статусы движок не трогает: cancelled — admin-only
-        # terminal, синхронизация не имеет права «реактивировать» отмену.
-        if player_mission.status in {"completed", "cancelled"}:
+        now = _utcnow()
+
+        # Терминальные статусы: cancelled — admin-only terminal, синхронизация
+        # не имеет права «реактивировать» отмену.
+        if player_mission.status == "cancelled":
+            continue
+
+        if player_mission.status == "completed":
+            # Sprint 8.14 (шаг 5): after_terminal для solo. Читаем
+            # repeatability_policy из published runtime policy.
+            policy = _get_published_runtime_policy(session, mission.id)
+            if policy is None:
+                continue  # legacy без policy — остаётся completed
+            if policy.repeatability_policy != "after_terminal":
+                # one_time / after_failure_only — после успеха остаётся completed.
+                continue
+            # Условие возврата в available:
+            # - если reentry_cooldown_seconds > 0: только после
+            #   available_again_at (или сейчас, если не задан).
+            # - если cooldown == 0: сразу available.
+            if mission.reentry_cooldown_seconds > 0:
+                if player_mission.available_again_at is None:
+                    # Первый вход в sync после completed — ставим available_again_at.
+                    player_mission.available_again_at = (
+                        (player_mission.completed_at or now)
+                        + timedelta(seconds=mission.reentry_cooldown_seconds)
+                    )
+                if ensure_utc(player_mission.available_again_at) > now:
+                    continue  # ещё в cooldown
+            # Cooldown прошёл (или его нет) — переводим в available.
+            player_mission.status = "available"
+            player_mission.started_at = None
+            player_mission.completed_at = None
+            player_mission.available_again_at = None
+            player_mission.attempt_count = 0
+            player_mission.progress = {}
+            # entry_count и successful_completions НЕ сбрасываем —
+            # они накопительные (для reference_id).
             continue
 
         # Авто-expire: если deadline истёк, перевести в 'expired'.
         # Если у миссии есть cooldown > 0 — заполняем available_again_at.
-        now = _utcnow()
         if (
             player_mission.status == "in_progress"
             and player_mission.deadline_at is not None
