@@ -1833,6 +1833,254 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
 
 
+    def test_zz_4_1_8_accept_consumes_entry(self) -> None:
+        """test_accept_consumes_entry: Sprint 8.14 (fix): entry списывается
+        при accept («взял миссию → заплатил»), а не при первом submit.
+        reference_id = "_entry_1"."""
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import PlayerItem, PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._attach_geo_zone(ids)
+        self._unlock(ids)
+
+        accepted = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", accepted)
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            # ROOT списан уже на accept: 50 - 5 = 45 (награды ещё нет).
+            self.assertEqual(wallet.available_balance, 45)
+
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "in_progress")
+            self.assertEqual(player_mission.entry_count, 1)
+            entry_reference_id = f"{player_mission.id}_entry_1"
+
+            debits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_entry_debit",
+                    WalletTransaction.reference_id == entry_reference_id,
+                )
+            ).all()
+            self.assertEqual(len(debits), 1)
+            self.assertEqual(debits[0].amount, 5)
+            self.assertEqual(debits[0].transaction_type, "debit")
+            self.assertEqual(debits[0].balance_after, 45)
+
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(item)
+            # 2 (seed) - 1 (списано на accept) = 1.
+            self.assertEqual(item.quantity, 1)
+
+            events = session.scalars(
+                select(InventoryEvent).where(
+                    InventoryEvent.reference_type == "mission_entry",
+                    InventoryEvent.reference_id == entry_reference_id,
+                )
+            ).all()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].event_type, "consumed")
+            self.assertEqual(events[0].quantity_delta, -1)
+
+    def test_zz_4_1_9_accept_idempotent_no_double_entry(self) -> None:
+        """test_accept_idempotent_no_double_entry: Sprint 8.14 (fix):
+        идемпотентный повторный accept (in_progress + spawn уже есть)
+        НЕ списывает entry повторно."""
+        from app.models import PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._attach_geo_zone(ids)
+        self._unlock(ids)
+
+        first = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", first)
+        repeated = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", repeated)
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.entry_count, 1)
+            entry_reference_id = f"{player_mission.id}_entry_1"
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            # Один заход — один вход: 50 - 5 = 45.
+            self.assertEqual(wallet.available_balance, 45)
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.wallet_id == wallet.id,
+                        WalletTransaction.reference_type
+                        == "mission_entry_debit",
+                        WalletTransaction.reference_id == entry_reference_id,
+                    )
+                ),
+                1,
+            )
+
+    def test_zz_4_1_10_accept_insufficient_balance_409(self) -> None:
+        """test_accept_insufficient_balance_409: Sprint 8.14 (fix): accept при
+        недостатке ROOT → 409, транзакция accept откатывается целиком:
+        spawn не сохранён, entry_count=0."""
+        from app.models import PlayerMission, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], entry_root_atomic=30)
+        self._attach_geo_zone(ids)
+        self._unlock(ids)  # создаёт кошелёк с балансом 0
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as error:
+            self.mission_engine.accept_mission(
+                ids["player"],
+                ids["target"],
+                latitude=55.751244,
+                longitude=37.618423,
+            )
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(
+            error.exception.detail,
+            "Недостаточно ROOT для взятия миссии.",
+        )
+
+        with self.SessionLocal() as session:
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.reference_type
+                        == "mission_entry_debit",
+                        WalletTransaction.reference_id == ids["target"],
+                    )
+                ),
+                0,
+            )
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            # Откат accept: spawn не сохранён, статус/счётчики прежние.
+            self.assertEqual(player_mission.status, "available")
+            self.assertEqual(player_mission.entry_count, 0)
+            self.assertIsNone((player_mission.progress or {}).get("spawn"))
+
+        bootstrap = self.mission_engine.get_bootstrap(ids["player"])
+        self.assertEqual(
+            self._mission_by_id(bootstrap, ids["target"])["status"],
+            "available",
+        )
+        self.assertEqual(bootstrap["wallet"]["availableBalance"], 0)
+
+    def test_zz_4_1_11_submit_without_accept_legacy_fallback_charges_entry(
+        self,
+    ) -> None:
+        """test_submit_without_accept_legacy_fallback_charges_entry:
+        Sprint 8.14 (fix): выбран legacy-fallback — прямой submit без accept
+        (entry_count == 0) всё ещё списывает entry ("_entry_0"), чтобы
+        платную миссию нельзя было завершить бесплатно."""
+        from app.models import PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        result = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(result["accepted"])
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            # 50 - 5 (fallback entry) + 15 (reward) = 60.
+            self.assertEqual(wallet.available_balance, 60)
+
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.entry_count, 0)
+            entry_reference_id = f"{player_mission.id}_entry_0"
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.wallet_id == wallet.id,
+                        WalletTransaction.reference_type
+                        == "mission_entry_debit",
+                        WalletTransaction.reference_id == entry_reference_id,
+                    )
+                ),
+                1,
+            )
+
     def test_zz_after_terminal_completed_to_available_no_cooldown(self) -> None:
         """Sprint 8.14 (шаг 5): after_terminal + cooldown=0 → completed сразу в available."""
         from app.models import PlayerMission

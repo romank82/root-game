@@ -995,10 +995,15 @@ def _submit_mission_once(
 
         player_mission.status = "in_progress"
 
-        # Шаг 4.1: списание ROOT-взноса и расходуемых ключей при взятии миссии.
-        # До валидации ответа: «вход» оплачивается независимо от исхода попытки.
+        # Sprint 8.14 (fix): штатное списание entry перенесено в
+        # _accept_mission_once («взял миссию → заплатил»). Здесь остаётся
+        # только legacy-fallback: если заход НЕ открывался через accept
+        # (entry_count == 0), вход списывается при submit — чтобы прямой
+        # submit без accept не позволял завершить платную миссию бесплатно.
+        # После accept entry_count >= 1 → повторного списания нет.
         # Любая нехватка ресурсов/недоступный ключ → 409 и полный откат.
-        _consume_entry_resources(session, player_id, mission, player_mission)
+        if player_mission.entry_count == 0:
+            _consume_entry_resources(session, player_id, mission, player_mission)
 
         if not _validate_submission(mission, answer, sequence):
             # Шаг 4.3a: первый неверный ответ → персональный fallback-entitlement.
@@ -1224,6 +1229,17 @@ def _accept_mission_once(
         # "_entry_<entry_count>" будет уникальным для каждого взятия миссии.
         if not was_in_progress:
             player_mission.entry_count += 1
+
+        # Sprint 8.14 (fix): штатное списание entry (ROOT-взнос + расходуемые
+        # ключи) выполняется ПРИ ВЗЯТИИ миссии — «взял миссию → заплатил».
+        # Идемпотентный повторный accept (in_progress + spawn) отсечён
+        # early-return выше, поэтому сюда попадаем только с уже
+        # инкрементированным entry_count → reference_id
+        # "<player_mission.id>_entry_<entry_count>" уникален для захода.
+        # Нехватка ресурсов/недоступный ключ → MissionEngineError: транзакция
+        # accept откатывается целиком (spawn не сохраняется, entry_count и
+        # статус миссии остаются прежними).
+        _consume_entry_resources(session, player_id, mission, player_mission)
 
         player_mission.status = "in_progress"
 
