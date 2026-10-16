@@ -170,6 +170,8 @@ export function CipherScreen({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successAward, setSuccessAward] = useState<string | null>(null)
+  const [successTitle, setSuccessTitle] = useState<string | null>(null)
+  const [successText, setSuccessText] = useState<string | null>(null)
   const [timedOut, setTimedOut] = useState(false)
 
   // Единый выбор активной миссии (ближайшая in_progress со spawn)
@@ -192,6 +194,8 @@ export function CipherScreen({
     setDrums(next ?? [])
     setError(null)
     setSuccessAward(null)
+    setSuccessTitle(null)
+    setSuccessText(null)
     setSubmitting(false)
     setTimedOut(false)
     setTimeLeft(active.timeLimitSeconds)
@@ -261,6 +265,9 @@ export function CipherScreen({
     }
 
     setSuccessAward(formatAwarded(response))
+    // Запоминаем тексты из content ДО того, как mission станет null
+    setSuccessTitle(content?.successTitle ?? null)
+    setSuccessText(content?.successText ?? null)
   }
 
   // 1. Сначала — финальные состояния (успех, тайм-аут).
@@ -272,9 +279,9 @@ export function CipherScreen({
         <section className="mission-success-card">
           <span className="file-label">ЗАМОК ОТКРЫТ</span>
           <div className="mission-success-symbol">✓</div>
-          <h3>{content?.successTitle ?? 'Комбинация принята'}</h3>
+          <h3>{successTitle ?? 'Комбинация принята'}</h3>
           <p>
-            {content?.successText ?? 'Прогресс и награды подтверждены сервером.'}
+            {successText ?? 'Прогресс и награды подтверждены сервером.'}
           </p>
           <div className="mission-reward-grid">
             <div>
