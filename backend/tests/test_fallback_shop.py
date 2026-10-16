@@ -415,7 +415,6 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                     status="published",
                     entry_root_atomic=entry_root_atomic,
                     max_attempts=3,
-                    attempt_deadline_seconds=600,
                     repeatability_policy="one_time",
                     required_items_json={
                         "schemaVersion": 1,

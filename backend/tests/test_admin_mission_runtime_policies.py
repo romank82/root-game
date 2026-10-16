@@ -54,7 +54,6 @@ def _policy_dict(**overrides):
         "mission_id": "mission-1",
         "entry_root_atomic": 0,
         "max_attempts": 3,
-        "attempt_deadline_seconds": 300,
         "repeatability_policy": "after_failure_only",
         "required_items_json": {
             "schemaVersion": 1,
@@ -127,18 +126,6 @@ class MissionRuntimePolicySchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             AdminMissionRuntimePolicyCreatePayload(**_policy_dict(max_attempts=11))
 
-    def test_create_payload_zero_deadline_rejected(self):
-        with self.assertRaises(ValidationError):
-            AdminMissionRuntimePolicyCreatePayload(
-                **_policy_dict(attempt_deadline_seconds=0)
-            )
-
-    def test_create_payload_deadline_over_max_rejected(self):
-        with self.assertRaises(ValidationError):
-            AdminMissionRuntimePolicyCreatePayload(
-                **_policy_dict(attempt_deadline_seconds=86_401)
-            )
-
     def test_create_payload_requires_json_policies(self):
         data = _policy_dict()
         data.pop("reward_policy_json")
@@ -167,7 +154,6 @@ class ContractViaRouterValidationTests(unittest.TestCase):
                 mission_id=payload["mission_id"],
                 entry_root_atomic=payload["entry_root_atomic"],
                 max_attempts=payload["max_attempts"],
-                attempt_deadline_seconds=payload["attempt_deadline_seconds"],
                 repeatability_policy=payload["repeatability_policy"],
                 required_items_json=payload["required_items_json"],
                 challenge_policy_json=payload["challenge_policy_json"],
@@ -238,7 +224,6 @@ class PublishDependencyValidationTests(unittest.TestCase):
             mission_category="solo",
             entry_root_atomic=payload["entry_root_atomic"],
             max_attempts=payload["max_attempts"],
-            attempt_deadline_seconds=payload["attempt_deadline_seconds"],
             repeatability_policy=payload["repeatability_policy"],
             required_items_json=payload["required_items_json"],
             challenge_policy_json=payload["challenge_policy_json"],
@@ -274,7 +259,6 @@ class SerializationTests(unittest.TestCase):
             status="draft",
             entry_root_atomic=0,
             max_attempts=3,
-            attempt_deadline_seconds=300,
             repeatability_policy="after_failure_only",
             required_items_json={"schemaVersion": 1, "items": []},
             challenge_policy_json={"challengeType": "cipher"},
@@ -290,7 +274,6 @@ class SerializationTests(unittest.TestCase):
         self.assertEqual(serialized["missionId"], "mission-1")
         self.assertEqual(serialized["entryRootAtomic"], 0)
         self.assertEqual(serialized["version"], 2)
-        self.assertEqual(serialized["attemptDeadlineSeconds"], 300)
         self.assertEqual(serialized["createdAt"], "2026-10-06T12:00:00+00:00")
         self.assertEqual(serialized["updatedAt"], "2026-10-06T12:05:00+00:00")
 

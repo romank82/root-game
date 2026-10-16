@@ -356,7 +356,6 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                     status="published",
                     entry_root_atomic=entry_root_atomic,
                     max_attempts=3,
-                    attempt_deadline_seconds=600,
                     repeatability_policy=repeatability_policy,
                     required_items_json={
                         "schemaVersion": 1,

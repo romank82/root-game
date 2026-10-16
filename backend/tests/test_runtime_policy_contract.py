@@ -29,7 +29,6 @@ def _policy(**overrides):
         "mission_category": "solo",
         "entry_root_atomic": 0,
         "max_attempts": 3,
-        "attempt_deadline_seconds": 300,
         "repeatability_policy": "after_failure_only",
         "required_items_json": {
             "schemaVersion": 1,
@@ -100,8 +99,6 @@ class RuntimePolicyContractTests(unittest.TestCase):
                 "max_attempts": 10,
                 "reward_policy_json": _reward_policy([1.0] + [0.5] * 9),
             },
-            {"attempt_deadline_seconds": 1},
-            {"attempt_deadline_seconds": 86_400},
         )
         for overrides in accepted:
             with self.subTest(overrides=overrides):
@@ -115,8 +112,6 @@ class RuntimePolicyContractTests(unittest.TestCase):
             {"entry_root_atomic": True},
             {"max_attempts": 0},
             {"max_attempts": 11},
-            {"attempt_deadline_seconds": 0},
-            {"attempt_deadline_seconds": 86_401},
             {"repeatability_policy": "after_success"},
             {"repeatability_policy": "one-time"},
         )
