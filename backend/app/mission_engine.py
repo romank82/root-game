@@ -697,7 +697,8 @@ def _apply_entry_debit(
       reference_type=ENTRY_ITEM_REFERENCE_TYPE, reference_id=reference_id).
 
     reference_id:
-    - solo → mission.id
+    - solo → "<player_mission.id>_entry_<successful_completions>" (per-run;
+      Sprint 8.14 fix: повторный заход списывает entry заново)
     - team → team_session.id
 
     Порядок: 1) баланс ROOT, 2) наличие/количество PlayerItem,
@@ -837,13 +838,20 @@ def _consume_entry_resources(
     requirements = policy.required_items_json.get("items", [])
     root_debit = policy.entry_root_atomic
 
+    # Sprint 8.14 (fix): per-run reference_id для entry, чтобы повторный заход
+    # списывал цену входа заново (unique index не блокировал). Счётчик
+    # successful_completions на момент входа = число уже завершённых проходов:
+    # первый заход → "<player_mission.id>_entry_0", второй → "_entry_1".
+    entry_reference_id = (
+        f"{player_mission.id}_entry_{player_mission.successful_completions}"
+    )
     _apply_entry_debit(
         session,
         player_id=player_id,
         mission=mission,
         root_debit=root_debit,
         requirements=requirements,
-        reference_id=mission.id,
+        reference_id=entry_reference_id,
         mission_run_id=None,
     )
 

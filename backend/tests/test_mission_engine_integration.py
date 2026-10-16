@@ -602,7 +602,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
 
     def test_zz_4_1_1_success_consumes_root_and_key(self) -> None:
         from app.geo_team_runtime_models import InventoryEvent
-        from app.models import PlayerItem, Wallet, WalletTransaction
+        from app.models import PlayerItem, PlayerMission, Wallet, WalletTransaction
 
         ids = self._fixture()
         self._seed_root_wallet(ids["player"], 50)
@@ -630,12 +630,24 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             # 50 (seed) - 5 (entry) + 15 (reward) = 60.
             self.assertEqual(wallet.available_balance, 60)
 
+            # Sprint 8.14 (fix): entry-дебит теперь per-run reference_id.
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.successful_completions, 1)
+            # Debit создан до инкремента successful_completions → _entry_0.
+            entry_reference_id = f"{player_mission.id}_entry_0"
+
             debits = session.scalars(
                 select(WalletTransaction).where(
                     WalletTransaction.wallet_id == wallet.id,
                     WalletTransaction.reference_type
                     == "mission_entry_debit",
-                    WalletTransaction.reference_id == ids["target"],
+                    WalletTransaction.reference_id == entry_reference_id,
                 )
             ).all()
             self.assertEqual(len(debits), 1)
@@ -656,7 +668,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             events = session.scalars(
                 select(InventoryEvent).where(
                     InventoryEvent.reference_type == "mission_entry",
-                    InventoryEvent.reference_id == ids["target"],
+                    InventoryEvent.reference_id == entry_reference_id,
                 )
             ).all()
             self.assertEqual(len(events), 1)
@@ -788,6 +800,35 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         )
         self._unlock(ids)
 
+        # Sprint 8.14 (fix): охранник идемпотентности теперь per-run.
+        # Прямой повторный вызов consume в рамках одного захода
+        # (successful_completions ещё 0) не создаёт второй debit — тот же
+        # reference_id "<pm.id>_entry_0".
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.successful_completions, 0)
+            entry_reference_id = f"{player_mission.id}_entry_0"
+            self.mission_engine._consume_entry_resources(
+                session,
+                ids["player"],
+                mission,
+                player_mission,
+            )
+            self.mission_engine._consume_entry_resources(
+                session,
+                ids["player"],
+                mission,
+                player_mission,
+            )
+
+        # Первый реальный submit того же захода тоже не списывает повторно.
         first = self.mission_engine.submit_mission(
             ids["player"],
             ids["target"],
@@ -804,24 +845,6 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(second["alreadyCompleted"])
 
-        # Прямой повторный вызов consume в новой сессии — проверка охранника
-        # идемпотентности в самом механизме (не только через alreadyCompleted).
-        with self.SessionLocal() as session:
-            mission = session.get(Mission, ids["target"])
-            player_mission = session.scalar(
-                select(PlayerMission).where(
-                    PlayerMission.player_id == ids["player"],
-                    PlayerMission.mission_id == ids["target"],
-                )
-            )
-            self.mission_engine._consume_entry_resources(
-                session,
-                ids["player"],
-                mission,
-                player_mission,
-            )
-            session.flush()
-
         with self.SessionLocal() as session:
             wallet = session.scalar(
                 select(Wallet).where(Wallet.player_id == ids["player"])
@@ -831,7 +854,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                     WalletTransaction.wallet_id == wallet.id,
                     WalletTransaction.reference_type
                     == "mission_entry_debit",
-                    WalletTransaction.reference_id == ids["target"],
+                    WalletTransaction.reference_id == entry_reference_id,
                 )
             ).all()
             self.assertEqual(len(debits), 1)
@@ -839,7 +862,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             events = session.scalars(
                 select(InventoryEvent).where(
                     InventoryEvent.reference_type == "mission_entry",
-                    InventoryEvent.reference_id == ids["target"],
+                    InventoryEvent.reference_id == entry_reference_id,
                 )
             ).all()
             self.assertEqual(len(events), 1)
@@ -858,7 +881,13 @@ class MissionEngineIntegrationTests(unittest.TestCase):
 
     def test_zz_4_1_5_non_consumable_key_checked_but_not_spent(self) -> None:
         from app.geo_team_runtime_models import InventoryEvent
-        from app.models import KeyRules, PlayerItem, Wallet, WalletTransaction
+        from app.models import (
+            KeyRules,
+            PlayerItem,
+            PlayerMission,
+            Wallet,
+            WalletTransaction,
+        )
 
         ids = self._fixture()
         self._seed_root_wallet(ids["player"], 50)
@@ -892,12 +921,23 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
             # ROOT списан, ключ — нет: 50 - 5 + 15 = 60.
             self.assertEqual(wallet.available_balance, 60)
+
+            # Sprint 8.14 (fix): entry-дебит per-run reference_id.
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            entry_reference_id = f"{player_mission.id}_entry_0"
+
             self.assertEqual(
                 session.scalar(
                     select(func.count(WalletTransaction.id)).where(
                         WalletTransaction.reference_type
                         == "mission_entry_debit",
-                        WalletTransaction.reference_id == ids["target"],
+                        WalletTransaction.reference_id == entry_reference_id,
                     )
                 ),
                 1,
@@ -905,7 +945,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self.assertEqual(
                 session.scalar(
                     select(func.count(InventoryEvent.id)).where(
-                        InventoryEvent.reference_id == ids["target"]
+                        InventoryEvent.reference_id == entry_reference_id
                     )
                 ),
                 0,
@@ -1062,12 +1102,24 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             # ROOT списан и не восстановлен: 50 - 5 = 45.
             self.assertEqual(wallet.available_balance, 45)
 
+            # Sprint 8.14 (fix): entry-дебит per-run (успехов ещё не было).
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertEqual(player_mission.status, "in_progress")
+            self.assertEqual(player_mission.attempt_count, 1)
+            self.assertEqual(player_mission.successful_completions, 0)
+            entry_reference_id = f"{player_mission.id}_entry_0"
+
             # Debit-проводка входа осталась, не отменена и ровно одна.
             debits = session.scalars(
                 select(WalletTransaction).where(
                     WalletTransaction.wallet_id == wallet.id,
                     WalletTransaction.reference_type == "mission_entry_debit",
-                    WalletTransaction.reference_id == ids["target"],
+                    WalletTransaction.reference_id == entry_reference_id,
                 )
             ).all()
             self.assertEqual(len(debits), 1)
@@ -1081,7 +1133,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                     select(func.count(WalletTransaction.id)).where(
                         WalletTransaction.wallet_id == wallet.id,
                         WalletTransaction.reference_type == "mission_entry_debit",
-                        WalletTransaction.reference_id == ids["target"],
+                        WalletTransaction.reference_id == entry_reference_id,
                         WalletTransaction.transaction_type == "credit",
                     )
                 ),
@@ -1102,22 +1154,12 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 session.scalar(
                     select(func.count(InventoryEvent.id)).where(
                         InventoryEvent.reference_type == "mission_entry",
-                        InventoryEvent.reference_id == ids["target"],
+                        InventoryEvent.reference_id == entry_reference_id,
                         InventoryEvent.event_type.in_(["credited", "released"]),
                     )
                 ),
                 0,
             )
-
-            # «Провал» = некорректный ответ: статус in_progress, попытка учтена.
-            player_mission = session.scalar(
-                select(PlayerMission).where(
-                    PlayerMission.player_id == ids["player"],
-                    PlayerMission.mission_id == ids["target"],
-                )
-            )
-            self.assertEqual(player_mission.status, "in_progress")
-            self.assertEqual(player_mission.attempt_count, 1)
 
     def test_zz_4_2_2_second_failed_attempt_does_not_recharge(self) -> None:
         from app.geo_team_runtime_models import InventoryEvent
@@ -1152,6 +1194,19 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             wallet = session.scalar(
                 select(Wallet).where(Wallet.player_id == ids["player"])
             )
+            # Sprint 8.14 (fix): обе попытки — один заход (успехов ещё нет),
+            # entry-дебит один на тот же per-run reference_id.
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertEqual(player_mission.status, "in_progress")
+            self.assertEqual(player_mission.attempt_count, 2)
+            self.assertEqual(player_mission.successful_completions, 0)
+            entry_reference_id = f"{player_mission.id}_entry_0"
+
             # Вторая провальная попытка не списывает повторно.
             self.assertEqual(wallet.available_balance, 45)
             self.assertEqual(
@@ -1159,7 +1214,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                     select(func.count(WalletTransaction.id)).where(
                         WalletTransaction.wallet_id == wallet.id,
                         WalletTransaction.reference_type == "mission_entry_debit",
-                        WalletTransaction.reference_id == ids["target"],
+                        WalletTransaction.reference_id == entry_reference_id,
                     )
                 ),
                 1,
@@ -1168,7 +1223,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 session.scalar(
                     select(func.count(InventoryEvent.id)).where(
                         InventoryEvent.reference_type == "mission_entry",
-                        InventoryEvent.reference_id == ids["target"],
+                        InventoryEvent.reference_id == entry_reference_id,
                     )
                 ),
                 1,
@@ -1181,15 +1236,6 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 )
             )
             self.assertEqual(player_item.quantity, 1)
-
-            player_mission = session.scalar(
-                select(PlayerMission).where(
-                    PlayerMission.player_id == ids["player"],
-                    PlayerMission.mission_id == ids["target"],
-                )
-            )
-            self.assertEqual(player_mission.status, "in_progress")
-            self.assertEqual(player_mission.attempt_count, 2)
 
     def test_zz_4_2_3_no_release_or_credit_events_for_entry_reference(self) -> None:
         from app.geo_team_runtime_models import InventoryEvent
@@ -1246,7 +1292,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         from sqlalchemy import text
 
         from app.geo_team_runtime_models import InventoryEvent
-        from app.models import Wallet, WalletTransaction
+        from app.models import PlayerMission, Wallet, WalletTransaction
 
         ids = self._fixture()
         self._seed_root_wallet(ids["player"], 50)
@@ -1263,6 +1309,17 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             answer="wrong_answer",
             sequence=None,
         )
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            # Sprint 8.14 (fix): entry-дебит per-run (успехов ещё не было).
+            entry_reference_id = f"{player_mission.id}_entry_0"
 
         def assert_immutable(sql: str, params: dict[str, str]) -> None:
             # SQLite RAISE(ABORT) может прийти и как OperationalError,
@@ -1282,12 +1339,12 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         assert_immutable(
             "UPDATE wallet_transactions SET amount = 999 "
             "WHERE reference_type = :rt AND reference_id = :rid",
-            {"rt": "mission_entry_debit", "rid": ids["target"]},
+            {"rt": "mission_entry_debit", "rid": entry_reference_id},
         )
         assert_immutable(
             "DELETE FROM inventory_events "
             "WHERE reference_type = :rt AND reference_id = :rid",
-            {"rt": "mission_entry", "rid": ids["target"]},
+            {"rt": "mission_entry", "rid": entry_reference_id},
         )
 
         with self.SessionLocal() as session:
@@ -1298,7 +1355,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 select(WalletTransaction).where(
                     WalletTransaction.wallet_id == wallet.id,
                     WalletTransaction.reference_type == "mission_entry_debit",
-                    WalletTransaction.reference_id == ids["target"],
+                    WalletTransaction.reference_id == entry_reference_id,
                 )
             ).all()
             # UPDATE не прошёл: проводка на месте и не изменена.
@@ -1310,11 +1367,210 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 session.scalar(
                     select(func.count(InventoryEvent.id)).where(
                         InventoryEvent.reference_type == "mission_entry",
-                        InventoryEvent.reference_id == ids["target"],
+                        InventoryEvent.reference_id == entry_reference_id,
                     )
                 ),
                 1,
             )
+
+
+    def test_entry_debit_per_run(self) -> None:
+        """Sprint 8.14 (fix): повторный заход списывает entry заново per-run."""
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import PlayerItem, PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        # Первый заход: entry списывается с reference_id "<pm.id>_entry_0".
+        first = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(first["accepted"])
+
+        # Сброс в available — временный суррогат шага 5 (after_terminal):
+        # attempt_count=0, successful_completions НЕ трогаем.
+        with self.SessionLocal.begin() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.successful_completions, 1)
+            player_mission.status = "available"
+            player_mission.attempt_count = 0
+
+        # Второй заход: entry списывается заново с reference_id "_entry_1".
+        second = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(second["accepted"])
+        self.assertFalse(second["alreadyCompleted"])
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.successful_completions, 2)
+
+            first_entry_reference = f"{player_mission.id}_entry_0"
+            second_entry_reference = f"{player_mission.id}_entry_1"
+            entry_references = {
+                first_entry_reference,
+                second_entry_reference,
+            }
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            # 50 - 5 - 5 (два входа) + 15 + 15 (две награды) = 70.
+            self.assertEqual(wallet.available_balance, 70)
+
+            debits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type
+                    == "mission_entry_debit",
+                    WalletTransaction.reference_id.in_(entry_references),
+                )
+            ).all()
+            # Два debit с разными per-run reference_id.
+            self.assertEqual(len(debits), 2)
+            self.assertEqual(
+                {debit.reference_id for debit in debits},
+                entry_references,
+            )
+            self.assertEqual(
+                {debit.amount for debit in debits},
+                {5},
+            )
+
+            # Ключи списаны за оба захода: 2 - 1 - 1 + 2 + 2 = 4.
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(item)
+            self.assertEqual(item.quantity, 4)
+
+            # Два consumed-события с разными per-run reference_id.
+            entry_events = session.scalars(
+                select(InventoryEvent).where(
+                    InventoryEvent.reference_type == "mission_entry",
+                    InventoryEvent.reference_id.in_(entry_references),
+                )
+            ).all()
+            self.assertEqual(len(entry_events), 2)
+            self.assertEqual(
+                {event.reference_id for event in entry_events},
+                entry_references,
+            )
+
+
+    def test_entry_debit_idempotent_within_run(self) -> None:
+        """Sprint 8.14 (fix): retry в рамках захода не создаёт второй debit."""
+        from app.geo_team_runtime_models import InventoryEvent
+        from app.models import PlayerItem, PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 50)
+        self._seed_key(ids["player"], ids["item"], 2)
+        self._seed_policy(
+            ids["target"],
+            entry_root_atomic=5,
+            required_items=[(ids["item"], 1)],
+        )
+        self._unlock(ids)
+
+        # Провальная попытка: entry списан, заход остаётся in_progress.
+        rejected = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong",
+            sequence=None,
+        )
+        self.assertFalse(rejected["accepted"])
+
+        # Retry того же захода: consume вызывается с тем же reference_id.
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.successful_completions, 1)
+            entry_reference_id = f"{player_mission.id}_entry_0"
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            # 50 - 5 (единственный entry) + 15 (награда) = 60.
+            self.assertEqual(wallet.available_balance, 60)
+
+            # Ровно один debit и одно consumed-событие на reference_id захода.
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WalletTransaction.id)).where(
+                        WalletTransaction.wallet_id == wallet.id,
+                        WalletTransaction.reference_type
+                        == "mission_entry_debit",
+                        WalletTransaction.reference_id == entry_reference_id,
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(InventoryEvent.id)).where(
+                        InventoryEvent.reference_type == "mission_entry",
+                        InventoryEvent.reference_id == entry_reference_id,
+                    )
+                ),
+                1,
+            )
+
+            # Ключ списан один раз: 2 - 1 + 2 = 3.
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(item)
+            self.assertEqual(item.quantity, 3)
 
 
     def test_cipher_reward_per_run_reference_id(self) -> None:
