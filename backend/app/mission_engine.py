@@ -218,6 +218,22 @@ def _synchronize_player_missions(
             # они накопительные (для reference_id).
             continue
 
+        # Sprint 8.14 (шаг 7): инвариант status ↔ attempt_count.
+        # Если миссия в in_progress, но attempt_count >= max_attempts
+        # (из published policy) — переводим в expired (защита от рассинхрона).
+        if player_mission.status == "in_progress":
+            policy = _get_published_runtime_policy(session, mission.id)
+            if policy is not None and player_mission.attempt_count >= policy.max_attempts:
+                player_mission.status = "expired"
+                if mission.reentry_cooldown_seconds > 0:
+                    player_mission.available_again_at = (
+                        now + timedelta(seconds=mission.reentry_cooldown_seconds)
+                    )
+                else:
+                    player_mission.available_again_at = None
+                player_mission.deadline_at = None
+                continue
+
         # Авто-expire: если deadline истёк, перевести в 'expired'.
         # Если у миссии есть cooldown > 0 — заполняем available_again_at.
         if (

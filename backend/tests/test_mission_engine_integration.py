@@ -1989,6 +1989,123 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self.assertEqual(player_mission.successful_completions, 1)
             self.assertEqual(player_mission.entry_count, 0)
 
+    def test_zz_invariant_in_progress_with_exhausted_attempts_expires(self) -> None:
+        """Sprint 8.14 (шаг 7): инвариант status ↔ attempt_count.
+        attempt_count >= max_attempts (из published policy) → in_progress в expired."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import Mission, PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], repeatability_policy="one_time")
+        self._unlock(ids)
+
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            mission.reentry_cooldown_seconds = 0
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            # deadline в будущем — авто-expire по deadline сработать не должен,
+            # expired возможен ТОЛЬКО по инварианту.
+            player_mission.status = "in_progress"
+            player_mission.attempt_count = 3  # == max_attempts
+            player_mission.deadline_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+            )
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "expired")
+            self.assertIsNone(player_mission.deadline_at)
+            self.assertIsNone(player_mission.available_again_at)
+
+    def test_zz_invariant_in_progress_below_limit_stays(self) -> None:
+        """Sprint 8.14 (шаг 7): attempt_count < max_attempts — статус не меняется."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], repeatability_policy="one_time")
+        self._unlock(ids)
+
+        with self.SessionLocal.begin() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.status = "in_progress"
+            player_mission.attempt_count = 2  # < max_attempts
+            player_mission.deadline_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+            )
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "in_progress")
+            self.assertEqual(player_mission.attempt_count, 2)
+            self.assertIsNotNone(player_mission.deadline_at)
+
+    def test_zz_invariant_no_policy_no_change(self) -> None:
+        """Sprint 8.14 (шаг 7): legacy без published policy — sync не трогает
+        in_progress даже при attempt_count >= типового лимита (ограничения нет)."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import PlayerMission
+
+        ids = self._fixture()
+        # Без _seed_policy — published policy отсутствует (legacy-миссия).
+        self._unlock(ids)
+
+        with self.SessionLocal.begin() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.status = "in_progress"
+            player_mission.attempt_count = 10
+            player_mission.deadline_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+            )
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "in_progress")
+            self.assertEqual(player_mission.attempt_count, 10)
+
     def test_zz_attempt_deadline_fallback_to_execution_limit(self) -> None:
         """Sprint 8.14 (шаг 6): без policy — fallback на execution_time_limit_seconds,
         deadline не перезаписывается (ставится только при первом выставлении)."""
