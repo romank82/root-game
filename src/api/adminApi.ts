@@ -558,7 +558,6 @@ export type MissionRuntimePolicy = {
   status: string
   entryRootAtomic: number
   maxAttempts: number
-  attemptDeadlineSeconds: number
   repeatabilityPolicy: string
   requiredItemsJson: Record<string, unknown>
   challengePolicyJson: Record<string, unknown>
@@ -573,7 +572,6 @@ export type CreateMissionRuntimePolicyPayload = {
   mission_id: string
   entry_root_atomic: number
   max_attempts: number
-  attempt_deadline_seconds: number
   repeatability_policy: string
   required_items_json: Record<string, unknown>
   challenge_policy_json: Record<string, unknown>
@@ -661,7 +659,6 @@ export type MissionRuntimePolicyUpsertPayload = {
   entry_root_atomic: number
   required_items_json: Record<string, unknown>
   max_attempts?: number
-  attempt_deadline_seconds?: number
   repeatability_policy?: string
   challenge_policy_json?: Record<string, unknown> | null
 }
