@@ -12,10 +12,12 @@ from sqlalchemy.orm import Session
 from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
+from app.fallback_shop import _read_setting
 from app.geo_team_runtime_models import MissionRuntimePolicy
 from app.models import AdminUser, Item, Mission
 from app.runtime_policy_contract import (
     RuntimePolicyValidationError,
+    validate_reward_policy,
     validate_runtime_policy,
 )
 
@@ -645,6 +647,41 @@ def upsert_mission_runtime_policy(
             raise HTTPException(status_code=404, detail="Миссия не найдена.")
 
         stored_challenge = payload.challenge_policy_json or {}
+
+        # Sprint 8.14 (шаг 4): скрытый reward-блок собирается из System
+        # Settings missions.default_attempt_reward_multipliers
+        # (= [1.0, 0.5, 0.25] в БД) вместо захардкоженных [1.0] * max_attempts.
+        # При несовпадении длины настройки с max_attempts (или отсутствии
+        # настройки) — fallback на [1.0] (прежнее поведение).
+        default_multipliers_raw = _read_setting(
+            session, "missions.default_attempt_reward_multipliers"
+        )
+        if not (
+            isinstance(default_multipliers_raw, list)
+            and len(default_multipliers_raw) == payload.max_attempts
+        ):
+            default_multipliers_raw = [1.0] * payload.max_attempts
+
+        # Каноническая форма хранения — десятичные строки
+        # (["1", "0.5", "0.25"]); float-значения настройки контрактный
+        # валидатор приводит сам. Некорректные значения (вне [0, 1]) — тоже
+        # fallback на 1.0, чтобы не допускать невалидные множители в БД.
+        try:
+            reward_policy_json = validate_reward_policy(
+                {
+                    "schemaVersion": 1,
+                    "attemptMultipliers": default_multipliers_raw,
+                    "rewards": [],
+                },
+                max_attempts=payload.max_attempts,
+            )
+        except RuntimePolicyValidationError:
+            reward_policy_json = {
+                "schemaVersion": 1,
+                "attemptMultipliers": [1.0] * payload.max_attempts,
+                "rewards": [],
+            }
+
         policy_values = {
             "entry_root_atomic": payload.entry_root_atomic,
             "required_items_json": payload.required_items_json,
@@ -652,11 +689,7 @@ def upsert_mission_runtime_policy(
             "attempt_deadline_seconds": payload.attempt_deadline_seconds,
             "repeatability_policy": payload.repeatability_policy,
             "challenge_policy_json": stored_challenge,
-            "reward_policy_json": {
-                "schemaVersion": 1,
-                "attemptMultipliers": [1.0] * payload.max_attempts,
-                "rewards": [],
-            },
+            "reward_policy_json": reward_policy_json,
             "fallback_policy_json": None,
             "feature_flags_json": {},
         }

@@ -332,6 +332,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         *,
         entry_root_atomic: int = 0,
         required_items: list[tuple[str, int]] | None = None,
+        reward_policy_json: dict | None = None,
     ) -> None:
         """Создать published policy напрямую через SQLAlchemy (без admin API)."""
         from app.geo_team_runtime_models import MissionRuntimePolicy
@@ -355,7 +356,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                         ],
                     },
                     challenge_policy_json={},
-                    reward_policy_json={},
+                    reward_policy_json=reward_policy_json or {},
                     fallback_policy_json=None,
                     feature_flags_json={},
                 )
@@ -1499,6 +1500,251 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 )
             )
             self.assertEqual(transaction_count, 1)
+
+    def test_multiplier_applied_to_subsequent_attempts(self) -> None:
+        """Sprint 8.14 (шаг 4): attempt 1 → 1.0, attempt 2 → 0.5, attempt 3 → 0.25.
+
+        Policy attemptMultipliers = ["1", "0.5", "0.25"], награда 10 ROOT:
+        10 → 5 → 2 (floor(10 * 250_000 // 1_000_000)).
+        """
+        from app.models import MissionReward, PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+
+        # Награда target = 10 ROOT (в базовой фикстуре 15).
+        with self.SessionLocal.begin() as session:
+            reward = session.scalar(
+                select(MissionReward).where(
+                    MissionReward.mission_id == ids["target"],
+                    MissionReward.reward_type == "currency",
+                )
+            )
+            self.assertIsNotNone(reward)
+            reward.amount = 10
+
+        self._seed_policy(
+            ids["target"],
+            reward_policy_json={
+                "schemaVersion": 1,
+                "attemptMultipliers": ["1", "0.5", "0.25"],
+                "rewards": [],
+            },
+        )
+
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["unlock"],
+            answer="unlock",
+            sequence=None,
+        )
+
+        def _reset_run() -> None:
+            """Новый run: статус → available, attempt_count сохраняется."""
+            with self.SessionLocal.begin() as session:
+                player_mission = session.scalar(
+                    select(PlayerMission).where(
+                        PlayerMission.player_id == ids["player"],
+                        PlayerMission.mission_id == ids["target"],
+                    )
+                )
+                self.assertIsNotNone(player_mission)
+                player_mission.status = "available"
+
+        attempt_1 = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertEqual(attempt_1["awarded"]["root"], 10)
+
+        _reset_run()
+        attempt_2 = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertEqual(attempt_2["awarded"]["root"], 5)
+
+        _reset_run()
+        attempt_3 = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertEqual(attempt_3["awarded"]["root"], 2)
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.attempt_count, 3)
+            self.assertEqual(player_mission.successful_completions, 3)
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            self.assertEqual(wallet.available_balance, 17)
+
+            run_reference_ids = {
+                f"{player_mission.id}_1",
+                f"{player_mission.id}_2",
+                f"{player_mission.id}_3",
+            }
+            transactions = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_reward",
+                    WalletTransaction.reference_id.in_(run_reference_ids),
+                )
+            ).all()
+            self.assertEqual(len(transactions), 3)
+            self.assertEqual(
+                {transaction.amount for transaction in transactions}, {2, 5, 10}
+            )
+
+    def test_multiplier_without_policy_gives_full_reward(self) -> None:
+        """Sprint 8.14 (шаг 4): без policy/множителей награда не масштабируется."""
+        from app.models import MissionReward, Wallet
+
+        ids = self._fixture()
+
+        # Награда target = 10 ROOT (в базовой фикстуре 15), policy нет — как
+        # legacy-миссии вне CMS: множителя нет, attempt 1 выдаёт полную сумму.
+        with self.SessionLocal.begin() as session:
+            reward = session.scalar(
+                select(MissionReward).where(
+                    MissionReward.mission_id == ids["target"],
+                    MissionReward.reward_type == "currency",
+                )
+            )
+            self.assertIsNotNone(reward)
+            reward.amount = 10
+
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["unlock"],
+            answer="unlock",
+            sequence=None,
+        )
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+        self.assertEqual(accepted["awarded"]["root"], 10)
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            self.assertEqual(wallet.available_balance, 10)
+
+    def test_multiplier_zero_amount_skipped(self) -> None:
+        """Sprint 8.14 (шаг 4): 1 ROOT * 0.5/0.25 → 0 → награда без проводки."""
+        from app.models import MissionReward, PlayerMission, Wallet, WalletTransaction
+
+        ids = self._fixture()
+
+        with self.SessionLocal.begin() as session:
+            reward = session.scalar(
+                select(MissionReward).where(
+                    MissionReward.mission_id == ids["target"],
+                    MissionReward.reward_type == "currency",
+                )
+            )
+            self.assertIsNotNone(reward)
+            reward.amount = 1
+
+        self._seed_policy(
+            ids["target"],
+            reward_policy_json={
+                "schemaVersion": 1,
+                "attemptMultipliers": ["1", "0.5", "0.25"],
+                "rewards": [],
+            },
+        )
+
+        self.mission_engine.submit_mission(
+            ids["player"],
+            ids["unlock"],
+            answer="unlock",
+            sequence=None,
+        )
+        first = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertEqual(first["awarded"]["root"], 1)
+
+        def _reset_run() -> None:
+            with self.SessionLocal.begin() as session:
+                player_mission = session.scalar(
+                    select(PlayerMission).where(
+                        PlayerMission.player_id == ids["player"],
+                        PlayerMission.mission_id == ids["target"],
+                    )
+                )
+                self.assertIsNotNone(player_mission)
+                player_mission.status = "available"
+
+        # Attempt 2: 1 * 0.5 = 0 (доля округляется вниз) — проводки нет.
+        _reset_run()
+        second = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertEqual(second["awarded"]["root"], 0)
+
+        # Attempt 3: 1 * 0.25 = 0 — тоже без проводки.
+        _reset_run()
+        third = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertEqual(third["awarded"]["root"], 0)
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.attempt_count, 3)
+            self.assertEqual(player_mission.successful_completions, 3)
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            self.assertEqual(wallet.available_balance, 1)
+
+            credits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_reward",
+                )
+            ).all()
+            self.assertEqual(len(credits), 1)
+            self.assertEqual(credits[0].amount, 1)
 
 
 class CipherMatchValidatorUnitTests(unittest.TestCase):

@@ -15,6 +15,7 @@ from app.fallback_shop import create_first_failure_entitlement
 from app.geo_spawn import generate_spawn_point
 from app.player_restrictions_engine import recompute_player_status
 from app.qr_service import generate_qr_payload, get_qr_ttl_seconds
+from app.runtime_policy_contract import scaled_attempt_multipliers
 from app.models import (
     GamePlayer,
     GeoZone,
@@ -507,6 +508,7 @@ def _award_mission_rewards(
     *,
     reference_id: str | None = None,
     mission_run_id: str | None = None,
+    attempt_number: int | None = None,
 ) -> dict:
     """
     Выдаёт награды в той же транзакции, что и completion миссии.
@@ -521,6 +523,12 @@ def _award_mission_rewards(
 
     mission_run_id — линк на MissionRun (для team), для solo None;
     при непустом значении попадает в metadata_json credit-проводки.
+
+    attempt_number — 1-базовый номер попытки в текущем проходе
+    (None для team/admin-флоу). Задаёт per-attempt множитель ROOT-награды
+    по attemptMultipliers опубликованной runtime-policy миссии
+    (Sprint 8.14, шаг 4). При None/без policy награда не масштабируется.
+    Значение и выбранный factor фиксируются в metadata_json проводки.
     """
     if reference_id is None:
         reference_id = mission.id
@@ -534,6 +542,28 @@ def _award_mission_rewards(
     awarded_root = 0
     awarded_items: list[dict] = []
     unlocked_story_node_ids: list[str] = []
+
+    # Sprint 8.14 (шаг 4): per-attempt reward multiplier. Множитель выбирается
+    # по номеру попытки в текущем проходе (1-базовый): attempt 1 → 1.0,
+    # attempt 2 → 0.5, attempt 3 → 0.25. Источник — attemptMultipliers
+    # опубликованной runtime-policy миссии (policy собирается на шаге 4 из
+    # System Settings missions.default_attempt_reward_multipliers).
+    # Без attempt_number / policy / multipliers награда не масштабируется.
+    # MULTIPLIER_SCALE = 1_000_000 (runtime_policy_contract, не экспортируется).
+    factor = 1_000_000
+    if attempt_number is not None and attempt_number >= 1:
+        policy = _get_published_runtime_policy(session, mission.id)
+        if policy is not None:
+            reward_policy = policy.reward_policy_json or {}
+            multipliers_raw = reward_policy.get("attemptMultipliers")
+            if multipliers_raw:
+                try:
+                    scaled = scaled_attempt_multipliers(reward_policy)
+                    index = attempt_number - 1
+                    if 0 <= index < len(scaled):
+                        factor = scaled[index]
+                except Exception:
+                    factor = 1_000_000
 
     for reward in rewards:
         if reward.reward_type == "currency":
@@ -553,8 +583,16 @@ def _award_mission_rewards(
             if existing_transaction is not None:
                 continue
 
-            wallet.available_balance += reward.amount
-            awarded_root += reward.amount
+            # Sprint 8.14 (шаг 4): ROOT-награда масштабируется множителем
+            # попытки (factor — целый, 1_000_000 == 1.0). Дробные доли
+            # округляются вниз; нулевая/отрицательная сумма не проводит запись.
+            base_amount = reward.amount
+            scaled_amount = base_amount * factor // 1_000_000
+            if scaled_amount <= 0:
+                continue
+
+            wallet.available_balance += scaled_amount
+            awarded_root += scaled_amount
 
             metadata_json: dict = {
                 "missionId": mission.id,
@@ -563,12 +601,18 @@ def _award_mission_rewards(
             }
             if mission_run_id is not None:
                 metadata_json["missionRunId"] = mission_run_id
+            # Сольная награда: фиксируем номер попытки и применённый
+            # множитель. Для team/admin (attempt_number=None) ключи не пишем,
+            # чтобы не менять форму их metadata_json.
+            if attempt_number is not None:
+                metadata_json["attemptNumber"] = attempt_number
+                metadata_json["multiplierScale"] = factor
 
             session.add(
                 WalletTransaction(
                     id=_new_id("wallet-transaction"),
                     wallet_id=wallet.id,
-                    amount=reward.amount,
+                    amount=scaled_amount,
                     balance_after=wallet.available_balance,
                     transaction_type="credit",
                     reason=f"Mission reward: {mission.slug}",
@@ -916,6 +960,10 @@ def _submit_mission_once(
             player_id,
             mission,
             reference_id=run_reference_id,
+            # Sprint 8.14 (шаг 4): attempt_count уже инкрементирован
+            # (attempt_count_before + 1) — это 1-базовый номер попытки
+            # в текущем проходе, по которому выбирается множитель награды.
+            attempt_number=player_mission.attempt_count,
         )
 
         return {
