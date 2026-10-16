@@ -904,6 +904,31 @@ def _submit_mission_once(
             }
 
         attempt_count_before = player_mission.attempt_count
+
+        # Sprint 8.14 (шаг 3): enforcement max_attempts.
+        # Если attempt_count уже >= max_attempts из published policy —
+        # новую попытку не начинаем (не инкрементим, не валидируем),
+        # переводим миссию в expired и возвращаем 409.
+        # policy is None (legacy-миссии без runtime policy) — проверка
+        # пропускается, поведение сохраняется.
+        policy = _get_published_runtime_policy(session, mission.id)
+        if policy is not None and attempt_count_before >= policy.max_attempts:
+            player_mission.status = "expired"
+            if mission.reentry_cooldown_seconds > 0:
+                player_mission.available_again_at = _utcnow() + timedelta(
+                    seconds=mission.reentry_cooldown_seconds
+                )
+            else:
+                player_mission.available_again_at = None
+            # MissionEngineError откатывает транзакцию _submit_mission_once
+            # целиком, поэтому expired-статус фиксируем ДО raise (иначе
+            # перевод в expired не сохранился бы).
+            session.commit()
+            raise MissionEngineError(
+                409,
+                "Попытки исчерпаны. Миссия переведена в expired.",
+            )
+
         player_mission.attempt_count += 1
 
         if player_mission.started_at is None:

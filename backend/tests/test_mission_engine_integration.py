@@ -1747,6 +1747,180 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self.assertEqual(credits[0].amount, 1)
 
 
+    # ---- Sprint 8.14 (шаг 3): enforcement max_attempts ------------------
+
+    def test_max_attempts_enforced_after_limit(self) -> None:
+        """Sprint 8.14 (шаг 3): 3 успешных submit, 4-й → 409 + expired.
+
+        Policy max_attempts=3. После исчерпания лимита новая попытка не
+        начинается: attempt_count не инкрементируется, а PlayerMission
+        переводится в expired.
+        """
+        from app.models import PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"])  # max_attempts=3
+        self._unlock(ids)
+
+        def _reset_run() -> None:
+            """Новый run: статус → available, attempt_count сохраняется."""
+            with self.SessionLocal.begin() as session:
+                player_mission = session.scalar(
+                    select(PlayerMission).where(
+                        PlayerMission.player_id == ids["player"],
+                        PlayerMission.mission_id == ids["target"],
+                    )
+                )
+                self.assertIsNotNone(player_mission)
+                player_mission.status = "available"
+
+        for _ in range(3):
+            accepted = self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="complete",
+                sequence=None,
+            )
+            self.assertTrue(accepted["accepted"])
+            _reset_run()
+
+        with self.assertRaises(self.mission_engine.MissionEngineError) as error:
+            self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="complete",
+                sequence=None,
+            )
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(
+            error.exception.detail,
+            "Попытки исчерпаны. Миссия переведена в expired.",
+        )
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            # Отвергнутая попытка не инкрементировала счётчик.
+            self.assertEqual(player_mission.attempt_count, 3)
+            self.assertEqual(player_mission.status, "expired")
+            # cooldown не задан → авто-возврат не планируется.
+            self.assertIsNone(player_mission.available_again_at)
+
+    def test_max_attempts_not_enforced_without_policy(self) -> None:
+        """Sprint 8.14 (шаг 3): legacy-миссия без policy — лимита нет."""
+        from app.models import PlayerMission
+
+        ids = self._fixture()
+        self._unlock(ids)
+
+        def _reset_run() -> None:
+            with self.SessionLocal.begin() as session:
+                player_mission = session.scalar(
+                    select(PlayerMission).where(
+                        PlayerMission.player_id == ids["player"],
+                        PlayerMission.mission_id == ids["target"],
+                    )
+                )
+                self.assertIsNotNone(player_mission)
+                player_mission.status = "available"
+
+        for _ in range(5):
+            accepted = self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="complete",
+                sequence=None,
+            )
+            self.assertTrue(accepted["accepted"])
+            self.assertFalse(accepted["alreadyCompleted"])
+            _reset_run()
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.attempt_count, 5)
+            self.assertNotEqual(player_mission.status, "expired")
+
+
+    def test_max_attempts_sets_available_again_at_with_cooldown(self) -> None:
+        """Sprint 8.14 (шаг 3): expire по лимиту учитывает cooldown миссии."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import Mission, PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"])  # max_attempts=3
+
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            mission.reentry_cooldown_seconds = 300
+
+        self._unlock(ids)
+
+        def _reset_run() -> None:
+            with self.SessionLocal.begin() as session:
+                player_mission = session.scalar(
+                    select(PlayerMission).where(
+                        PlayerMission.player_id == ids["player"],
+                        PlayerMission.mission_id == ids["target"],
+                    )
+                )
+                self.assertIsNotNone(player_mission)
+                player_mission.status = "available"
+
+        for _ in range(3):
+            self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="complete",
+                sequence=None,
+            )
+            _reset_run()
+
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
+        with self.assertRaises(self.mission_engine.MissionEngineError) as error:
+            self.mission_engine.submit_mission(
+                ids["player"],
+                ids["target"],
+                answer="complete",
+                sequence=None,
+            )
+        self.assertEqual(error.exception.status_code, 409)
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "expired")
+            self.assertIsNotNone(player_mission.available_again_at)
+
+            available_again_at = player_mission.available_again_at
+            if available_again_at.tzinfo is not None:
+                available_again_at = available_again_at.astimezone(
+                    timezone.utc
+                ).replace(tzinfo=None)
+            expected = before + timedelta(seconds=300)
+            self.assertLess(
+                abs((available_again_at - expected).total_seconds()),
+                5,
+            )
+
+
 class CipherMatchValidatorUnitTests(unittest.TestCase):
     """Direct unit tests for _validate_submission cipher_match validator."""
 
