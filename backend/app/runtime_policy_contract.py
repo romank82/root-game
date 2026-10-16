@@ -57,8 +57,6 @@ ENTRY_ROOT_ATOMIC_MIN = 0
 ENTRY_ROOT_ATOMIC_MAX = 2_147_483_647
 MAX_ATTEMPTS_MIN = 1
 MAX_ATTEMPTS_MAX = 10
-DEADLINE_SECONDS_MIN = 1
-DEADLINE_SECONDS_MAX = 86_400
 REPEATABILITY_POLICIES = frozenset(
     {"one_time", "after_terminal", "after_failure_only"}
 )
@@ -473,7 +471,6 @@ def validate_runtime_policy(
     mission_category: str | None = None,
     entry_root_atomic: Any,
     max_attempts: Any,
-    attempt_deadline_seconds: Any,
     repeatability_policy: Any,
     required_items_json: Any,
     challenge_policy_json: Any = None,
@@ -513,12 +510,6 @@ def validate_runtime_policy(
         MAX_ATTEMPTS_MIN,
         MAX_ATTEMPTS_MAX,
     )
-    deadline = _integer(
-        attempt_deadline_seconds,
-        "attemptDeadlineSeconds",
-        DEADLINE_SECONDS_MIN,
-        DEADLINE_SECONDS_MAX,
-    )
 
     repeatability = _nonempty_text(
         repeatability_policy,
@@ -537,7 +528,6 @@ def validate_runtime_policy(
         "missionType": SOLO_MISSION_TYPE,
         "entryRootAtomic": entry_root,
         "maxAttempts": attempts,
-        "attemptDeadlineSeconds": deadline,
         "repeatabilityPolicy": repeatability,
         "requiredItems": validate_required_items(required_items_json),
         "challengePolicy": _normalize_challenge_policy(

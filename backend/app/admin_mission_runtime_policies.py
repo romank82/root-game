@@ -43,12 +43,10 @@ VALID_POLICY_STATUSES = {"draft", "published", "archived"}
 # out-of-range values early. The contract remains the single source of truth.
 ENTRY_ROOT_ATOMIC_MAX = 2_147_483_647
 MAX_ATTEMPTS_MAX = 10
-DEADLINE_SECONDS_MAX = 86_400
 
 UPDATABLE_FIELDS = (
     "entry_root_atomic",
     "max_attempts",
-    "attempt_deadline_seconds",
     "repeatability_policy",
     "required_items_json",
     "challenge_policy_json",
@@ -62,7 +60,6 @@ class AdminMissionRuntimePolicyCreatePayload(BaseModel):
     mission_id: str = Field(min_length=1, max_length=64)
     entry_root_atomic: int = Field(ge=0, le=ENTRY_ROOT_ATOMIC_MAX)
     max_attempts: int = Field(ge=1, le=MAX_ATTEMPTS_MAX)
-    attempt_deadline_seconds: int = Field(ge=1, le=DEADLINE_SECONDS_MAX)
     repeatability_policy: str = Field(min_length=1, max_length=64)
     required_items_json: dict[str, Any]
     challenge_policy_json: dict[str, Any]
@@ -76,9 +73,6 @@ class AdminMissionRuntimePolicyUpdatePayload(BaseModel):
         default=None, ge=0, le=ENTRY_ROOT_ATOMIC_MAX
     )
     max_attempts: int | None = Field(default=None, ge=1, le=MAX_ATTEMPTS_MAX)
-    attempt_deadline_seconds: int | None = Field(
-        default=None, ge=1, le=DEADLINE_SECONDS_MAX
-    )
     repeatability_policy: str | None = Field(default=None, min_length=1, max_length=64)
     required_items_json: dict[str, Any] | None = None
     challenge_policy_json: dict[str, Any] | None = None
@@ -101,9 +95,6 @@ class MissionRuntimePolicyUpsertPayload(BaseModel):
         default_factory=lambda: {"schemaVersion": 1, "items": []}
     )
     max_attempts: int = Field(default=3, ge=1, le=MAX_ATTEMPTS_MAX)
-    attempt_deadline_seconds: int = Field(
-        default=3600, ge=1, le=DEADLINE_SECONDS_MAX
-    )
     repeatability_policy: str = Field(default="after_terminal", max_length=64)
     challenge_policy_json: dict[str, Any] | None = None
 
@@ -142,7 +133,6 @@ def _policy_arguments(
     mission_id: str,
     entry_root_atomic: int,
     max_attempts: int,
-    attempt_deadline_seconds: int,
     repeatability_policy: str,
     required_items_json: dict[str, Any],
     challenge_policy_json: dict[str, Any],
@@ -154,7 +144,6 @@ def _policy_arguments(
         "mission_id": mission_id,
         "entry_root_atomic": entry_root_atomic,
         "max_attempts": max_attempts,
-        "attempt_deadline_seconds": attempt_deadline_seconds,
         "repeatability_policy": repeatability_policy,
         "required_items_json": required_items_json,
         "challenge_policy_json": challenge_policy_json,
@@ -171,7 +160,6 @@ def _policy_arguments_from_policy(
         mission_id=policy.mission_id,
         entry_root_atomic=policy.entry_root_atomic,
         max_attempts=policy.max_attempts,
-        attempt_deadline_seconds=policy.attempt_deadline_seconds,
         repeatability_policy=policy.repeatability_policy,
         required_items_json=policy.required_items_json,
         challenge_policy_json=policy.challenge_policy_json,
@@ -185,7 +173,6 @@ def _validate_policy_via_contract(
     mission_id: str,
     entry_root_atomic: Any,
     max_attempts: Any,
-    attempt_deadline_seconds: Any,
     repeatability_policy: Any,
     required_items_json: Any,
     challenge_policy_json: Any,
@@ -203,7 +190,6 @@ def _validate_policy_via_contract(
             mission_category=mission.mission_category,
             entry_root_atomic=entry_root_atomic,
             max_attempts=max_attempts,
-            attempt_deadline_seconds=attempt_deadline_seconds,
             repeatability_policy=repeatability_policy,
             required_items_json=required_items_json,
             challenge_policy_json=challenge_policy_json,
@@ -245,7 +231,6 @@ def _serialize_policy(policy: MissionRuntimePolicy) -> dict[str, Any]:
         "status": policy.status,
         "entryRootAtomic": policy.entry_root_atomic,
         "maxAttempts": policy.max_attempts,
-        "attemptDeadlineSeconds": policy.attempt_deadline_seconds,
         "repeatabilityPolicy": policy.repeatability_policy,
         "requiredItemsJson": policy.required_items_json,
         "challengePolicyJson": policy.challenge_policy_json,
@@ -356,7 +341,6 @@ def create_admin_mission_runtime_policy(
             mission_id=payload.mission_id,
             entry_root_atomic=payload.entry_root_atomic,
             max_attempts=payload.max_attempts,
-            attempt_deadline_seconds=payload.attempt_deadline_seconds,
             repeatability_policy=payload.repeatability_policy,
             required_items_json=payload.required_items_json,
             challenge_policy_json=payload.challenge_policy_json,
@@ -686,7 +670,6 @@ def upsert_mission_runtime_policy(
             "entry_root_atomic": payload.entry_root_atomic,
             "required_items_json": payload.required_items_json,
             "max_attempts": payload.max_attempts,
-            "attempt_deadline_seconds": payload.attempt_deadline_seconds,
             "repeatability_policy": payload.repeatability_policy,
             "challenge_policy_json": stored_challenge,
             "reward_policy_json": reward_policy_json,
