@@ -14,12 +14,12 @@
 2. Начисляла награду за **КАЖДЫЙ** успешный проход (не только за первый).
 3. Ограничивала количество попыток (`max_attempts`).
 4. Уменьшала награду за поздние попытки (`attemptMultipliers`).
-5. Давала отдельный таймер на каждую попытку (`attempt_deadline_seconds`).
+5. ~~Давала отдельный таймер на каждую попытку~~ — ❌ ОТМЕНЕНО 2026-10-16 (мёртвое поле удалено; см. раздел 5).
 
 ## Что уже есть в проекте
 
 - Модель `PlayerMission` с `attempt_count`, `deadline_at`, `available_again_at`.
-- Таблица `mission_runtime_policies`: `max_attempts`, `attempt_deadline_seconds`,
+- Таблица `mission_runtime_policies`: `max_attempts`,
   `repeatability_policy`, `reward_policy_json.attemptMultipliers` (модель в
   `geo_team_runtime_models.py`, админка в `admin_mission_runtime_policies.py`).
 - `MissionRun` (`geo_team_runtime_models.py:159`, таблица `mission_runs`) —
@@ -114,19 +114,19 @@ reference_id`).
 - 2-я (`attempt_count_before = 1`) → 50%.
 - 3-я (`attempt_count_before = 2`) → 25%.
 
-### 5. Timer per-attempt
+### 5. Timer per-attempt — ❌ отменён (поле удалено)
 
-**Решение:** подключить `attempt_deadline_seconds` из policy — время **НА КАЖДУЮ
-ПОПЫТКУ**.
+**Отменено 2026-10-16:** поле policy `attempt_deadline_seconds` добавлено в
+Sprint 8.14 как «per-attempt timer», но удалено как мёртвое (план и итог:
+`docs/remove-attempt-deadline-plan.md`). Причины:
+- общий таймер миссии (`deadline_at` из `execution_time_limit_seconds`) не должен
+  сбрасываться между попытками;
+- таймер мини-игры (`content.ui.timeLimitSeconds`) — клиентский;
+- поле не настраивается в админке → в коде зашивается только механика.
 
-**Что меняется:**
-- При новой попытке (в `_submit_mission_once`, при `attempt_count > 0`):
-  `deadline_at = now + attempt_deadline_seconds`.
-- При первой попытке (в `_accept_mission_once`): если `attempt_deadline_seconds`
-  задан — использовать его; иначе — `execution_time_limit_seconds`.
-- `execution_time_limit_seconds` — оставить как fallback, **не удалять**.
-- Frontend: `MissionTimer` показывает время до `deadline_at` (как сейчас).
-- При новой попытке таймер визуально сбрасывается.
+**Текущее поведение:** `deadline_at` ставится один раз при accept
+(`_accept_mission_once`) из `execution_time_limit_seconds`; блок в
+`_submit_mission_once` удалён (step 1–2, `7af016c`).
 
 ### 6. after_terminal для solo
 
@@ -157,10 +157,24 @@ reference_id`).
 3. Per-run `reference_id` + инкремент `successful_completions`. ✅
 4. `max_attempts` enforcement. ✅
 5. `attemptMultipliers` подключение + убрать хардкод. ✅
-6. `after_terminal` для solo (sync). ⏳
-7. Timer per-attempt. ⏳
+6. `after_terminal` для solo (sync). ✅ (`e0ce223`)
+7. Timer per-attempt. ❌ отменён (поле удалено).
 8. Инвариант `status ↔ attempt_count`. ⏳
-9. Обновление docs: roadmap + audit. ✅ (этот шаг)
+9. Обновление docs: roadmap + audit + удаление поля. ✅ (этот шаг)
+
+## Удаление per-attempt timer (2026-10-16)
+
+Поле `attempt_deadline_seconds` удалено полностью (9 шагов,
+`docs/remove-attempt-deadline-plan.md`):
+
+- step 1–2 `7af016c`: engine (откат блока step 6) + engine-тесты.
+- step 3–4 `262f392`: контракт + admin API.
+- step 5–6 `4a5d606`: миграция `5c85930cfb3e` (drop column) + модель.
+- step 7 `2b43094`: frontend-типы.
+- step 8 `f719ef0`: остальные тесты.
+- step 9: docs (этот файл и другие).
+
+Тесты после шага 8: **554 OK**. `deadline_at` управляется только при accept.
 
 ## Принятые решения
 

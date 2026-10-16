@@ -646,7 +646,7 @@
 - **8.14.3** ✅ max_attempts enforcement (409 + expired).
 - **8.14.4** ✅ attemptMultipliers (подключён scaled_attempt_multipliers, убран хардкод).
 - **8.14.5** ⏳ after_terminal для solo — миссия не возвращается в available после completed.
-- **8.14.6** ⏳ Timer per-attempt (attempt_deadline_seconds).
+- **8.14.6** ❌ отменён: timer per-attempt — мёртвое поле удалено 2026-10-16 (не настраивается в админке; `deadline_at` только от accept, план — docs/remove-attempt-deadline-plan.md).
 - **8.14.7** ⏳ Инвариант status ↔ attempt_count.
 - **Известный баг**: entry debit (mission_entry_debit) использует reference_id=mission.id (не per-run) — при повторном заходе debit не создаётся (unique index). Требует reference_id = f"{player_mission.id}_entry_{N}". Не исправлено.
 

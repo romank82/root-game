@@ -208,7 +208,6 @@ nodes через `player_missions.status == 'completed'`. Новый runtime п�
 | Правило контракта | Гарантия БД |
 |---|---|
 | `max_attempts` от 1 до 10 | только `>= 1` |
-| `attempt_deadline_seconds` от 1 до 86400 | только `>= 1` |
 | `repeatability_policy` ∈ {one_time, after_terminal, after_failure_only} | нет |
 | JSON-схемы `schemaVersion=1` и их поля | нет |
 | policy только для `mission_type='solo'` | нет |

@@ -29,7 +29,6 @@ immutable effective_config_snapshot.
 ## Скалярные правила policy
 entry_root_atomic: целое число >= 0.
 max_attempts: целое число от 1 до 10.
-attempt_deadline_seconds: целое число от 1 до 86400.
 repeatability_policy: только one_time, after_terminal, after_failure_only.
 fallback_policy_json: в первой версии только null.
 feature_flags_json: только валидированная не-секретная feature policy.
