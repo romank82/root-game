@@ -343,7 +343,6 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         required_items: list[tuple[str, int]] | None = None,
         reward_policy_json: dict | None = None,
         repeatability_policy: str = "one_time",
-        attempt_deadline_seconds: int = 600,
     ) -> None:
         """Создать published policy напрямую через SQLAlchemy (без admin API)."""
         from app.geo_team_runtime_models import MissionRuntimePolicy
@@ -357,7 +356,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                     status="published",
                     entry_root_atomic=entry_root_atomic,
                     max_attempts=3,
-                    attempt_deadline_seconds=attempt_deadline_seconds,
+                    attempt_deadline_seconds=600,
                     repeatability_policy=repeatability_policy,
                     required_items_json={
                         "schemaVersion": 1,
@@ -1990,76 +1989,6 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self.assertEqual(player_mission.status, "completed")
             self.assertEqual(player_mission.successful_completions, 1)
             self.assertEqual(player_mission.entry_count, 0)
-
-    def test_zz_attempt_deadline_resets_per_attempt(self) -> None:
-        """Sprint 8.14 (шаг 6): per-attempt timer — deadline_at сбрасывается на
-        каждую новую попытку по attempt_deadline_seconds из policy."""
-        from datetime import datetime, timedelta, timezone
-
-        from app.models import Mission, PlayerMission
-
-        ids = self._fixture()
-        self._seed_policy(ids["target"], attempt_deadline_seconds=60)
-        with self.SessionLocal.begin() as session:
-            mission = session.get(Mission, ids["target"])
-            self.assertIsNotNone(mission)
-            # accept ставит deadline из execution_time_limit_seconds.
-            mission.execution_time_limit_seconds = 60
-        self._attach_geo_zone(ids)
-        self._unlock(ids)
-
-        self.mission_engine.accept_mission(
-            ids["player"],
-            ids["target"],
-            latitude=55.751244,
-            longitude=37.618423,
-        )
-
-        with self.SessionLocal() as session:
-            player_mission = session.scalar(
-                select(PlayerMission).where(
-                    PlayerMission.player_id == ids["player"],
-                    PlayerMission.mission_id == ids["target"],
-                )
-            )
-            self.assertIsNotNone(player_mission)
-            self.assertIsNotNone(player_mission.deadline_at)
-            deadline_after_accept = self._as_naive_utc(
-                player_mission.deadline_at
-            )
-
-        # Промах: attempt инкрементируется, deadline перезаписывается на now+60.
-        before_submit = datetime.now(timezone.utc).replace(tzinfo=None)
-        rejected = self.mission_engine.submit_mission(
-            ids["player"],
-            ids["target"],
-            answer="wrong-answer",
-            sequence=None,
-        )
-        self.assertFalse(rejected["accepted"])
-
-        with self.SessionLocal() as session:
-            player_mission = session.scalar(
-                select(PlayerMission).where(
-                    PlayerMission.player_id == ids["player"],
-                    PlayerMission.mission_id == ids["target"],
-                )
-            )
-            self.assertIsNotNone(player_mission)
-            self.assertEqual(player_mission.status, "in_progress")
-            self.assertEqual(player_mission.attempt_count, 1)
-            self.assertIsNotNone(player_mission.deadline_at)
-            deadline_after_submit = self._as_naive_utc(
-                player_mission.deadline_at
-            )
-
-        # deadline обновлён (новое, более позднее значение) и равен ~ now + 60.
-        self.assertGreater(deadline_after_submit, deadline_after_accept)
-        expected = before_submit + timedelta(seconds=60)
-        self.assertLess(
-            abs((deadline_after_submit - expected).total_seconds()),
-            5,
-        )
 
     def test_zz_attempt_deadline_fallback_to_execution_limit(self) -> None:
         """Sprint 8.14 (шаг 6): без policy — fallback на execution_time_limit_seconds,

@@ -974,23 +974,6 @@ def _submit_mission_once(
 
         player_mission.attempt_count += 1
 
-        # Sprint 8.14 (шаг 6): per-attempt timer.
-        # attempt_deadline_seconds из published policy — время на КАЖДУЮ попытку.
-        # При каждой новой попытке сбрасываем deadline_at = now + attempt_deadline_seconds.
-        # Fallback: если policy/attempt_deadline_seconds не задан —
-        # execution_time_limit_seconds миссии (на всю миссию).
-        # policy уже прочитана выше (enforcement max_attempts) — не читаем повторно.
-        if policy is not None and policy.attempt_deadline_seconds:
-            player_mission.deadline_at = _utcnow() + timedelta(
-                seconds=policy.attempt_deadline_seconds
-            )
-        elif mission.execution_time_limit_seconds:
-            # Fallback: если deadline_at ещё не выставлен — поставить.
-            if player_mission.deadline_at is None:
-                player_mission.deadline_at = _utcnow() + timedelta(
-                    seconds=mission.execution_time_limit_seconds
-                )
-
         if player_mission.started_at is None:
             player_mission.started_at = _utcnow()
 
