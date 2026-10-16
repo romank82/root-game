@@ -472,6 +472,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self.assertNotIn("validationConfig", mission)
             self.assertNotIn("acceptedAnswers", mission)
             self.assertNotIn("rewardValue", mission)
+            self.assertIn("maxAttempts", mission)
 
         self.assertEqual(
             self._mission_by_id(bootstrap, ids["unlock"])["status"],
@@ -482,6 +483,125 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             "locked",
         )
         self.assertEqual(bootstrap["storyNodes"], [])
+
+    def test_bootstrap_exposes_max_attempts(self) -> None:
+        """Sprint 8.14 (ui): maxAttempts из published policy; для legacy без policy — null.
+
+        Изолированная мини-фикстура БЕЗ новых Segment: этот тест (по алфавиту)
+        выполняется раньше test_bootstrap_exposes_only_public_... и обязан
+        оставить ровно один published-сегмент в общей SQLite-БД.
+        """
+        from app.geo_team_runtime_models import MissionRuntimePolicy
+        from app.models import Chapter, GamePlayer, Mission, Season
+
+        suffix = uuid.uuid4().hex
+        player_id = f"player-{suffix}"
+        season_id = f"season-{suffix}"
+        chapter_id = f"chapter-{suffix}"
+        with_policy_id = f"mission-with-policy-{suffix}"
+        no_policy_id = f"mission-no-policy-{suffix}"
+
+        with self.SessionLocal.begin() as session:
+            # Фазовый flush как в _fixture: без ORM-relationship между
+            # Season/Chapter/Mission SQLAlchemy не упорядочивает INSERT-ы
+            # по FK-зависимостям (chapters лёг бы раньше seasons).
+            session.add(
+                Season(
+                    id=season_id,
+                    slug=f"season-{suffix}",
+                    title="Bootstrap maxAttempts season",
+                    description=None,
+                    status="published",
+                    sort_order=1,
+                )
+            )
+            session.flush()
+
+            session.add_all(
+                [
+                    Chapter(
+                        id=chapter_id,
+                        season_id=season_id,
+                        slug=f"chapter-{suffix}",
+                        title="Bootstrap maxAttempts chapter",
+                        description=None,
+                        status="published",
+                        sort_order=1,
+                    ),
+                    GamePlayer(
+                        id=player_id,
+                        display_name="Bootstrap maxAttempts player",
+                        auth_provider="test",
+                        external_id=player_id,
+                        status="active",
+                    ),
+                ]
+            )
+            session.flush()
+
+            session.add_all(
+                [
+                    Mission(
+                        id=with_policy_id,
+                        chapter_id=chapter_id,
+                        slug=f"with-policy-{suffix}",
+                        mission_type="text_answer",
+                        title="With policy",
+                        description=None,
+                        content={"schemaVersion": 1, "ui": {"label": "With"}},
+                        validation_config={
+                            "validator": "normalized_text_match",
+                            "acceptedAnswers": ["ok"],
+                        },
+                        status="published",
+                        sort_order=1,
+                    ),
+                    Mission(
+                        id=no_policy_id,
+                        chapter_id=chapter_id,
+                        slug=f"no-policy-{suffix}",
+                        mission_type="text_answer",
+                        title="No policy",
+                        description=None,
+                        content={"schemaVersion": 1, "ui": {"label": "No"}},
+                        validation_config={
+                            "validator": "normalized_text_match",
+                            "acceptedAnswers": ["ok"],
+                        },
+                        status="published",
+                        sort_order=2,
+                    ),
+                ]
+            )
+            session.flush()
+
+            # Published policy — единственная на миссию (частичный unique index).
+            session.add(
+                MissionRuntimePolicy(
+                    id=f"policy-{uuid.uuid4().hex}",
+                    mission_id=with_policy_id,
+                    version=1,
+                    status="published",
+                    entry_root_atomic=0,
+                    max_attempts=3,
+                    repeatability_policy="one_time",
+                    required_items_json={"schemaVersion": 1, "items": []},
+                    challenge_policy_json={},
+                    reward_policy_json={},
+                    fallback_policy_json=None,
+                    feature_flags_json={},
+                )
+            )
+
+        bootstrap = self.mission_engine.get_bootstrap(player_id)
+
+        # Миссия с published policy → maxAttempts = max_attempts policy.
+        with_policy = self._mission_by_id(bootstrap, with_policy_id)
+        self.assertEqual(with_policy["maxAttempts"], 3)
+
+        # Legacy-миссия без policy → maxAttempts = null.
+        no_policy = self._mission_by_id(bootstrap, no_policy_id)
+        self.assertIsNone(no_policy["maxAttempts"])
 
     def test_prerequisite_completion_unlocks_reward_mission(self) -> None:
         ids = self._fixture()

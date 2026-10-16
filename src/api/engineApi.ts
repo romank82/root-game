@@ -30,6 +30,7 @@ export type EngineMission = {
   spawn: EngineMissionSpawn | null
   status: EngineMissionStatus
   attemptCount: number
+  maxAttempts: number | null
   startedAt: string | null
   completedAt: string | null
   executionTimeLimitSeconds: number | null

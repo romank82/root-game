@@ -411,6 +411,17 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
         .order_by(Segment.sort_order, Segment.id)
     ).all()
 
+    # Sprint 8.14 (ui): лимит попыток для UI-счётчика. Источник — единственная
+    # published MissionRuntimePolicy миссии; для legacy-миссий без policy — None.
+    # Частичный unique index гарантирует не более одной published policy на
+    # миссию, поэтому scalar-чтение по одной на миссию безопасно.
+    max_attempts_by_mission: dict[str, int | None] = {}
+    for mission in missions:
+        policy = _get_published_runtime_policy(session, mission.id)
+        max_attempts_by_mission[mission.id] = (
+            policy.max_attempts if policy is not None else None
+        )
+
     return {
         "player": {
             "id": player.id,
@@ -436,6 +447,7 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "spawn": _extract_spawn_for_bootstrap(progress[mission.id]),
                 "status": progress[mission.id].status,
                 "attemptCount": progress[mission.id].attempt_count,
+                "maxAttempts": max_attempts_by_mission[mission.id],
                 "startedAt": (
                     ensure_utc(progress[mission.id].started_at).isoformat()
                     if progress[mission.id].started_at
