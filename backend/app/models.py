@@ -1114,6 +1114,13 @@ class PlayerMission(TimestampMixin, Base):
         default="locked",
     )
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    successful_completions: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+
     progress: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
