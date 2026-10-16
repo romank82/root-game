@@ -201,15 +201,17 @@ export function CipherScreen({
     setTimeLeft(active.timeLimitSeconds)
   }, [mission?.id])
 
-  // Обратный отсчёт. timeLeft <= 0 → провал.
+  // Обратный отсчёт. timeLeft <= 0 → тайм-аут = промах (не expire миссии).
   useEffect(() => {
     if (timeLeft === null || timedOut) return
     if (timeLeft <= 0) {
       setTimedOut(true)
-      // Sprint 8.14 (fix): сообщаем серверу о тайм-ауте, чтобы
-      // миссия ушла в expired + available_again_at.
+      // Sprint 8.14 (fix): тайм-аут = промах (не expire миссии).
+      // Пустая последовательность гарантированно False для cipher_match.
+      // Это даёт attempt_count += 1 и новую попытку (или 409 + expired
+      // при исчерпании max_attempts).
       if (mission) {
-        void onExpireMission(mission.id)
+        void handleTimeout()
       }
       return
     }
@@ -217,8 +219,11 @@ export function CipherScreen({
       () => setTimeLeft((current) => (current === null ? null : current - 1)),
       1000,
     )
+    // Примечание: handleTimeout намеренно НЕ в списке зависимостей — функция
+    // пересоздаётся каждый рендер, и её добавление в deps перезапускало бы
+    // интервал на каждом рендере (замедление отсчёта). Тайм-аут — one-shot.
     return () => clearInterval(id)
-  }, [timeLeft, timedOut, mission?.id, onExpireMission])
+  }, [timeLeft, timedOut, mission?.id])
 
   function stepDrum(drumIndex: number, direction: -1 | 1) {
     setDrums((current) =>
@@ -251,12 +256,24 @@ export function CipherScreen({
     startYRef.current = null
   }
 
-  async function handleSubmit() {
+  // Тайм-аут попытки: пустая последовательность — гарантированный False для
+  // cipher_match → промах (attempt_count += 1) и новая попытка. Всю обработку
+  // ответа (null / !accepted / accepted) переиспользуем из handleSubmit.
+  async function handleTimeout() {
+    if (!mission) return
+    if (submitting) return
+    await handleSubmit([])
+  }
+
+  async function handleSubmit(sequenceOverride?: string[]) {
     if (!mission) return
     setSubmitting(true)
     setError(null)
 
-    const sequence = drums.map((drum) => drum.symbols[drum.currentIndex])
+    // Тайм-аут передаёт пустую последовательность (sequenceOverride=[]),
+    // обычная отправка собирает текущую позицию барабанов.
+    const sequence =
+      sequenceOverride ?? drums.map((drum) => drum.symbols[drum.currentIndex])
     const response = await onSubmitMission(mission.id, { sequence })
 
     setSubmitting(false)
