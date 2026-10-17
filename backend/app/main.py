@@ -21,6 +21,7 @@ from app.mission_engine import (
 )
 from app.models import GamePlayer
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
+from app.shop_service import list_catalog_items, purchase_catalog_item
 from app.teams_service import (
     accept_invitation_entrypoint,
     approve_join_request_entrypoint,
@@ -551,6 +552,46 @@ def purchase_fallback_offer_route(
 ):
     try:
         return purchase_fallback_offer_entrypoint(player_id, offer_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+# ============================================================================
+# Shop (Sprint 8.16) — общий каталог ключей (shop.catalog).
+# ============================================================================
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/shop/items")
+def get_shop_items_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Список published KEY items из общего каталога (без квоты)."""
+    try:
+        with SessionLocal.begin() as session:
+            items = list_catalog_items(session, player_id)
+        return {"items": items}
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/shop/items/{item_id}/purchases")
+def purchase_shop_item_route(
+    request: Request,
+    item_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Купить ключ из каталога за ROOT (идемпотентная ledger-проводка)."""
+    try:
+        with SessionLocal.begin() as session:
+            return purchase_catalog_item(session, player_id, item_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,
