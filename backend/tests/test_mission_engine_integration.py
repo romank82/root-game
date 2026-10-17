@@ -970,6 +970,166 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self.assertEqual(item.quantity, 2)
 
 
+    def test_item_key_awarded_after_new_accept_after_failure(self) -> None:
+        """Sprint 8.14 (fix, per-run): новый заход БЕЗ провала → ключ выдаётся.
+
+        Entitlement «вечен» (contract) и после 1-го провала остаётся в БД,
+        но guard проверяет провал только в ТЕКУЩЕМ заходе: после нового
+        accept (attempt_count=0) успех с первой попытки снова даёт ключ.
+        """
+        from app.geo_team_runtime_models import PlayerFallbackEntitlement
+        from app.models import PlayerItem, PlayerMission
+
+        ids = self._fixture()
+        self._seed_key_rules(ids["item"])
+        self._upsert_fallback_settings()
+        self._attach_geo_zone(ids)
+        self._unlock(ids)
+
+        # Заход 1: провал (entitlement создан) → успех → ключ НЕ выдан
+        # (same-run guard: attempt_count_before == 1).
+        rejected = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong",
+            sequence=None,
+        )
+        self.assertFalse(rejected["accepted"])
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+        self.assertEqual(accepted["awarded"]["items"], [])
+
+        with self.SessionLocal() as session:
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNone(item)
+            entitlement = session.scalar(
+                select(PlayerFallbackEntitlement).where(
+                    PlayerFallbackEntitlement.player_id == ids["player"],
+                    PlayerFallbackEntitlement.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(entitlement)
+            self.assertEqual(entitlement.status, "available")
+
+        # Новый заход: mission возвращена в available, attempt_count = 0
+        # (суррогат шага 5 / after_terminal — как в test_zz_4_1_x).
+        with self.SessionLocal.begin() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.status = "available"
+            player_mission.attempt_count = 0
+            player_mission.started_at = None
+            player_mission.completed_at = None
+            player_mission.progress = {}
+
+        accepted = self.mission_engine.accept_mission(
+            ids["player"],
+            ids["target"],
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertIn("spawn", accepted)
+
+        # Заход 2: успех с 1-й попытки → attempt_count_before == 0 →
+        # guard не срабатывает → ключ ВЫДАН наградой.
+        second = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(second["accepted"])
+        awarded_items = second["awarded"]["items"]
+        self.assertEqual(len(awarded_items), 1)
+        self.assertEqual(awarded_items[0]["id"], ids["item"])
+        self.assertEqual(awarded_items[0]["quantity"], 2)
+
+        with self.SessionLocal() as session:
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(item)
+            self.assertEqual(item.quantity, 2)
+
+
+    def test_item_key_not_awarded_on_success_after_failure_same_run(self) -> None:
+        """Sprint 8.14 (fix, per-run): успех ПОСЛЕ провала в том же заходе → ключ НЕ выдан.
+
+        attempt_count_before == 1 (уже был провал) → guard срабатывает,
+        даже если entitlement создан в этом же заходе.
+        """
+        from app.geo_team_runtime_models import PlayerFallbackEntitlement
+        from app.models import PlayerItem, PlayerMission
+
+        ids = self._fixture()
+        self._seed_key_rules(ids["item"])
+        self._upsert_fallback_settings()
+        self._unlock(ids)
+
+        rejected = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong",
+            sequence=None,
+        )
+        self.assertFalse(rejected["accepted"])
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.attempt_count, 1)
+            entitlement = session.scalar(
+                select(PlayerFallbackEntitlement).where(
+                    PlayerFallbackEntitlement.player_id == ids["player"],
+                    PlayerFallbackEntitlement.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(entitlement)
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+        # attempt_count_before == 1 → провал в этом заходе → ключ не выдаём.
+        self.assertEqual(accepted["awarded"]["items"], [])
+
+        with self.SessionLocal() as session:
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNone(item)
+
+
     def test_zz_4_1_1_success_consumes_root_and_key(self) -> None:
         from app.geo_team_runtime_models import InventoryEvent
         from app.models import PlayerItem, PlayerMission, Wallet, WalletTransaction

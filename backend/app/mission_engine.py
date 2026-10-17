@@ -575,6 +575,7 @@ def _award_mission_rewards(
     reference_id: str | None = None,
     mission_run_id: str | None = None,
     attempt_number: int | None = None,
+    attempt_count_before: int | None = None,
 ) -> dict:
     """
     Выдаёт награды в той же транзакции, что и completion миссии.
@@ -595,6 +596,10 @@ def _award_mission_rewards(
     по attemptMultipliers опубликованной runtime-policy миссии
     (Sprint 8.14, шаг 4). При None/без policy награда не масштабируется.
     Значение и выбранный factor фиксируются в metadata_json проводки.
+
+    attempt_count_before — число попыток ДО текущего submit (0 — успех
+    с первой попытки захода). Используется per-run guard'ом fallback-ключа:
+    ключ выдаётся наградой, только если в ЭТОМ заходе провала не было.
     """
     if reference_id is None:
         reference_id = mission.id
@@ -703,7 +708,19 @@ def _award_mission_rewards(
             # либо магазин (первая попытка провалена).
             fallback_key = mission_has_purchasable_key_reward(session, mission.id)
             if fallback_key is not None and fallback_key.id == reward.item_id:
-                if is_key_reserved_for_player(session, player_id, mission.id):
+                # Sprint 8.14 (fix): per-run guard. Entitlement «вечен»
+                # (contract), но проверяем: был ли провал в ЭТОМ заходе.
+                # Если нет — ключ выдаётся наградой (XOR работает per-run,
+                # а не на всю жизнь миссии).
+                # attempt_count_before > 0 ⟺ в текущем заходе уже был провал.
+                failed_before_in_run = (
+                    attempt_count_before is not None and attempt_count_before > 0
+                )
+                if failed_before_in_run and is_key_reserved_for_player(
+                    session,
+                    player_id,
+                    mission.id,
+                ):
                     continue  # ключ уже в магазине
 
             player_item = session.scalar(
@@ -1078,6 +1095,9 @@ def _submit_mission_once(
             # (attempt_count_before + 1) — это 1-базовый номер попытки
             # в текущем проходе, по которому выбирается множитель награды.
             attempt_number=player_mission.attempt_count,
+            # Sprint 8.14 (fix): per-run guard fallback-ключа — был ли
+            # провал до этой успешной попытки в текущем заходе.
+            attempt_count_before=attempt_count_before,
         )
 
         return {
