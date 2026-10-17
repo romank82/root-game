@@ -485,7 +485,8 @@ class DirectExecutionTests(unittest.TestCase):
         ent = _entitlement()
         pm = _player_mission()
         session = FakeSession(
-            scalar_script=[pm, ent],
+            scalar_script=[pm],
+            scalars_script=[[ent]],
             get_results={"GamePlayer:player-1": _player()},
         )
         audit_ctx: list = []
@@ -497,6 +498,37 @@ class DirectExecutionTests(unittest.TestCase):
 
         self.assertIs(result["entitlementInvalidated"], True)
         self.assertEqual(ent.status, "disabled")
+        audit = audit_ctx[0]
+        self.assertIs(
+            audit.call_args.kwargs["metadata"]["entitlementInvalidated"], True
+        )
+
+    def test_invalidate_all_entitlements_for_mission(self) -> None:
+        # Sprint 8.16: у миссии может быть несколько ключей-наград -> по одному
+        # fallback-entitlement'у на каждый. Отмена с invalidate обязана выключить
+        # ВСЕ записи (player, mission), а не только первую.
+        ent_red = _entitlement(id="entitlement-red", item_id="item-red")
+        ent_blue = _entitlement(id="entitlement-blue", item_id="item-blue")
+        pm = _player_mission()
+        session = FakeSession(
+            scalar_script=[pm],
+            scalars_script=[[ent_red, ent_blue]],
+            get_results={"GamePlayer:player-1": _player()},
+        )
+        audit_ctx: list = []
+        result = self._cancel(
+            session,
+            payload_extra={"invalidate_fallback_entitlement": True},
+            audit_ctx=audit_ctx,
+        )
+
+        self.assertIs(result["entitlementInvalidated"], True)
+        self.assertEqual(ent_red.status, "disabled")
+        self.assertEqual(ent_blue.status, "disabled")
+        # В магазине не осталось ни одного доступного оффера этой миссии.
+        self.assertEqual(
+            [e for e in (ent_red, ent_blue) if e.status == "available"], []
+        )
         audit = audit_ctx[0]
         self.assertIs(
             audit.call_args.kwargs["metadata"]["entitlementInvalidated"], True

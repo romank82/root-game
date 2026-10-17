@@ -322,9 +322,11 @@ def _apply_mission_cancel(
 ) -> tuple[PlayerMission, bool]:
     """Перевести PlayerMission в терминальный статус cancelled + аудит.
 
-    Возвращает (player_mission, entitlement_invalidated). Entitlement
-    отключается только при явном invalidate_entitlement=true и статусе
-    available (exhausted/disabled не трогаем — это другие семантики).
+    Возвращает (player_mission, entitlement_invalidated). Entitlement'ы
+    отключаются только при явном invalidate_entitlement=true и статусе
+    available (exhausted/disabled не трогаем — это другие семантики);
+    инвалидируются ВСЕ записи игрока по миссии (Sprint 8.16: у миссии может
+    быть несколько fallback-entitlement'ов — по одному на ключ-награду).
     Ресурсы не возвращаются. Аудит пишется только после успешного flush.
     """
     if player_mission is None:
@@ -358,13 +360,16 @@ def _apply_mission_cancel(
 
     entitlement_invalidated = False
     if invalidate_entitlement:
-        entitlement = session.scalar(
+        # Sprint 8.16: у миссии может быть несколько fallback-entitlement'ов
+        # (по одному на каждый ключ-награду). Отключаем ВСЕ записи для
+        # (player, mission), а не только первую.
+        entitlements = session.scalars(
             select(PlayerFallbackEntitlement).where(
                 PlayerFallbackEntitlement.player_id == player_id,
                 PlayerFallbackEntitlement.mission_id == mission_id,
             )
-        )
-        if entitlement is not None:
+        ).all()
+        for entitlement in entitlements:
             if entitlement.status == ENTITLEMENT_ACTIVE_STATUS:
                 entitlement.status = ENTITLEMENT_DISABLED_STATUS
                 entitlement_invalidated = True
