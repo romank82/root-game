@@ -3,6 +3,7 @@ import './App.css'
 import { useAuth } from './hooks/useAuth'
 import { useGameState } from './hooks/useGameState'
 import { useGeoPosition } from './hooks/useGeoPosition'
+import { getEngineBootstrap } from './api/engineApi'
 import { Topbar } from './components/Topbar'
 import { MobileNavigation } from './components/MobileNavigation'
 import { BriefingScreen } from './components/screens/BriefingScreen'
@@ -168,6 +169,15 @@ function App() {
         <ShopScreen
           inventory={inventory}
           onScreenChange={setScreen}
+          onPurchaseComplete={async () => {
+            // Refetch bootstrap: inventory + rootBalance после покупки.
+            try {
+              const fresh = await getEngineBootstrap()
+              applyEngineBootstrap(fresh)
+            } catch {
+              // Покупка прошла, но bootstrap не обновился — не критично.
+            }
+          }}
         />
       )}
 

@@ -1,19 +1,23 @@
 import { useEffect, useState } from 'react'
 import type { Screen } from '../../types/game'
 import {
-  listFallbackOffers,
-  purchaseFallbackOffer,
+  listShopItems,
+  purchaseShopItem,
   type EngineInventoryItem,
-  type FallbackOffer,
+  type ShopCatalogItem,
 } from '../../api/engineApi'
 
 type ShopScreenProps = {
   inventory: EngineInventoryItem[]
   onScreenChange: (screen: Screen) => void
+  onPurchaseComplete?: () => void
 }
 
-export function ShopScreen({ inventory, onScreenChange }: ShopScreenProps) {
-  const [offers, setOffers] = useState<FallbackOffer[]>([])
+export function ShopScreen({
+  onScreenChange,
+  onPurchaseComplete,
+}: ShopScreenProps) {
+  const [items, setItems] = useState<ShopCatalogItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [purchasingId, setPurchasingId] = useState<string | null>(null)
@@ -23,9 +27,9 @@ export function ShopScreen({ inventory, onScreenChange }: ShopScreenProps) {
     let cancelled = false
     setLoading(true)
     setError(null)
-    listFallbackOffers()
+    listShopItems()
       .then((data) => {
-        if (!cancelled) setOffers(data)
+        if (!cancelled) setItems(data.items)
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message)
@@ -38,19 +42,18 @@ export function ShopScreen({ inventory, onScreenChange }: ShopScreenProps) {
     }
   }, [])
 
-  async function handlePurchase(offer: FallbackOffer) {
-    setPurchasingId(offer.entitlementId)
+  async function handlePurchase(item: ShopCatalogItem) {
+    setPurchasingId(item.itemId)
     setError(null)
     setNotice(null)
     try {
-      const result = await purchaseFallbackOffer(offer.entitlementId)
-      setNotice(
-        `Куплено. Баланс: ${result.rootBalance} ROOT. ` +
-          `Осталось попыток: ${result.remainingQuota}.`,
-      )
-      // Обновить список (quota могла уменьшиться, status → exhausted).
-      const refreshed = await listFallbackOffers()
-      setOffers(refreshed)
+      const result = await purchaseShopItem(item.itemId)
+      setNotice(`Куплено. Баланс: ${result.rootBalance} ROOT.`)
+      // Обновить список (owned мог измениться).
+      const refreshed = await listShopItems()
+      setItems(refreshed.items)
+      // Передать наверх: refetch bootstrap (inventory + rootBalance в App).
+      onPurchaseComplete?.()
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -60,7 +63,7 @@ export function ShopScreen({ inventory, onScreenChange }: ShopScreenProps) {
 
   return (
     <section className="shop">
-      <p className="eyebrow">МАГАЗИН / ПЕРСОНАЛЬНЫЕ ПРЕДЛОЖЕНИЯ</p>
+      <p className="eyebrow">МАГАЗИН / КЛЮЧИ</p>
       <h2>Магазин</h2>
 
       {loading && <p className="admin-muted">Загрузка…</p>}
@@ -68,61 +71,37 @@ export function ShopScreen({ inventory, onScreenChange }: ShopScreenProps) {
       {error && <p className="admin-alert admin-error">{error}</p>}
       {notice && <p className="admin-alert admin-notice">{notice}</p>}
 
-      {!loading && offers.length === 0 && !error && (
+      {!loading && items.length === 0 && !error && (
         <article className="message-card">
-          <p>
-            У вас нет персональных предложений. Они открываются
-            после первой неудачной попытки миссии.
-          </p>
+          <p>Магазин пуст.</p>
         </article>
       )}
 
-      {offers.map((offer) => (
-        <article className="message-card" key={offer.entitlementId}>
-          <p className="eyebrow">{offer.missionTitle}</p>
-          {offer.item && (
-            <h3>
-              {offer.item.symbol ? `${offer.item.symbol} ` : ''}
-              {offer.item.title}
-            </h3>
-          )}
-          {offer.item && (
-            <p>
-              <code>{offer.item.code}</code>
-            </p>
-          )}
-
+      {items.map((item) => (
+        <article className="message-card" key={item.itemId}>
+          <h3>
+            {item.symbol ? `${item.symbol} ` : ''}
+            {item.title}
+          </h3>
           <p>
-            Цена: <b>{offer.priceRoot} ROOT</b>
-            {' · '}
-            Осталось попыток: {offer.remainingQuota} из {offer.quotaLimit}
+            <code>{item.code}</code>
           </p>
 
-          {offer.item && (
-            <p className="shop-owned">
-              У вас:{' '}
-              {inventory.find((it) => it.code === offer.item?.code)?.quantity ?? 0}{' '}
-              шт.
-            </p>
-          )}
+          <p>
+            Цена: <b>{item.priceRoot} ROOT</b>
+          </p>
 
-          {offer.status === 'available' && offer.remainingQuota > 0 ? (
-            <button
-              className="admin-primary"
-              onClick={() => handlePurchase(offer)}
-              disabled={purchasingId === offer.entitlementId}
-            >
-              {purchasingId === offer.entitlementId
-                ? 'Покупка…'
-                : `Купить за ${offer.priceRoot} ROOT`}
-            </button>
-          ) : (
-            <p className="admin-muted">
-              {offer.status === 'exhausted'
-                ? 'Лимит покупок исчерпан.'
-                : 'Предложение недоступно.'}
-            </p>
-          )}
+          <p className="admin-muted">У вас: {item.owned} шт.</p>
+
+          <button
+            className="admin-primary"
+            onClick={() => handlePurchase(item)}
+            disabled={purchasingId === item.itemId}
+          >
+            {purchasingId === item.itemId
+              ? 'Покупка…'
+              : `Купить за ${item.priceRoot} ROOT`}
+          </button>
         </article>
       ))}
 
