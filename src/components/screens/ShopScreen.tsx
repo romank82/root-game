@@ -49,7 +49,7 @@ export function ShopScreen({
     try {
       const result = await purchaseShopItem(item.itemId)
       setNotice(`Куплено. Баланс: ${result.rootBalance} ROOT.`)
-      // Обновить список (owned мог измениться).
+      // Обновить каталог после покупки.
       const refreshed = await listShopItems()
       setItems(refreshed.items)
       // Передать наверх: refetch bootstrap (inventory + rootBalance в App).
@@ -66,7 +66,7 @@ export function ShopScreen({
       <p className="eyebrow">МАГАЗИН / КЛЮЧИ</p>
       <h2>Магазин</h2>
 
-      {loading && <p className="admin-muted">Загрузка…</p>}
+      {loading && <p>Загрузка…</p>}
 
       {error && <p className="admin-alert admin-error">{error}</p>}
       {notice && <p className="admin-alert admin-notice">{notice}</p>}
@@ -90,8 +90,6 @@ export function ShopScreen({
           <p>
             Цена: <b>{item.priceRoot} ROOT</b>
           </p>
-
-          <p className="admin-muted">У вас: {item.owned} шт.</p>
 
           <button
             className="admin-primary"
