@@ -217,9 +217,9 @@ class Mission(TimestampMixin, Base):
         default=None,
     )
 
-    # Время перезарядки в секундах до повторного взятия миссии после завершения/провала.
-    # 0 = одноразовая (после завершения/провала больше не появляется).
-    # >0 = через N секунд снова доступна.
+    # reentry_cooldown_seconds: таймер восстановления (после завершения
+    # или провала). 0 = сразу доступна (для after_terminal).
+    # Одноразовость (one_time) определяется repeatability_policy в runtime policy.
     reentry_cooldown_seconds: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

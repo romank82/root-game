@@ -539,6 +539,27 @@ class MissionEngineAcceptTests(unittest.TestCase):
         from datetime import timedelta
 
         ids = self._fixture(reentry_cooldown_seconds=10)  # 10 сек
+        # Sprint 8.15: возврат из expired после cooldown возможен только для
+        # after_terminal (legacy/one_time → архив).
+        from app.geo_team_runtime_models import MissionRuntimePolicy
+
+        with self.SessionLocal.begin() as session:
+            session.add(
+                MissionRuntimePolicy(
+                    id=f"policy-{uuid.uuid4().hex}",
+                    mission_id=ids["mission"],
+                    version=1,
+                    status="published",
+                    entry_root_atomic=0,
+                    max_attempts=3,
+                    repeatability_policy="after_terminal",
+                    required_items_json={"schemaVersion": 1, "items": []},
+                    challenge_policy_json={},
+                    reward_policy_json={},
+                    fallback_policy_json=None,
+                    feature_flags_json={},
+                )
+            )
         self._call_accept(ids)
         self.mission_engine.expire_mission(ids["player"], ids["mission"])
 

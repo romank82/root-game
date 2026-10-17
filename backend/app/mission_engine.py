@@ -252,16 +252,30 @@ def _synchronize_player_missions(
                 )
             player_mission.deadline_at = None
 
-        # Авто-возврат из cooldown: если available_again_at прошёл, вернуть 'available'.
-        if player_mission.status == "expired" and player_mission.available_again_at is not None:
-            if ensure_utc(player_mission.available_again_at) <= now:
-                player_mission.status = "available"
-                player_mission.available_again_at = None
-                player_mission.attempt_count = 0
-                player_mission.started_at = None
-                player_mission.completed_at = None
-                player_mission.progress = {}
-                continue
+        # Sprint 8.15 (fix): expired + cooldown, консистентно с completed-веткой.
+        # - one_time → остаётся expired (архив).
+        # - after_terminal + cooldown=0 → immediately available.
+        # - after_terminal + cooldown>0 → wait cooldown → available.
+        if player_mission.status == "expired":
+            # Policy check (как в completed-ветке выше).
+            policy = _get_published_runtime_policy(session, mission.id)
+            if policy is None:
+                continue  # legacy без policy — остаётся expired (как сейчас)
+            if policy.repeatability_policy != "after_terminal":
+                continue  # one_time / after_failure_only — остаётся expired (архив)
+            # after_terminal: проверяем cooldown.
+            if player_mission.available_again_at is not None:
+                if ensure_utc(player_mission.available_again_at) > now:
+                    continue  # ещё в cooldown
+                # cooldown истёк → возврат в available.
+            # available_again_at is None → cooldown=0 → immediately available.
+            player_mission.status = "available"
+            player_mission.available_again_at = None
+            player_mission.attempt_count = 0
+            player_mission.started_at = None
+            player_mission.completed_at = None
+            player_mission.progress = {}
+            continue
 
         # Expired-миссия (на cooldown или одноразовая) — не пересчитываем через
         # requirements. Иначе при изменении требований админом она бы ушла в

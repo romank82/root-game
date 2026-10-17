@@ -2166,6 +2166,9 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             ids["target"],
             entry_root_atomic=5,
             required_items=[(ids["item"], 1)],
+            # Sprint 8.15: возврат из expired после cooldown возможен только
+            # для after_terminal (one_time → архив).
+            repeatability_policy="after_terminal",
         )
         self._attach_geo_zone(ids)
         with self.SessionLocal.begin() as session:
@@ -2771,9 +2774,191 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 )
             )
             self.assertIsNotNone(player_mission)
+            # Sprint 8.15: policy=one_time → expired остаётся (архив).
             self.assertEqual(player_mission.status, "expired")
             self.assertIsNone(player_mission.deadline_at)
             self.assertIsNone(player_mission.available_again_at)
+
+    def test_zz_after_terminal_expired_no_cooldown_immediately_available(self) -> None:
+        """Sprint 8.15: after_terminal + cooldown=0 → expired → сразу available."""
+        from app.models import Mission, PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], repeatability_policy="after_terminal")
+        self._unlock(ids)
+
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            mission.reentry_cooldown_seconds = 0
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.status = "expired"
+            player_mission.attempt_count = 3
+            player_mission.available_again_at = None
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "available")
+            self.assertEqual(player_mission.attempt_count, 0)
+            self.assertIsNone(player_mission.available_again_at)
+            self.assertIsNone(player_mission.started_at)
+            self.assertIsNone(player_mission.completed_at)
+            self.assertEqual(player_mission.progress, {})
+
+    def test_zz_after_terminal_expired_with_cooldown_waits(self) -> None:
+        """Sprint 8.15: after_terminal + cooldown=300 → expired ждёт cooldown,
+        затем sync возвращает в available."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import Mission, PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], repeatability_policy="after_terminal")
+        self._unlock(ids)
+
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            mission.reentry_cooldown_seconds = 300
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.status = "expired"
+            player_mission.attempt_count = 3
+            player_mission.available_again_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None)
+                + timedelta(seconds=300)
+            )
+
+        # Ещё в cooldown → остаётся expired.
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "expired")
+
+        # Перемотка: cooldown прошёл → available.
+        with self.SessionLocal.begin() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.available_again_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None)
+                - timedelta(seconds=1)
+            )
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "available")
+            self.assertEqual(player_mission.attempt_count, 0)
+            self.assertIsNone(player_mission.available_again_at)
+
+    def test_zz_one_time_expired_stays(self) -> None:
+        """Sprint 8.15: one_time → expired остаётся (архив), даже с cooldown=0."""
+        from app.models import Mission, PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], repeatability_policy="one_time")
+        self._unlock(ids)
+
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            mission.reentry_cooldown_seconds = 0
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.status = "expired"
+            player_mission.attempt_count = 3
+            player_mission.available_again_at = None
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "expired")
+            self.assertIsNone(player_mission.available_again_at)
+
+    def test_zz_one_time_expired_with_cooldown_stays(self) -> None:
+        """Sprint 8.15: one_time → expired остаётся (архив), даже если cooldown прошёл."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import Mission, PlayerMission
+
+        ids = self._fixture()
+        self._seed_policy(ids["target"], repeatability_policy="one_time")
+        self._unlock(ids)
+
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            mission.reentry_cooldown_seconds = 300
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            player_mission.status = "expired"
+            player_mission.attempt_count = 3
+            player_mission.available_again_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None)
+                - timedelta(seconds=1)
+            )
+
+        with self.SessionLocal.begin() as session:
+            self.mission_engine._synchronize_player_missions(session, ids["player"])
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            self.assertEqual(player_mission.status, "expired")
 
     def test_zz_invariant_in_progress_below_limit_stays(self) -> None:
         """Sprint 8.14 (шаг 7): attempt_count < max_attempts — статус не меняется."""
@@ -3450,6 +3635,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self.assertIsNotNone(player_mission)
             # Отвергнутая попытка не инкрементировала счётчик.
             self.assertEqual(player_mission.attempt_count, 3)
+            # Sprint 8.15: policy=one_time (дефолт) → expired остаётся (архив).
             self.assertEqual(player_mission.status, "expired")
             # cooldown не задан → авто-возврат не планируется.
             self.assertIsNone(player_mission.available_again_at)
