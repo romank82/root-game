@@ -340,12 +340,24 @@ class ShopCatalogTests(unittest.TestCase):
     # ---- 8.16.1: публичный список каталога -----------------------------------
     def test_list_catalog_items_empty_when_disabled(self):
         ids = self._fixture()
-        # Миграция сеет shop.catalog.enabled = False → магазин выключен.
-        # Значение выставляем явно — тест не должен зависеть от порядка прогона.
+        # Магазин выключен админом: явно ставим False (head-миграции дают
+        # True по умолчанию). Явное значение — тест не зависит от порядка.
         self._set_setting(SHOP_ENABLED_KEY, False)
         with self.SessionLocal.begin() as session:
             items = list_catalog_items(session, ids["player"])
         self.assertEqual(items, [])
+
+    def test_list_catalog_items_enabled_by_default(self):
+        # Миграция 46acb135d92a ставит shop.catalog.enabled = True по
+        # умолчанию (согласует БД с каталогом default_value=True). Никакого
+        # явного _set_setting не нужно — pristine-копия БД уже enabled.
+        ids = self._fixture()
+
+        with self.SessionLocal.begin() as session:
+            items = list_catalog_items(session, ids["player"])
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["itemId"], ids["item_key_pub"])
 
     def test_list_catalog_items_only_published_key(self):
         ids = self._fixture()
