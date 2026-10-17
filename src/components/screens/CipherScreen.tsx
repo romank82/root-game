@@ -369,6 +369,20 @@ export function CipherScreen({
     )
   }
 
+  // Sprint 8.14 (ui): счётчик попыток. attemptCount инкрементится сервером
+  // при каждом промахе, поэтому текущая попытка = attemptCount + 1.
+  // maxAttempts — из published MissionRuntimePolicy; legacy без policy → null.
+  const currentAttempt = (mission?.attemptCount ?? 0) + 1
+  const maxAttempts = mission?.maxAttempts ?? null
+  const isLastAttempt = maxAttempts !== null && currentAttempt === maxAttempts
+
+  const attemptLabel =
+    maxAttempts !== null
+      ? `ПОПЫТКА ${currentAttempt} / ${maxAttempts}${
+          isLastAttempt ? ' (ПОСЛЕДНЯЯ)' : ''
+        }`
+      : `ПОПЫТКА ${currentAttempt}`
+
   // 3. Иначе — игровой UI.
   return (
     <section className="segment-screen">
@@ -415,6 +429,8 @@ export function CipherScreen({
           ⏱ {Math.max(timeLeft, 0)} сек
         </div>
       )}
+
+      {mission && <div className="cipher-timer">{attemptLabel}</div>}
 
       <div className="cipher-drums">
         {drums.map((drum, drumIndex) => {
