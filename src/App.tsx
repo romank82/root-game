@@ -165,7 +165,10 @@ function App() {
       )}
 
       {screen === 'shop' && (
-        <ShopScreen onScreenChange={setScreen} />
+        <ShopScreen
+          inventory={inventory}
+          onScreenChange={setScreen}
+        />
       )}
 
       {accepted && screen !== 'briefing' && (

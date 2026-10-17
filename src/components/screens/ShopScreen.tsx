@@ -3,14 +3,16 @@ import type { Screen } from '../../types/game'
 import {
   listFallbackOffers,
   purchaseFallbackOffer,
+  type EngineInventoryItem,
   type FallbackOffer,
 } from '../../api/engineApi'
 
 type ShopScreenProps = {
+  inventory: EngineInventoryItem[]
   onScreenChange: (screen: Screen) => void
 }
 
-export function ShopScreen({ onScreenChange }: ShopScreenProps) {
+export function ShopScreen({ inventory, onScreenChange }: ShopScreenProps) {
   const [offers, setOffers] = useState<FallbackOffer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -95,6 +97,14 @@ export function ShopScreen({ onScreenChange }: ShopScreenProps) {
             {' · '}
             Осталось попыток: {offer.remainingQuota} из {offer.quotaLimit}
           </p>
+
+          {offer.item && (
+            <p className="shop-owned">
+              У вас:{' '}
+              {inventory.find((it) => it.code === offer.item?.code)?.quantity ?? 0}{' '}
+              шт.
+            </p>
+          )}
 
           {offer.status === 'available' && offer.remainingQuota > 0 ? (
             <button
