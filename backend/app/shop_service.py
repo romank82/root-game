@@ -10,7 +10,9 @@ CMS-first: магазин включается настройкой shop.catalog
 Правила живут в system_settings, в коде — только механизмы и валидация.
 
 Идемпотентность: reference_id = f"{item.id}:{n}", где n — порядковый номер
-покупки ключа (счётчик берётся из player_item.quantity ДО инкремента).
+покупки ключа. Счётчик — число уже созданных immutable-событий выдачи этого
+ключа магазином (InventoryEvent "credited"/shop_purchase): quantity нельзя,
+он убывает при расходовании ключа на входе в миссию.
 Сквозные unique-индексы WalletTransaction (wallet_id, reference_type,
 reference_id) и InventoryEvent (player_item_id, event_type, reference_type,
 reference_id) — те же, что у fallback-покупки (шаг 4.4) и наград
@@ -22,7 +24,7 @@ from __future__ import annotations
 import logging
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.geo_team_runtime_models import InventoryEvent
@@ -198,11 +200,27 @@ def purchase_catalog_item(
         session.add(player_item)
         session.flush()  # нужен player_item.id для InventoryEvent
 
-    # reference_id от порядкового номера покупки ключа: детерминированный,
-    # растёт вместе с quantity, уникален на (player_item/wallet, reference_type).
-    reference_id = f"{item.id}:{player_item.quantity + 1}"
-
+    # Блокировка кошелька берётся до расчёта номера покупки: в PostgreSQL
+    # FOR UPDATE сериализует конкурентные покупки одного игрока, поэтому
+    # конкурентная сессия увидит уже закоммиченное число событий выдачи.
     wallet = _get_root_wallet_for_update(session, player_id)
+
+    # Порядковый номер покупки — из числа уже созданных immutable-событий
+    # выдачи этого ключа магазином (InventoryEvent "credited"/shop_purchase).
+    # PlayerItem.quantity использовать нельзя: он уменьшается при расходовании
+    # ключа на входе в миссию (mission_engine._apply_entry_debit), и после
+    # «купил → потратил → купил» reference_id совпал бы с первой покупкой,
+    # а guard вернул бы «успех» без списания ROOT и выдачи ключа. События
+    # выдачи immutable: число завершённых покупок = число таких событий,
+    # следующий номер монотонен и не коллизирует со старыми reference_id.
+    credited_count = session.scalar(
+        select(func.count(InventoryEvent.id)).where(
+            InventoryEvent.player_item_id == player_item.id,
+            InventoryEvent.event_type == INVENTORY_CREDITED_EVENT_TYPE,
+            InventoryEvent.reference_type == SHOP_PURCHASE_REFERENCE_TYPE,
+        )
+    )
+    reference_id = f"{item.id}:{(credited_count or 0) + 1}"
 
     # Идемпотентность (в т.ч. гонка двух параллельных POST): если проводка под
     # нашим reference_id уже закоммичена, повторный POST возвращает тот же

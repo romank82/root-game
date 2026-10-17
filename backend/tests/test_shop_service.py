@@ -459,6 +459,59 @@ class ShopCatalogTests(unittest.TestCase):
             self._count_shop_events(ids_b["player"], ids_b["item_key_pub"]), 0
         )
 
+    def test_rebuy_after_consumed_key_creates_new_reference(self):
+        # Регрессия «купил → потратил ключ → купил снова»: номер покупки
+        # обязан браться из числа immutable-событий выдачи ключа, а не из
+        # player_item.quantity (quantity убывает при расходовании ключа на
+        # входе в миссию). Вторая покупка должна получить новый reference_id,
+        # списать ROOT и выдать ключ, а не вернуть «успех» без проводки.
+        from app.models import PlayerItem
+
+        ids = self._fixture()
+        self._set_setting(SHOP_ENABLED_KEY, True)
+        self._seed_root_wallet(ids["player"], 1000)
+
+        with self.SessionLocal.begin() as session:
+            first = purchase_catalog_item(
+                session, ids["player"], ids["item_key_pub"]
+            )
+        self.assertEqual((first["rootBalance"], first["owned"]), (900, 1))
+
+        # Имитация расхода ключа: mission_engine._apply_entry_debit уменьшает
+        # quantity (и пишет отдельное consumed-событие), не трогая события
+        # выдачи магазина. Для воспроизведения бага достаточно снизить
+        # только quantity.
+        with self.SessionLocal.begin() as session:
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item_key_pub"],
+                )
+            )
+            self.assertIsNotNone(player_item)
+            player_item.quantity -= 1
+            session.flush()
+        self.assertEqual(self._owned(ids["player"], ids["item_key_pub"]), 0)
+
+        with self.SessionLocal.begin() as session:
+            second = purchase_catalog_item(
+                session, ids["player"], ids["item_key_pub"]
+            )
+        self.assertEqual((second["rootBalance"], second["owned"]), (800, 1))
+
+        # Две отдельные ROOT-проводки и два события выдачи; reference_id
+        # уникальны и продолжают последовательность item:1 -> item:2.
+        self.assertEqual(self._wallet_balance(ids["player"]), 800)
+        self.assertEqual(self._owned(ids["player"], ids["item_key_pub"]), 1)
+        self.assertEqual(self._count_shop_transactions(ids["player"]), 2)
+        self.assertEqual(
+            self._count_shop_events(ids["player"], ids["item_key_pub"]), 2
+        )
+        self.assertEqual(
+            self._shop_reference_ids(ids["player"]),
+            [f"{ids['item_key_pub']}:1", f"{ids['item_key_pub']}:2"],
+        )
+
     def test_purchase_insufficient_balance_409(self):
         ids = self._fixture()
         self._set_setting(SHOP_ENABLED_KEY, True)
