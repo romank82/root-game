@@ -492,6 +492,10 @@ class PlayerFallbackEntitlement(RuntimeTimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    # Sprint 8.16: ключ-награда (item), на который выдан entitlement.
+    # У миссии может быть несколько ключей — у каждого свой entitlement.
+    # NULL только у legacy-строк до миграции (backfill: item_id = offer_id).
+    item_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     offer_id: Mapped[str] = mapped_column(String(64), nullable=False)
     quota_limit: Mapped[int] = mapped_column(Integer, nullable=False)
     consumed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -501,7 +505,8 @@ class PlayerFallbackEntitlement(RuntimeTimestampMixin, Base):
         UniqueConstraint(
             "player_id",
             "mission_id",
-            name="uq_player_fallback_entitlements_player_mission",
+            "item_id",
+            name="uq_pfe_player_mission_item",
         ),
         CheckConstraint(
             "quota_limit >= 0",

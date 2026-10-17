@@ -106,6 +106,7 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         include_key_rules: bool = True,
         second_mission: bool = False,
         second_player: bool = False,
+        second_key_reward: bool = False,
     ) -> dict[str, str]:
         from app.models import (
             Chapter,
@@ -130,6 +131,7 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             "story": f"story-{suffix}",
             "item": f"item-{suffix}",
             "item_second": f"item-second-{suffix}",
+            "item_extra": f"item-extra-{suffix}",
             "target": f"target-{suffix}",
             "target_second": f"target-second-{suffix}",
         }
@@ -210,6 +212,23 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                         status="published",
                     )
                 )
+            if second_key_reward:
+                # Второй ключ-награда ТОЙ ЖЕ миссии (Sprint 8.16).
+                items.append(
+                    Item(
+                        id=ids["item_extra"],
+                        slug=f"item-extra-{suffix}",
+                        code=f"ITEMX-{suffix[:12]}",
+                        title="Extra fixture key",
+                        description="Second key reward of the same mission",
+                        symbol="KEY",
+                        category="key",
+                        rarity="common",
+                        is_unique=False,
+                        content={"schemaVersion": 1},
+                        status="published",
+                    )
+                )
 
             session.add_all(
                 [
@@ -252,6 +271,15 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                         KeyRules(
                             id=f"key-rules-second-{suffix}",
                             item_id=ids["item_second"],
+                            is_consumable=True,
+                            stack_limit=1,
+                        )
+                    )
+                if second_key_reward:
+                    session.add(
+                        KeyRules(
+                            id=f"key-rules-extra-{suffix}",
+                            item_id=ids["item_extra"],
                             is_consumable=True,
                             stack_limit=1,
                         )
@@ -319,6 +347,18 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                             amount=1,
                             reward_value={},
                             sort_order=1,
+                        )
+                    )
+                if second_key_reward:
+                    reward_rows.append(
+                        MissionReward(
+                            id=f"item-reward-extra-{suffix}",
+                            mission_id=ids["target"],
+                            reward_type="item",
+                            item_id=ids["item_extra"],
+                            amount=1,
+                            reward_value={},
+                            sort_order=2,
                         )
                     )
             session.add_all(reward_rows)
@@ -452,6 +492,20 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                 )
             )
 
+    def _list_entitlements(self, player_id: str, mission_id: str):
+        """Все entitlement'ы игрока на миссию (Sprint 8.16: их может быть >1)."""
+        from app.geo_team_runtime_models import PlayerFallbackEntitlement
+
+        with self.SessionLocal() as session:
+            return session.scalars(
+                select(PlayerFallbackEntitlement)
+                .where(
+                    PlayerFallbackEntitlement.player_id == player_id,
+                    PlayerFallbackEntitlement.mission_id == mission_id,
+                )
+                .order_by(PlayerFallbackEntitlement.item_id)
+            ).all()
+
     def _seed_root_wallet(self, player_id: str, amount: int) -> str:
         """Кошелёк с кредитной проводкой — игровой ROOT на старте (как в 4.1)."""
         from app.models import Wallet, WalletTransaction
@@ -492,7 +546,8 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         entitlement = self._get_entitlement(ids["player"], ids["target"])
         self.assertIsNotNone(entitlement)
         self.assertEqual(entitlement.status, "available")
-        self.assertEqual(entitlement.offer_id, "offer-fallback-1")
+        self.assertEqual(entitlement.offer_id, ids["item"])
+        self.assertEqual(entitlement.item_id, ids["item"])
         self.assertEqual(entitlement.quota_limit, 1)
         self.assertEqual(entitlement.consumed_count, 0)
 
@@ -586,6 +641,119 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         self.assertEqual(catcher.exception.status_code, 409)
         self.assertEqual(self._count_entitlements(ids["player"]), 0)
 
+    # ---- Sprint 8.16: несколько ключей-наград одной миссии -----------------
+    def test_8_16_first_failure_adds_all_key_rewards(self):
+        ids = self._fixture(second_key_reward=True)
+        result = self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        self.assertFalse(result["accepted"])
+        entitlements = self._list_entitlements(ids["player"], ids["target"])
+        self.assertEqual(
+            {entitlement.item_id for entitlement in entitlements},
+            {ids["item"], ids["item_extra"]},
+        )
+        for entitlement in entitlements:
+            self.assertEqual(entitlement.status, "available")
+            self.assertEqual(entitlement.quota_limit, 1)
+            self.assertEqual(entitlement.consumed_count, 0)
+            self.assertEqual(entitlement.offer_id, entitlement.item_id)
+
+    def test_8_16_repeated_failures_add_nothing(self):
+        ids = self._fixture(second_key_reward=True)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-1"
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-2"
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-3"
+        )
+        entitlements = self._list_entitlements(ids["player"], ids["target"])
+        self.assertEqual(len(entitlements), 2)
+
+    def test_8_16_purchase_individual_key(self):
+        ids = self._fixture(second_key_reward=True)
+        self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 2)
+        by_item = {offer["item"]["id"]: offer for offer in offers}
+        self.assertEqual(set(by_item), {ids["item"], ids["item_extra"]})
+
+        # Покупка красного: его квота исчерпана, синий остаётся доступен.
+        first = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], by_item[ids["item"]]["entitlementId"]
+        )
+        self.assertTrue(first["purchased"])
+        self.assertEqual(first["consumedCount"], 1)
+        self.assertEqual(first["status"], "exhausted")
+        self.assertEqual(first["item"]["id"], ids["item"])
+
+        remaining = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        by_item = {offer["item"]["id"]: offer for offer in remaining}
+        self.assertEqual(by_item[ids["item"]]["consumedCount"], 1)
+        self.assertEqual(by_item[ids["item"]]["status"], "exhausted")
+        self.assertEqual(by_item[ids["item_extra"]]["consumedCount"], 0)
+        self.assertEqual(by_item[ids["item_extra"]]["status"], "available")
+
+        # Синий покупается независимо.
+        second = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], by_item[ids["item_extra"]]["entitlementId"]
+        )
+        self.assertTrue(second["purchased"])
+        self.assertEqual(second["consumedCount"], 1)
+        self.assertEqual(second["status"], "exhausted")
+        self.assertEqual(second["item"]["id"], ids["item_extra"])
+
+        with self.SessionLocal() as session:
+            from app.models import PlayerItem
+
+            red = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            blue = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item_extra"],
+                )
+            )
+            self.assertIsNotNone(red)
+            self.assertEqual(red.quantity, 1)
+            self.assertIsNotNone(blue)
+            self.assertEqual(blue.quantity, 1)
+
+    def test_8_16_existing_single_key_compatible(self):
+        # Legacy-миссия с одним ключом работает как раньше: 1 entitlement
+        # на (player, mission), item_id = ключ-награда, покупка выдаёт ключ.
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlements = self._list_entitlements(ids["player"], ids["target"])
+        self.assertEqual(len(entitlements), 1)
+        entitlement = entitlements[0]
+        self.assertEqual(entitlement.item_id, ids["item"])
+        self.assertEqual(entitlement.offer_id, ids["item"])
+        self.assertEqual(entitlement.quota_limit, 1)
+
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0]["item"]["id"], ids["item"])
+
+        result = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], entitlement.id
+        )
+        self.assertTrue(result["purchased"])
+        self.assertEqual(result["item"]["id"], ids["item"])
+
     # ---- 4.3b.1–4.3b.7 (GET /api/v1/engine/fallback-offers) ------------
     def test_4_3b_1_no_entitlement_returns_empty(self):
         ids = self._fixture()
@@ -608,7 +776,7 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             offer["entitlementId"],
             self._get_entitlement(ids["player"], ids["target"]).id,
         )
-        self.assertEqual(offer["offerId"], "offer-fallback-1")
+        self.assertEqual(offer["offerId"], ids["item"])
         self.assertEqual(offer["priceRoot"], 100)
         self.assertEqual(offer["quotaLimit"], 1)
         self.assertEqual(offer["consumedCount"], 0)

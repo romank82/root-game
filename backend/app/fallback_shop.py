@@ -99,59 +99,81 @@ def mission_has_purchasable_key_reward(
     return item
 
 
+def _resolve_fallback_key_item(
+    session: Session,
+    entitlement: PlayerFallbackEntitlement,
+) -> Item | None:
+    """Предмет, на который выдан entitlement (4.3b/4.4, Sprint 8.16).
+
+    Основной источник — entitlement.item_id: у миссии может быть несколько
+    ключей-наград, и каждый entitlement адресует свой item. Для legacy-строк
+    (item_id NULL до миграции add item_id) — первый опубликованный
+    ключ-награда миссии (до Sprint 8.16 такой ключ был один).
+
+    Если item_id заполнен, но предмет недоступен (нет/unpublished/без
+    KeyRules) — возвращаем None (fallback НЕ делаем, чтобы не подсовывать
+    игроку другой предмет): оффер помечается disabled / покупка отдаёт 409.
+    """
+    if entitlement.item_id:
+        item = session.get(Item, entitlement.item_id)
+        if item is None or item.status != "published":
+            return None
+        key_rules = session.scalar(select(KeyRules).where(KeyRules.item_id == item.id))
+        if key_rules is None:
+            return None
+        return item
+    return mission_has_purchasable_key_reward(session, entitlement.mission_id)
+
+
 def is_key_reserved_for_player(
     session: Session,
     player_id: str,
     mission_id: str,
+    item_id: str | None = None,
 ) -> bool:
-    """Sprint 8.14: ключ уже зарезервирован в fallback-магазине?
+    """Sprint 8.14/8.16: ключ уже зарезервирован в fallback-магазине?
 
-    True, если для (player_id, mission_id) существует PlayerFallbackEntitlement.
-    В этом случае item-награда при успехе НЕ выдаётся — ключ уже в магазине.
+    True, если для (player_id, mission_id) существует PlayerFallbackEntitlement
+    (при item_id is None — любой), либо — Sprint 8.16 — entitlement именно на
+    этот ключ (item_id). В обоих случаях item-награда при успехе НЕ выдаётся:
+    ключ уже в магазине.
     """
-    existing = session.scalar(
-        select(PlayerFallbackEntitlement.id).where(
-            PlayerFallbackEntitlement.player_id == player_id,
-            PlayerFallbackEntitlement.mission_id == mission_id,
-        )
+    query = select(PlayerFallbackEntitlement.id).where(
+        PlayerFallbackEntitlement.player_id == player_id,
+        PlayerFallbackEntitlement.mission_id == mission_id,
     )
+    if item_id is not None:
+        query = query.where(PlayerFallbackEntitlement.item_id == item_id)
+    existing = session.scalar(query)
     return existing is not None
 
 
-def create_first_failure_entitlement(
+def create_first_failure_entitlements(
     session: Session,
     player_id: str,
     mission_id: str,
     *,
     attempt_count_before: int,
 ) -> None:
-    """Создать персональный fallback-entitlement после первого провала (4.3a).
+    """Создать персональный fallback-entitlement на КАЖДЫЙ ключ-награду (4.3a).
+
+    Sprint 8.16: при провале первой попытки в fallback-магазин попадают ВСЕ
+    item-награды миссии (каждая отдельным entitlement'ом), подтверждённые
+    KeyRules из CMS. Повторные провалы (attempt_count_before != 0) и повторные
+    вызовы ничего не добавляют: guard attempt_count_before == 0 + unique
+    (player_id, mission_id, item_id) делают функцию идемпотентной.
 
     V1 semantics (docs/fallback-shop-contract.md): первый неверный ответ создаёт
-    entitlement независимо от того, есть ли у миссии платная entry policy
+    entitlement'ы независимо от того, есть ли у миссии платная entry policy
     (работает и для бесплатных/legacy-миссий). Вызывать строго внутри транзакции
     submit_mission после успешного _consume_entry_resources и только когда
-    _validate_submission вернул False.
-
-    Идемпотентна: (player_id, mission_id) уникален в БД, а guard
-    attempt_count_before != 0 исключает повторное создание при следующих
-    провалах. Entitlement создаётся в статусе available с quota из настроек;
-    покупка ключа — шаг 4.4.
+    _validate_submission вернул False. offer_id = item.id (Sprint 8.16:
+    предложение адресует сам ключ, а не CMS-продукт из настроек).
     """
     if attempt_count_before != 0:
         return
 
     if _read_setting(session, FALLBACK_ENABLED_KEY) is not True:
-        return
-
-    offer_id = _read_setting(session, FALLBACK_OFFER_ID_KEY)
-    if not isinstance(offer_id, str) or not offer_id.strip():
-        logger.warning(
-            "fallback entitlement skipped: shop.fallback.default_offer_id is empty "
-            "(player_id=%s, mission_id=%s)",
-            player_id,
-            mission_id,
-        )
         return
 
     quota_limit = _read_setting(session, FALLBACK_QUOTA_LIMIT_KEY)
@@ -161,36 +183,49 @@ def create_first_failure_entitlement(
         or quota_limit < 1
     ):
         logger.warning(
-            "fallback entitlement skipped: shop.fallback.default_quota_limit is not "
+            "fallback entitlements skipped: shop.fallback.default_quota_limit is not "
             "a positive integer (player_id=%s, mission_id=%s)",
             player_id,
             mission_id,
         )
         return
 
-    if mission_has_purchasable_key_reward(session, mission_id) is None:
-        return
-
-    existing = session.scalar(
-        select(PlayerFallbackEntitlement).where(
-            PlayerFallbackEntitlement.player_id == player_id,
-            PlayerFallbackEntitlement.mission_id == mission_id,
+    rewards = session.scalars(
+        select(MissionReward).where(
+            MissionReward.mission_id == mission_id,
+            MissionReward.reward_type == "item",
+            MissionReward.item_id.is_not(None),
         )
-    )
-    if existing is not None:
-        return
+    ).all()
 
-    session.add(
-        PlayerFallbackEntitlement(
-            id=f"fallback-entitlement-{uuid4().hex}",
-            player_id=player_id,
-            mission_id=mission_id,
-            offer_id=offer_id.strip(),
-            quota_limit=quota_limit,
-            consumed_count=0,
-            status="available",
+    for reward in rewards:
+        item = session.get(Item, reward.item_id)
+        if item is None or item.status != "published":
+            continue
+        key_rules = session.scalar(select(KeyRules).where(KeyRules.item_id == item.id))
+        if key_rules is None:
+            continue
+        existing = session.scalar(
+            select(PlayerFallbackEntitlement).where(
+                PlayerFallbackEntitlement.player_id == player_id,
+                PlayerFallbackEntitlement.mission_id == mission_id,
+                PlayerFallbackEntitlement.item_id == item.id,
+            )
         )
-    )
+        if existing is not None:
+            continue
+        session.add(
+            PlayerFallbackEntitlement(
+                id=_new_id("fallback-entitlement"),
+                player_id=player_id,
+                mission_id=mission_id,
+                item_id=item.id,
+                offer_id=item.id,
+                quota_limit=quota_limit,
+                consumed_count=0,
+                status="available",
+            )
+        )
     session.flush()
 
 
@@ -224,7 +259,7 @@ def build_fallback_offers(session: Session, player_id: str) -> list[dict]:
         if mission is None:
             continue
 
-        item = mission_has_purchasable_key_reward(session, entitlement.mission_id)
+        item = _resolve_fallback_key_item(session, entitlement)
         effective_status = entitlement.status if item is not None else "disabled"
         remaining_quota = max(0, entitlement.quota_limit - entitlement.consumed_count)
 
@@ -303,7 +338,7 @@ def purchase_fallback_offer(
     unique-индексами WalletTransaction и InventoryEvent.
     """
     # Lazy import из-за циклической связи модулей: mission_engine импортирует
-    # fallback_shop на верхнем уровне (create_first_failure_entitlement).
+    # fallback_shop на верхнем уровне (create_first_failure_entitlements).
     from app.mission_engine import MissionEngineError
 
     entitlement = session.scalar(
@@ -320,7 +355,7 @@ def purchase_fallback_offer(
     if _read_setting(session, FALLBACK_ENABLED_KEY) is not True:
         raise MissionEngineError(409, "Магазин отключён.")
 
-    item = mission_has_purchasable_key_reward(session, entitlement.mission_id)
+    item = _resolve_fallback_key_item(session, entitlement)
     if item is None:
         raise MissionEngineError(409, "Ключ недоступен.")
 

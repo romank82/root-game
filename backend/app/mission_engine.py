@@ -12,9 +12,8 @@ from sqlalchemy.orm import Session
 from app.datetime_utils import ensure_utc
 from app.db import SessionLocal
 from app.fallback_shop import (
-    create_first_failure_entitlement,
+    create_first_failure_entitlements,
     is_key_reserved_for_player,
-    mission_has_purchasable_key_reward,
 )
 from app.geo_spawn import generate_spawn_point
 from app.player_restrictions_engine import recompute_player_status
@@ -716,26 +715,32 @@ def _award_mission_rewards(
                     "Награда миссии ссылается на отсутствующий предмет.",
                 )
 
-            # Sprint 8.14 (fix): если это fallback-ключ миссии и он уже
-            # зарезервирован в магазине (был провал) — НЕ выдавать наградой.
-            # Один ключ за миссию: либо награда (успех с 1-й попытки),
-            # либо магазин (первая попытка провалена).
-            fallback_key = mission_has_purchasable_key_reward(session, mission.id)
-            if fallback_key is not None and fallback_key.id == reward.item_id:
-                # Sprint 8.14 (fix): per-run guard. Entitlement «вечен»
-                # (contract), но проверяем: был ли провал в ЭТОМ заходе.
-                # Если нет — ключ выдаётся наградой (XOR работает per-run,
-                # а не на всю жизнь миссии).
-                # attempt_count_before > 0 ⟺ в текущем заходе уже был провал.
-                failed_before_in_run = (
-                    attempt_count_before is not None and attempt_count_before > 0
-                )
-                if failed_before_in_run and is_key_reserved_for_player(
+            # Sprint 8.14/8.16 (fix): если это fallback-ключ миссии (published
+            # item с KeyRules) и он уже зарезервирован в магазине на ЭТУ
+            # миссию — НЕ выдавать наградой. Per-key XOR per-run: каждый ключ
+            # миссии либо награда (успех с 1-й попытки), либо магазин (в
+            # текущем заходе первая попытка провалена).
+            # Sprint 8.16: у миссии может быть несколько ключей-наград —
+            # проверяем резервацию конкретного item, а не только первого.
+            # attempt_count_before > 0 ⟺ в текущем заходе уже был провал.
+            failed_before_in_run = (
+                attempt_count_before is not None and attempt_count_before > 0
+            )
+            has_key_rules = (
+                session.scalar(select(KeyRules).where(KeyRules.item_id == item.id))
+                is not None
+            )
+            if (
+                failed_before_in_run
+                and has_key_rules
+                and is_key_reserved_for_player(
                     session,
                     player_id,
                     mission.id,
-                ):
-                    continue  # ключ уже в магазине
+                    item_id=item.id,
+                )
+            ):
+                continue  # ключ уже в магазине
 
             player_item = session.scalar(
                 select(PlayerItem).where(
@@ -1067,7 +1072,7 @@ def _submit_mission_once(
             # docs/fallback-shop-contract.md): eligible независимо от paid policy,
             # работает и для бесплатных миссий. Функция идемпотентна, вызываем
             # только после успешного _consume_entry_resources и только при отказе.
-            create_first_failure_entitlement(
+            create_first_failure_entitlements(
                 session,
                 player_id,
                 mission.id,
