@@ -412,6 +412,70 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 )
             )
 
+    def _seed_key_rules(self, item_id: str, *, is_consumable: bool = True) -> None:
+        """KeyRules для item — делает его ключом по CMS (нужен fallback-пути)."""
+        from app.models import KeyRules
+
+        with self.SessionLocal.begin() as session:
+            session.add(
+                KeyRules(
+                    id=f"key-rules-{uuid.uuid4().hex}",
+                    item_id=item_id,
+                    is_consumable=is_consumable,
+                )
+            )
+
+    def _upsert_fallback_settings(self) -> None:
+        """Включить shop.fallback.* для теста.
+
+        Миграция 07131ffe9d13 уже сидит 4 строки дефолтов — upsert,
+        а не повторный INSERT (PK key конфликтовал бы).
+        """
+        from app.models import SystemSetting
+
+        rows = [
+            SystemSetting(
+                key="shop.fallback.enabled",
+                value_json=True,
+                value_type="boolean",
+                category="shop",
+                title="Fallback-магазин после первого провала",
+                description="Включает персональный магазин после первого провала миссии.",
+                is_sensitive=False,
+                status="active",
+            ),
+            SystemSetting(
+                key="shop.fallback.default_offer_id",
+                value_json="offer-fallback-1",
+                value_type="string",
+                category="shop",
+                title="Идентификатор fallback-предложения по умолчанию",
+                description="Ссылка на CMS product, продаваемый после провала.",
+                is_sensitive=False,
+                status="active",
+            ),
+            SystemSetting(
+                key="shop.fallback.default_quota_limit",
+                value_json=1,
+                value_type="integer",
+                category="shop",
+                title="Лимит покупок fallback-ключа по умолчанию",
+                description="Сколько раз игрок может купить ключ по этому предложению.",
+                is_sensitive=False,
+                status="active",
+            ),
+        ]
+        with self.SessionLocal.begin() as session:
+            for row in rows:
+                existing = session.get(SystemSetting, row.key)
+                if existing is None:
+                    session.add(row)
+                else:
+                    existing.value_json = row.value_json
+                    existing.value_type = row.value_type
+                    existing.status = "active"
+
+
     def _attach_geo_zone(self, ids: dict[str, str]) -> None:
         """Настроить target-миссии геозону, чтобы accept_mission прошёл."""
         from app.models import GeoZone, Mission
@@ -753,6 +817,157 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             {story["id"] for story in final_bootstrap["storyNodes"]},
             {ids["story"]},
         )
+
+
+    def test_item_key_not_awarded_after_failure(self) -> None:
+        """Sprint 8.14 (fix): провал → ключ в магазине, успех НЕ даёт его наградой.
+
+        Один ключ за миссию: entitlement (магазин) ИЛИ item-награда, не оба.
+        """
+        from app.geo_team_runtime_models import PlayerFallbackEntitlement
+        from app.models import PlayerItem
+
+        ids = self._fixture()
+        self._seed_key_rules(ids["item"])
+        self._upsert_fallback_settings()
+        self._unlock(ids)
+
+        rejected = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong",
+            sequence=None,
+        )
+        self.assertFalse(rejected["accepted"])
+
+        with self.SessionLocal() as session:
+            entitlement = session.scalar(
+                select(PlayerFallbackEntitlement).where(
+                    PlayerFallbackEntitlement.player_id == ids["player"],
+                    PlayerFallbackEntitlement.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNotNone(entitlement)
+            self.assertEqual(entitlement.status, "available")
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+        self.assertEqual(accepted["awarded"]["root"], 15)
+        # Ключ уже зарезервирован в магазине — наградой не выдаётся.
+        self.assertEqual(accepted["awarded"]["items"], [])
+
+        with self.SessionLocal() as session:
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNone(item)
+
+
+    def test_item_key_awarded_on_first_success(self) -> None:
+        """Sprint 8.14 (fix): успех с первой попытки — ключ выдаётся наградой.
+
+        Entitlement не создаётся (провала не было), магазин не получает ключ.
+        """
+        from app.geo_team_runtime_models import PlayerFallbackEntitlement
+        from app.models import PlayerItem
+
+        ids = self._fixture()
+        self._seed_key_rules(ids["item"])
+        self._upsert_fallback_settings()
+        self._unlock(ids)
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+        awarded_items = accepted["awarded"]["items"]
+        self.assertEqual(len(awarded_items), 1)
+        self.assertEqual(awarded_items[0]["id"], ids["item"])
+        self.assertEqual(awarded_items[0]["quantity"], 2)
+
+        with self.SessionLocal() as session:
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(item)
+            self.assertEqual(item.quantity, 2)
+
+            entitlement = session.scalar(
+                select(PlayerFallbackEntitlement).where(
+                    PlayerFallbackEntitlement.player_id == ids["player"],
+                    PlayerFallbackEntitlement.mission_id == ids["target"],
+                )
+            )
+            self.assertIsNone(entitlement)
+
+
+    def test_item_non_fallback_awarded_always(self) -> None:
+        """Sprint 8.14 (fix): item без KeyRules — не fallback-ключ.
+
+        Провал + успех: entitlement не создаётся, item всегда выдаётся
+        наградой (guard «ключ в магазине» не срабатывает).
+        """
+        from app.geo_team_runtime_models import PlayerFallbackEntitlement
+        from app.models import PlayerItem
+
+        ids = self._fixture()
+        # KeyRules НЕ создаём → mission_has_purchasable_key_reward вернёт None.
+        self._upsert_fallback_settings()
+        self._unlock(ids)
+
+        rejected = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="wrong",
+            sequence=None,
+        )
+        self.assertFalse(rejected["accepted"])
+
+        with self.SessionLocal() as session:
+            entitlement = session.scalar(
+                select(PlayerFallbackEntitlement).where(
+                    PlayerFallbackEntitlement.player_id == ids["player"],
+                    PlayerFallbackEntitlement.mission_id == ids["target"],
+                )
+            )
+            # Без KeyRules на item-награде entitlement не создаётся.
+            self.assertIsNone(entitlement)
+
+        accepted = self.mission_engine.submit_mission(
+            ids["player"],
+            ids["target"],
+            answer="complete",
+            sequence=None,
+        )
+        self.assertTrue(accepted["accepted"])
+        awarded_items = accepted["awarded"]["items"]
+        self.assertEqual(len(awarded_items), 1)
+        self.assertEqual(awarded_items[0]["id"], ids["item"])
+        self.assertEqual(awarded_items[0]["quantity"], 2)
+
+        with self.SessionLocal() as session:
+            item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(item)
+            self.assertEqual(item.quantity, 2)
 
 
     def test_zz_4_1_1_success_consumes_root_and_key(self) -> None:

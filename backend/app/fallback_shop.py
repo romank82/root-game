@@ -71,7 +71,7 @@ def _get_root_wallet_for_update(session: Session, player_id: str) -> Wallet | No
     )
 
 
-def _mission_has_purchasable_key_reward(
+def mission_has_purchasable_key_reward(
     session: Session,
     mission_id: str,
 ) -> Item | None:
@@ -97,6 +97,25 @@ def _mission_has_purchasable_key_reward(
         return None
 
     return item
+
+
+def is_key_reserved_for_player(
+    session: Session,
+    player_id: str,
+    mission_id: str,
+) -> bool:
+    """Sprint 8.14: ключ уже зарезервирован в fallback-магазине?
+
+    True, если для (player_id, mission_id) существует PlayerFallbackEntitlement.
+    В этом случае item-награда при успехе НЕ выдаётся — ключ уже в магазине.
+    """
+    existing = session.scalar(
+        select(PlayerFallbackEntitlement.id).where(
+            PlayerFallbackEntitlement.player_id == player_id,
+            PlayerFallbackEntitlement.mission_id == mission_id,
+        )
+    )
+    return existing is not None
 
 
 def create_first_failure_entitlement(
@@ -149,7 +168,7 @@ def create_first_failure_entitlement(
         )
         return
 
-    if _mission_has_purchasable_key_reward(session, mission_id) is None:
+    if mission_has_purchasable_key_reward(session, mission_id) is None:
         return
 
     existing = session.scalar(
@@ -205,7 +224,7 @@ def build_fallback_offers(session: Session, player_id: str) -> list[dict]:
         if mission is None:
             continue
 
-        item = _mission_has_purchasable_key_reward(session, entitlement.mission_id)
+        item = mission_has_purchasable_key_reward(session, entitlement.mission_id)
         effective_status = entitlement.status if item is not None else "disabled"
         remaining_quota = max(0, entitlement.quota_limit - entitlement.consumed_count)
 
@@ -301,7 +320,7 @@ def purchase_fallback_offer(
     if _read_setting(session, FALLBACK_ENABLED_KEY) is not True:
         raise MissionEngineError(409, "Магазин отключён.")
 
-    item = _mission_has_purchasable_key_reward(session, entitlement.mission_id)
+    item = mission_has_purchasable_key_reward(session, entitlement.mission_id)
     if item is None:
         raise MissionEngineError(409, "Ключ недоступен.")
 

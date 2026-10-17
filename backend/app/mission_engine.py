@@ -11,7 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.datetime_utils import ensure_utc
 from app.db import SessionLocal
-from app.fallback_shop import create_first_failure_entitlement
+from app.fallback_shop import (
+    create_first_failure_entitlement,
+    is_key_reserved_for_player,
+    mission_has_purchasable_key_reward,
+)
 from app.geo_spawn import generate_spawn_point
 from app.player_restrictions_engine import recompute_player_status
 from app.qr_service import generate_qr_payload, get_qr_ttl_seconds
@@ -692,6 +696,15 @@ def _award_mission_rewards(
                     500,
                     "Награда миссии ссылается на отсутствующий предмет.",
                 )
+
+            # Sprint 8.14 (fix): если это fallback-ключ миссии и он уже
+            # зарезервирован в магазине (был провал) — НЕ выдавать наградой.
+            # Один ключ за миссию: либо награда (успех с 1-й попытки),
+            # либо магазин (первая попытка провалена).
+            fallback_key = mission_has_purchasable_key_reward(session, mission.id)
+            if fallback_key is not None and fallback_key.id == reward.item_id:
+                if is_key_reserved_for_player(session, player_id, mission.id):
+                    continue  # ключ уже в магазине
 
             player_item = session.scalar(
                 select(PlayerItem).where(
