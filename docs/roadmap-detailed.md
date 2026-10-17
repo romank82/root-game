@@ -650,7 +650,41 @@
 - **8.14.7** ✅ Инвариант status ↔ attempt_count (`3126bc9`).
 - **Известный баг**: entry debit (mission_entry_debit) использует reference_id=mission.id (не per-run) — при повторном заходе debit не создаётся (unique index). Требует reference_id = f"{player_mission.id}_entry_{N}". Не исправлено.
 
-### Спринт 8.15. Админ-форма UX — ❌ запланирован
+### Спринт 8.15. Expire_mission при cooldown=0 — ✅ закрыт (2026-10-17)
+
+**Было:** при cooldown = 0 миссия после провала терялась навсегда.
+**Стало:** expired следует repeatability_policy:
+- one_time / legacy → expired (архив).
+- after_terminal + cooldown=0 → immediately available.
+- after_terminal + cooldown>0 → wait cooldown → available.
+**Тесты:** 571 OK.
+
+### Спринт 8.16. Полный магазин — ❌ запланирован
+
+**Логика:**
+- Магазин — общий для всех миссий.
+- Все published KEY items в списке.
+- Купить можно любое количество раз (пока есть ROOT).
+- Без quota_limit / consumed_count / exhausted.
+- Per-key цена (сейчас глобальная).
+
+**Что надо:**
+- ShopScreen → список всех published KEY items.
+- Новый endpoint /shop/items или fallback-offers без квоты.
+- Убрать quota_limit/consumed_count/exhausted.
+- Обновить docs (fallback-shop-contract.md), тесты, UI.
+
+### Долги
+
+- Per-key цена fallback.
+- Fallback offer_id: брать из миссии.
+- layerCounts: cooldown-миссии не учитываются как доступные.
+- Счётчик ключей в магазине: не обновляется после покупки.
+- Команды: frontend отсутствует (backend готов).
+- QR: deprecated.
+- attempt_deadline_seconds: удалён в 8.14 (мусор), остатки в миграциях/backups.
+
+### Спринт 8.17. Админ-форма UX — ❌ запланирован
 
 - **Статус**: ❌ запланирован.
 - Автозаполнение, справочники (Chapter, Story node, Slug, reward value JSON).
@@ -659,7 +693,7 @@
 - Правка контракта: правильная комбинация вводится дважды (cipher-блок + validation).
 - Алфавит символов — генерировать автоматически.
 
-### Спринт 8.16. Fallback per-key цена + offer_id из миссии — ❌ запланирован
+### Спринт 8.18. Fallback per-key цена + offer_id из миссии — ❌ запланирован
 
 - **Статус**: ❌ запланирован.
 - Per-key цена fallback-магазина (сейчас только глобальная shop.fallback.default_price_root).
