@@ -84,18 +84,20 @@ export function TerminalScreen({
     (mission) => mission.missionType !== 'team',
   )
 
-  // Активные (в основном списке): всё, кроме завершённых и одноразовых провалов.
+  // Sprint 8.14 (fix): миссия с cooldown (availableAgainAt) — всегда
+  // в активном списке, независимо от статуса (completed или expired).
   const activeMissions = textMissions.filter(
     (mission) =>
-      mission.status !== 'completed' &&
-      !(mission.status === 'expired' && mission.availableAgainAt === null),
+      mission.availableAgainAt !== null ||
+      (mission.status !== 'completed' &&
+        !(mission.status === 'expired' && mission.availableAgainAt === null)),
   )
 
-  // Архив: завершённые + одноразовые провалы.
   const archivedMissions = textMissions.filter(
     (mission) =>
-      mission.status === 'completed' ||
-      (mission.status === 'expired' && mission.availableAgainAt === null),
+      mission.availableAgainAt === null &&
+      (mission.status === 'completed' ||
+        (mission.status === 'expired' && mission.availableAgainAt === null)),
   )
 
   // Группировка активных миссий по слоям.
@@ -175,7 +177,15 @@ export function TerminalScreen({
           {missionText(mission, 'question', mission.description)}
         </h3>
 
-        {isCompleted ? (
+        {mission.availableAgainAt !== null ? (
+          <div className="expired-file">
+            <p>НА ПЕРЕРЫВЕ</p>
+            <p className="expired-hint">
+              Доступна снова через:{' '}
+              <CooldownCountdown availableAgainAt={mission.availableAgainAt} />
+            </p>
+          </div>
+        ) : isCompleted ? (
           <div className="success">
             <strong>
               {missionText(
@@ -195,16 +205,7 @@ export function TerminalScreen({
         ) : isExpired ? (
           <div className="expired-file">
             <p>ВРЕМЯ ВЫШЛО</p>
-            {mission.availableAgainAt ? (
-              <p className="expired-hint">
-                Доступна снова через:{' '}
-                <CooldownCountdown
-                  availableAgainAt={mission.availableAgainAt}
-                />
-              </p>
-            ) : (
-              <p className="expired-hint">Миссия одноразовая.</p>
-            )}
+            <p className="expired-hint">Миссия одноразовая.</p>
             <button
               className="expired-remove"
               onClick={() => void onExpireMission(mission.id)}
