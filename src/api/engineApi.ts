@@ -25,6 +25,14 @@ export type EngineMission = {
   title: string
   description: string
   content: Record<string, unknown>
+  // Sprint 8.17 (шаг 6-7): сгенерированная backend-сессия cipher-игры.
+  // Барабаны и правильный код создаются при accept и пересоздаются при
+  // каждом промахе. У старых миссий отсутствует → фронт использует
+  // content.ui как fallback до миграции (шаг 8.17.10).
+  cipherSession?: {
+    drums: string[][]
+    correctCode: string[]
+  } | null
   geoZoneId: string | null
   arObjectId: string | null
   spawn: EngineMissionSpawn | null

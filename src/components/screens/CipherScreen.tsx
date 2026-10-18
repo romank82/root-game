@@ -27,6 +27,13 @@ type CipherContent = {
   wrongAnswerText: string | null
 }
 
+// Backend-сессия cipher (mission.cipherSession, Sprint 8.17, шаги 6-7).
+// Создаётся при accept, пересоздаётся после каждого промаха на сервере.
+// У старых миссий отсутствует → fallback на content.ui (шаг 8.17.10).
+type CipherSession =
+  | { drums: string[][]; correctCode: string[] }
+  | null
+
 interface CipherScreenProps {
   missions: EngineMission[]
   onScreenChange: (screen: Screen) => void
@@ -118,7 +125,32 @@ function shuffle<T>(items: T[]): T[] {
   return copy
 }
 
-function buildDrums(content: CipherContent): Drum[] | null {
+function buildDrums(
+  content: CipherContent,
+  cipherSession: CipherSession,
+): Drum[] | null {
+  // Sprint 8.17 (шаг 7): приоритет — готовые барабаны с backend
+  // (mission.cipherSession). Локальная генерация из content.ui — fallback
+  // для старых миссий до миграции (шаг 8.17.10).
+  if (cipherSession) {
+    const drumsRaw = cipherSession.drums
+    if (
+      Array.isArray(drumsRaw) &&
+      drumsRaw.length > 0 &&
+      drumsRaw.every(
+        (symbols) =>
+          Array.isArray(symbols) &&
+          symbols.length > 0 &&
+          symbols.every((symbol) => typeof symbol === 'string'),
+      )
+    ) {
+      return drumsRaw.map((symbols) => ({
+        symbols: [...symbols],
+        currentIndex: 0,
+      }))
+    }
+  }
+
   const combinationChars = Array.from(content.combination)
   if (combinationChars.length !== content.drumCount) return null
 
@@ -179,18 +211,26 @@ export function CipherScreen({
   const cipherMissions = missions.filter((m) => m.missionType === 'cipher')
   const mission = useActiveMission(cipherMissions, null)
   const content = mission ? parseCipherContent(mission) : null
+  // Sprint 8.17 (шаг 7): готовая backend-сессия (барабаны + правильный код)
+  // приоритетнее content.ui; у старых миссий её нет → fallback на content.ui.
+  const cipherSession = mission?.cipherSession ?? null
+  // Правильный код для показа игроку (игра на внимательность, не на угадывание).
+  const correctCode =
+    cipherSession?.correctCode?.join('') ?? content?.combination ?? ''
 
   // Хранилище стартовой точки свайпа по вертикали.
   const startYRef = useRef<number | null>(null)
 
-  // Инициализация барабанов при смене миссии.
+  // Инициализация барабанов при смене миссии И при новой backend-сессии:
+  // после промаха сервер пересоздаёт cipherSession → deps перезапускают
+  // эффект и барабаны собираются заново (Sprint 8.17, шаг 7).
   useEffect(() => {
     const active = mission ? parseCipherContent(mission) : null
     if (!active) {
       setDrums([])
       return
     }
-    const next = buildDrums(active)
+    const next = buildDrums(active, mission?.cipherSession ?? null)
     setDrums(next ?? [])
     setError(null)
     setSuccessAward(null)
@@ -199,7 +239,7 @@ export function CipherScreen({
     setSubmitting(false)
     setTimedOut(false)
     setTimeLeft(active.timeLimitSeconds)
-  }, [mission?.id])
+  }, [mission?.id, mission?.cipherSession])
 
   // Обратный отсчёт. timeLeft <= 0 → тайм-аут = промах (не expire миссии).
   useEffect(() => {
@@ -412,8 +452,10 @@ export function CipherScreen({
         {content.instruction && <p>{content.instruction}</p>}
       </div>
 
+      {/* Sprint 8.17 (шаг 7): правильный код — из backend-сессии (correctCode);
+          у старых миссий без cipherSession — fallback на content.ui.combination. */}
       <div className="cipher-combination" aria-label="Правильная комбинация">
-        {Array.from(content.combination).map((char, index) => (
+        {Array.from(correctCode).map((char, index) => (
           <span key={`${char}-${index}`} className="cipher-combination-char">
             {char}
           </span>
@@ -468,7 +510,7 @@ export function CipherScreen({
         <button
           className="repair-clear-button"
           onClick={() => {
-            const next = buildDrums(content)
+            const next = buildDrums(content, cipherSession)
             if (next) setDrums(next)
             setError(null)
           }}
