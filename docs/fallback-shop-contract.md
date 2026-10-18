@@ -10,10 +10,11 @@ binding, limits, lifecycle, pool policy, eligibility policy, and feature flags
 are CMS/System Settings configuration. Runtime code performs validation,
 locking, idempotency, state transitions, and atomic domain execution.
 
-The current database contains `PlayerFallbackEntitlement` as foundation. It
-does not yet provide the full shop product, global pool, purchase, or executor
-implementation described here. This is a target contract; it does not authorize
-a schema change by itself.
+V1 (Sprint 8.16) is implemented and working end-to-end: entitlements are
+per `(player_id, mission_id, item_id)`, one offer per key-reward of the
+mission, with an atomic purchase. The full product/global-pool model described
+below remains a target contract; it does not authorize a schema change by
+itself beyond what V1 already implements.
 
 ## Definitions
 
@@ -45,10 +46,9 @@ idempotent: replaying the same outcome, timeout job, submit request, or
 transaction retry cannot create another entitlement or increment the pool.
 
 The entitlement must be traceable to qualifying run, attempt, and outcome in
-target schema and references. The existing unique `(player_id, mission_id)`
-foundation may need a separately reviewed migration before it can express all
-repeatable-run policy cases. No schema workaround or overloaded mutable field
-is permitted without that review.
+target schema and references. V1 expresses per-key cases via the unique
+`(player_id, mission_id, item_id)` constraint (Sprint 8.16). No schema
+workaround or overloaded mutable field is permitted without review.
 
 ## V1 semantics (implemented in 4.3a)
 
@@ -59,14 +59,16 @@ narrow subset of the target contract:
   (`attempt_count_before == 0`) for the owning player. It is eligible whether
   or not the mission has a paid entry policy; a failed answer on a free/legacy
   mission is equally eligible.
-- Only the **personal entitlement** is created as a `PlayerFallbackEntitlement`
-  row with `offer_id = shop.fallback.default_offer_id`,
+- **One entitlement per key-reward**: on the first qualifying outcome every
+  key-reward item of the mission gets its own `PlayerFallbackEntitlement` row
+  (a separate offer per key): `item_id` = the key's item,
+  `offer_id = shop.fallback.default_offer_id`,
   `quota_limit = shop.fallback.default_quota_limit`, `consumed_count = 0` and
   `status = 'available'`.
 - The **global offer pool is not touched**: V1 has no pool rows.
-- Creation is **idempotent** via the existing unique `(player_id, mission_id)`
+- Creation is **idempotent** via the unique `(player_id, mission_id, item_id)`
   constraint and the `attempt_count_before != 0` guard: later failed attempts
-  cannot extend or duplicate the entitlement.
+  cannot extend, duplicate, or add additional key entitlements.
 - The empty-string `offer_id` default means no entitlement is recorded until an
   admin enables a real `shop.fallback.default_offer_id` (and
   `shop.fallback.enabled = true`) through System Settings.

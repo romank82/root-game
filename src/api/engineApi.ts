@@ -358,10 +358,6 @@ export async function scanMissionQr(
   return response.json() as Promise<EngineMissionScanResult>
 }
 
-/**
- * @deprecated Sprint 8.16: общий магазин (shop.catalog) заменил fallback.
- * Оставлено временно; удаляется вместе с backend fallback-offers.
- */
 export async function listFallbackOffers(): Promise<FallbackOffer[]> {
   const response = await apiFetch('/api/v1/engine/fallback-offers')
 
@@ -373,10 +369,6 @@ export async function listFallbackOffers(): Promise<FallbackOffer[]> {
   return body.offers
 }
 
-/**
- * @deprecated Sprint 8.16: общий магазин (shop.catalog) заменил fallback.
- * Оставлено временно; удаляется вместе с backend fallback-offers.
- */
 export async function purchaseFallbackOffer(
   entitlementId: string,
 ): Promise<FallbackPurchaseResult> {

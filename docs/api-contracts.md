@@ -8,6 +8,8 @@
 - `GET /api/v1/engine/missions/{mission_id}/qr-payload` — подписанный QR-payload для миссии в `in_progress`
 - `GET /api/v1/engine/fallback-offers`
 - `POST /api/v1/engine/fallback-offers/{offer_id}/purchases`
+- `GET /api/v1/engine/shop/items` — @deprecated (каталог shop.catalog; не используется основным UI)
+- `POST /api/v1/engine/shop/items/{item_id}/purchases` — @deprecated (см. выше)
 - `POST /api/v1/engine/teams` — создать команду (201)
 - `GET /api/v1/engine/teams/me` — моя команда
 - `GET /api/v1/engine/teams/{team_id}` — карточка команды
@@ -54,10 +56,12 @@ API, где QR — protected challenge snapshot; здесь QR является 
 
 `GET /api/v1/engine/fallback-offers` (4.3b) возвращает только персональные
 fallback-предложения вызывающего игрока после первого провала
-(`docs/fallback-shop-contract.md`): mission id/slug/title, `entitlementId`
-(уникальный адрес предложения в API), offer id, `priceRoot` (цена ключа в ROOT
-atomic units, из system_settings), quota/remaining лимиты, presentation status
-и предмет-ключ (id/slug/code/title/symbol/category/rarity).
+(`docs/fallback-shop-contract.md`). Каждый ключ-награда миссии — отдельный
+оффер (entitlement per (player, mission, item)); оффер содержит: mission
+id/slug/title, `entitlementId` (уникальный адрес предложения в API), offer id,
+`priceRoot` (цена ключа в ROOT atomic units, из system_settings), quota/remaining
+лимиты, presentation status и предмет-ключ
+(id/slug/code/title/symbol/category/rarity).
 `shop.fallback.enabled=false` → пустой список; item не published / KeyRules
 удалён → `status: "disabled"` (derived, без записи в БД). Response никогда не
 содержит pool/mode/expiry, policy JSON или server-only метаданные.
@@ -81,6 +85,11 @@ committed-результат (`purchased: true`).
 Response: `{"purchased": true, "entitlementId", "consumedCount",
 "remainingQuota", "status", "priceRoot", "rootBalance", "item": {id, slug,
 code, title, symbol, category, rarity}}`.
+
+`GET /api/v1/engine/shop/items` и
+`POST /api/v1/engine/shop/items/{item_id}/purchases` — @deprecated: каталог
+`shop.catalog` (Sprint 8.16) реализован как альтернатива и не используется
+основным UI; основной flow продажи ключей — fallback-offers (4.3b/4.4) выше.
 
 ## Teams API (этап 6.4)
 

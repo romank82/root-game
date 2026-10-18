@@ -659,20 +659,21 @@
 - after_terminal + cooldown>0 → wait cooldown → available.
 **Тесты:** 571 OK.
 
-### Спринт 8.16. Полный магазин — ❌ запланирован
+### Спринт 8.16. Магазин ключей (per-key fallback) — ✅ закрыт (2026-10-18)
 
-**Логика:**
-- Магазин — общий для всех миссий.
-- Все published KEY items в списке.
-- Купить можно любое количество раз (пока есть ROOT).
-- Без quota_limit / consumed_count / exhausted.
-- Per-key цена (сейчас глобальная).
+**Что сделано:**
+- Backend: per-key entitlements (item_id в player_fallback_entitlements).
+  При провале 1 → ВСЕ ключи-награды миссии → отдельные офферы.
+  Провал 2+ → не добавляется.
+- Backend: admin invalidate ALL entitlements on mission cancel.
+- Backend: shop_service (каталог) + shop.catalog settings — оставлен
+  как альтернатива (не используется основным UI).
+- Frontend: ShopScreen → fallback-офферы, "В магазине: N" (remainingQuota).
+- Тесты: 586 OK.
 
-**Что надо:**
-- ShopScreen → список всех published KEY items.
-- Новый endpoint /shop/items или fallback-offers без квоты.
-- Убрать quota_limit/consumed_count/exhausted.
-- Обновить docs (fallback-shop-contract.md), тесты, UI.
+**Долги (перенесены в 8.17/8.18):**
+- Per-key цена fallback (сейчас глобальная).
+- Fallback offer_id из миссии.
 
 ### Долги
 
