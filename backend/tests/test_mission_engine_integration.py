@@ -3750,60 +3750,289 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
 
 
+    def _create_cipher_mission(
+        self,
+        ids: dict[str, str],
+        *,
+        drum_count: int = 4,
+        false_choices_per_drum: int = 2,
+    ) -> str:
+        """Создать published cipher-миссию с геозоной (Sprint 8.17, шаг 6)."""
+        from app.models import GeoZone, Mission
+
+        suffix = uuid.uuid4().hex
+        mission_id = f"cipher-{suffix}"
+        zone_id = f"cipher-zone-{suffix}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GeoZone(
+                    id=zone_id,
+                    slug=f"cipher-zone-{suffix}",
+                    title="Cipher fixture geo zone",
+                    description="Cipher accept fixture geo zone",
+                    zone_type="radius",
+                    status="published",
+                    sort_order=50,
+                    latitude=55.751244,
+                    longitude=37.618423,
+                    radius_meters=500,
+                    search_radius_meters=1500,
+                    location_constraints={},
+                )
+            )
+            session.add(
+                Mission(
+                    id=mission_id,
+                    chapter_id=ids["chapter"],
+                    slug=f"cipher-{suffix}",
+                    mission_type="cipher",
+                    title="Cipher mission",
+                    description="Cipher fixture mission",
+                    content={
+                        "schemaVersion": 1,
+                        "ui": {
+                            "label": "Cipher",
+                            "instruction": "Set the code",
+                            "drumCount": drum_count,
+                            "falseChoicesPerDrum": false_choices_per_drum,
+                        },
+                    },
+                    validation_config={
+                        "validator": "cipher_match",
+                        "correctCombination": [],  # legacy, больше не читается
+                    },
+                    status="published",
+                    sort_order=40,
+                    geo_zone_id=zone_id,
+                )
+            )
+        return mission_id
+
+    def _read_cipher_session(
+        self,
+        player_id: str,
+        mission_id: str,
+    ) -> dict:
+        from app.models import PlayerMission
+
+        with self.SessionLocal() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == player_id,
+                    PlayerMission.mission_id == mission_id,
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            session_data = (player_mission.progress or {}).get("cipher_session")
+            self.assertIsNotNone(session_data)
+            return session_data
+    def test_cipher_accept_generates_session(self) -> None:
+        """Sprint 8.17 (шаг 6): accept создаёт cipher_session в progress."""
+        from app.mission_engine import CIPHER_ALPHABET
+
+        ids = self._fixture()
+        cipher_mission_id = self._create_cipher_mission(
+            ids,
+            drum_count=4,
+            false_choices_per_drum=2,
+        )
+
+        accepted = self.mission_engine.accept_mission(
+            ids["player"],
+            cipher_mission_id,
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        self.assertTrue(accepted["accepted"])
+
+        session_data = self._read_cipher_session(ids["player"], cipher_mission_id)
+        correct_code = session_data["correct_code"]
+        drums = session_data["drums"]
+
+        self.assertEqual(len(correct_code), 4)  # длина = drumCount
+        self.assertEqual(len(drums), 4)
+        for index, correct in enumerate(correct_code):
+            self.assertIn(correct, CIPHER_ALPHABET)
+            drum = drums[index]
+            self.assertEqual(len(drum), 3)  # 1 верный + 2 ложных
+            self.assertIn(correct, drum)
+            # Ложные не повторяются и не равны верному (алфавит позволяет).
+            self.assertEqual(len(set(drum)), 3)
+
+        # Bootstrap отдаёт публичный cipherSession (барабаны + правильный код).
+        bootstrap = self.mission_engine.get_bootstrap(ids["player"])
+        cipher_mission = next(
+            mission
+            for mission in bootstrap["missions"]
+            if mission["id"] == cipher_mission_id
+        )
+        self.assertEqual(
+            cipher_mission["cipherSession"],
+            {"drums": drums, "correctCode": correct_code},
+        )
+
+    def test_cipher_submit_matches_generated_code(self) -> None:
+        """Sprint 8.17 (шаг 6): submit сверяется с progress.cipher_session."""
+        ids = self._fixture()
+        cipher_mission_id = self._create_cipher_mission(
+            ids,
+            drum_count=4,
+            false_choices_per_drum=2,
+        )
+
+        self.mission_engine.accept_mission(
+            ids["player"],
+            cipher_mission_id,
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        session_data = self._read_cipher_session(ids["player"], cipher_mission_id)
+
+        result = self.mission_engine.submit_mission(
+            ids["player"],
+            cipher_mission_id,
+            answer=None,
+            sequence=session_data["correct_code"],
+        )
+        self.assertTrue(result["accepted"])
+        self.assertFalse(result["alreadyCompleted"])
+        self.assertEqual(result["missionStatus"], "completed")
+
+    def test_cipher_submit_wrong_code_fails_and_regenerates(self) -> None:
+        """Неверный код → отказ + новый код и барабаны на новую попытку."""
+        from app.mission_engine import CIPHER_ALPHABET
+
+        ids = self._fixture()
+        cipher_mission_id = self._create_cipher_mission(
+            ids,
+            drum_count=4,
+            false_choices_per_drum=2,
+        )
+
+        self.mission_engine.accept_mission(
+            ids["player"],
+            cipher_mission_id,
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        before = self._read_cipher_session(ids["player"], cipher_mission_id)
+        old_code = before["correct_code"]
+
+        wrong_code = list(old_code)
+        wrong_code[-1] = next(
+            symbol for symbol in CIPHER_ALPHABET if symbol != wrong_code[-1]
+        )
+
+        rejected = self.mission_engine.submit_mission(
+            ids["player"],
+            cipher_mission_id,
+            answer=None,
+            sequence=wrong_code,
+        )
+        self.assertFalse(rejected["accepted"])
+        self.assertEqual(rejected["missionStatus"], "in_progress")
+
+        after = self._read_cipher_session(ids["player"], cipher_mission_id)
+        self.assertNotEqual(after["correct_code"], old_code)
+
+    def test_cipher_drums_contain_correct_symbol(self) -> None:
+        """Каждый барабан содержит правильный символ своей позиции."""
+        ids = self._fixture()
+        cipher_mission_id = self._create_cipher_mission(
+            ids,
+            drum_count=5,
+            false_choices_per_drum=3,
+        )
+
+        self.mission_engine.accept_mission(
+            ids["player"],
+            cipher_mission_id,
+            latitude=55.751244,
+            longitude=37.618423,
+        )
+        session_data = self._read_cipher_session(ids["player"], cipher_mission_id)
+
+        self.assertEqual(len(session_data["drums"]), 5)
+        self.assertEqual(len(session_data["correct_code"]), 5)
+        for drum, correct in zip(
+            session_data["drums"],
+            session_data["correct_code"],
+        ):
+            self.assertIn(correct, drum)
+            self.assertEqual(len(drum), 4)  # 1 верный + 3 ложных
 class CipherMatchValidatorUnitTests(unittest.TestCase):
-    """Direct unit tests for _validate_submission cipher_match validator."""
+    """Direct unit tests for _validate_submission cipher_match validator.
+
+    Sprint 8.17 (шаг 6): cipher_match сравнивает sequence с правильным кодом
+    из player_mission.progress.cipher_session.correct_code, а не с
+    validation_config.correctCombination (legacy, больше не читается).
+    """
 
     class FakeMission:
-        def __init__(self, validation_config: dict) -> None:
-            self.validation_config = validation_config
+        def __init__(self) -> None:
+            self.mission_type = "cipher"
             self.content = {"schemaVersion": 1}
+            self.validation_config = {"validator": "cipher_match"}
+
+    class FakePlayerMission:
+        def __init__(self, progress: dict) -> None:
+            self.progress = progress
 
     @staticmethod
     def _validate(
-        validation_config: dict,
+        progress: dict,
         sequence,
         answer: str | None = None,
     ) -> bool:
         from app.mission_engine import _validate_submission
 
-        mission = CipherMatchValidatorUnitTests.FakeMission(validation_config)
-        return _validate_submission(mission, answer, sequence)
+        mission = CipherMatchValidatorUnitTests.FakeMission()
+        player_mission = CipherMatchValidatorUnitTests.FakePlayerMission(progress)
+        return _validate_submission(mission, answer, sequence, player_mission)
 
-    def test_cipher_match_accepts_correct_sequence(self) -> None:
-        validation_config = {
-            "validator": "cipher_match",
-            "correctCombination": ["R", "O", "O", "T"],
+    @staticmethod
+    def _progress(correct_code: list[str]) -> dict:
+        return {
+            "cipher_session": {
+                "correct_code": correct_code,
+                "drums": [[symbol] for symbol in correct_code],
+            }
         }
 
+    def test_cipher_match_accepts_correct_sequence(self) -> None:
+        progress = self._progress(["R", "O", "O", "T"])
+
         self.assertTrue(
-            self._validate(validation_config, sequence=["R", "O", "O", "T"])
+            self._validate(progress, sequence=["R", "O", "O", "T"])
         )
 
     def test_cipher_match_rejects_wrong_sequence(self) -> None:
-        validation_config = {
-            "validator": "cipher_match",
-            "correctCombination": ["R", "O", "O", "T"],
-        }
+        progress = self._progress(["R", "O", "O", "T"])
 
         self.assertFalse(
-            self._validate(validation_config, sequence=["R", "O", "T", "O"])
+            self._validate(progress, sequence=["R", "O", "T", "O"])
         )
 
     def test_cipher_match_rejects_wrong_length(self) -> None:
-        validation_config = {
-            "validator": "cipher_match",
-            "correctCombination": ["R", "O", "O", "T"],
-        }
+        progress = self._progress(["R", "O", "O", "T"])
 
-        self.assertFalse(self._validate(validation_config, sequence=["R", "O"]))
+        self.assertFalse(self._validate(progress, sequence=["R", "O"]))
 
     def test_cipher_match_rejects_non_list(self) -> None:
-        validation_config = {
-            "validator": "cipher_match",
-            "correctCombination": ["R", "O", "O", "T"],
-        }
+        progress = self._progress(["R", "O", "O", "T"])
 
-        self.assertFalse(self._validate(validation_config, sequence="ROOT"))
+        self.assertFalse(self._validate(progress, sequence="ROOT"))
+
+    def test_cipher_match_rejects_missing_session(self) -> None:
+        """Без cipher_session (accept не вызывался) — submission невалиден."""
+        self.assertFalse(self._validate({}, sequence=["R", "O", "O", "T"]))
+
+    def test_cipher_match_rejects_without_player_mission(self) -> None:
+        """Защита сигнатуры: без player_mission cipher_match невалиден."""
+        from app.mission_engine import _validate_submission
+
+        mission = CipherMatchValidatorUnitTests.FakeMission()
+        self.assertFalse(_validate_submission(mission, None, ["R", "O"]))
 
 
 if __name__ == "__main__":

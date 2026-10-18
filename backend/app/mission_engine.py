@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import random
 import time
 from typing import Any
 from uuid import uuid4
@@ -45,6 +46,11 @@ ROOT_CURRENCY = "ROOT"
 ENTRY_DEBIT_REFERENCE_TYPE = "mission_entry_debit"
 ENTRY_ITEM_REFERENCE_TYPE = "mission_entry"
 ENTRY_ITEM_EVENT_TYPE = "consumed"
+
+# Sprint 8.17 (шаг 6): фиксированный алфавит cipher-игры (A-Z + 0-9).
+# Не редактируется в CMS; drumCount = длина кода, falseChoicesPerDrum ложных
+# символов + 1 верный на барабан.
+CIPHER_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 
 class MissionEngineError(Exception):
@@ -462,6 +468,10 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "geoZoneId": mission.geo_zone_id,
                 "arObjectId": mission.ar_object_id,
                 "spawn": _extract_spawn_for_bootstrap(progress[mission.id]),
+                "cipherSession": _serialize_cipher_session_for_bootstrap(
+                    mission,
+                    progress[mission.id],
+                ),
                 "status": progress[mission.id].status,
                 "attemptCount": progress[mission.id].attempt_count,
                 "maxAttempts": max_attempts_by_mission[mission.id],
@@ -536,13 +546,95 @@ def _normalize_text(value: str) -> str:
     return " ".join(value.casefold().strip().split())
 
 
+def generate_cipher_session(content_ui: dict) -> dict:
+    """Сгенерировать код + символы барабанов для одной попытки cipher.
+
+    Sprint 8.17 (шаг 6): правильный код больше не лежит в CMS — он создаётся
+    случайно при accept (и пересоздаётся при каждой неверной попытке) и
+    хранится в PlayerMission.progress.cipher_session.
+
+    - drumCount (по умолчанию 4): длина правильного кода и число барабанов.
+    - falseChoicesPerDrum (по умолчанию 2): ложных символов на барабан.
+    - Алфавит фиксированный: A-Z + 0-9 (36 символов).
+    - Каждый барабан: 1 верный + N ложных; ложные не совпадают с верным и
+      без повторов, пока хватает алфавита (при N > 35 допустимы повторы).
+    """
+    drum_count = content_ui.get("drumCount", 4)
+    false_choices = content_ui.get("falseChoicesPerDrum", 2)
+
+    try:
+        drum_count = int(drum_count)
+        false_choices = int(false_choices)
+    except (TypeError, ValueError):
+        # Надёжность: экранируем неожиданные значения из JS JSON.
+        drum_count = 4
+        false_choices = 2
+
+    # Границы по контракту cipher (content_contract.py); верхняя граница
+    # ложных — размер алфавита за вычетом верного символа.
+    drum_count = max(2, min(drum_count, 12))
+    false_choices = max(0, min(false_choices, 36))
+
+    correct_code = [random.choice(CIPHER_ALPHABET) for _ in range(drum_count)]
+
+    drums: list[list[str]] = []
+    for correct in correct_code:
+        false_pool = [symbol for symbol in CIPHER_ALPHABET if symbol != correct]
+        if false_choices <= len(false_pool):
+            false_symbols = random.sample(false_pool, false_choices)
+        else:
+            false_symbols = [
+                random.choice(false_pool) for _ in range(false_choices)
+            ]
+        symbols = [correct, *false_symbols]
+        random.shuffle(symbols)
+        drums.append(symbols)
+
+    return {
+        "correct_code": correct_code,
+        "drums": drums,
+    }
+
+
+def _serialize_cipher_session_for_bootstrap(
+    mission: Mission,
+    player_mission: PlayerMission,
+) -> dict | None:
+    """Sprint 8.17: публичные барабаны и правильный код для cipher-игры.
+
+    correctCode отдаётся намеренно: cipher — игра на внимательность и
+    скорость, а не на разгадку (docs/minigame-cipher.md, раздел 3) — код
+    показывается игроку на экране. Проверка ответа при submit всё равно
+    выполняется на сервере по progress.cipher_session.
+    """
+    if mission.mission_type != "cipher":
+        return None
+    session_data = (player_mission.progress or {}).get("cipher_session")
+    if not isinstance(session_data, dict):
+        return None
+    drums = session_data.get("drums")
+    correct_code = session_data.get("correct_code")
+    if not isinstance(drums, list) or not isinstance(correct_code, list):
+        return None
+    return {
+        "drums": drums,
+        "correctCode": correct_code,
+    }
+
+
 def _validate_submission(
     mission: Mission,
     answer: str | None,
     sequence: list[str] | None,
+    player_mission: PlayerMission | None = None,
 ) -> bool:
     """
-    Проверяет закрытый validation_config исключительно на сервере.
+    Проверяет закрытую часть ответа исключительно на сервере.
+
+    Для обычных валидаторов источник истины — mission.validation_config
+    (правила из CMS). Для cipher_match (Sprint 8.17, шаг 6) правильный код
+    генерируется при accept и хранится в progress.cipher_session;
+    validation_config.correctCombination больше не используется.
     """
     validator = mission.validation_config.get("validator")
 
@@ -569,7 +661,17 @@ def _validate_submission(
         )
 
     if validator == "cipher_match":
-        correct = mission.validation_config.get("correctCombination", [])
+        # Sprint 8.17 (шаг 6): правильный код — из progress.cipher_session,
+        # а не из validation_config (см. generate_cipher_session).
+        if player_mission is None:
+            return False
+        session_data = (player_mission.progress or {}).get("cipher_session")
+        if not isinstance(session_data, dict):
+            return False  # нет сессии — невалидно
+        correct = session_data.get("correct_code")
+        if not isinstance(correct, list):
+            return False
+
         return (
             isinstance(sequence, list)
             and len(sequence) == len(correct)
@@ -1066,7 +1168,9 @@ def _submit_mission_once(
         if player_mission.entry_count == 0:
             _consume_entry_resources(session, player_id, mission, player_mission)
 
-        if not _validate_submission(mission, answer, sequence):
+        if not _validate_submission(
+            mission, answer, sequence, player_mission=player_mission
+        ):
             # Шаг 4.3a: первый неверный ответ → персональный fallback-entitlement.
             # attempt_count_before == 0 => это первая попытка (V1 semantics,
             # docs/fallback-shop-contract.md): eligible независимо от paid policy,
@@ -1078,6 +1182,15 @@ def _submit_mission_once(
                 mission.id,
                 attempt_count_before=attempt_count_before,
             )
+            # Sprint 8.17 (шаг 6): неверная попытка закрыта — следующая попытка
+            # получает новый код и новые барабаны (сгенерированная при accept
+            # сессия больше недействительна).
+            if mission.mission_type == "cipher":
+                content_ui = (mission.content or {}).get("ui", {})
+                new_session = generate_cipher_session(content_ui)
+                progress = dict(player_mission.progress or {})
+                progress["cipher_session"] = new_session
+                player_mission.progress = progress
             return {
                 "accepted": False,
                 "alreadyCompleted": False,
@@ -1278,6 +1391,16 @@ def _accept_mission_once(
         progress = dict(progress)
         progress["spawn"] = spawn_record
         player_mission.progress = progress
+
+        # Sprint 8.17 (шаг 6): cipher-игра получает при accept новый случайный
+        # код и символы барабанов. Сессия хранится в progress.cipher_session:
+        # при submit сервер сверяется именно с ней, а не с validation_config.
+        if mission.mission_type == "cipher":
+            content_ui = (mission.content or {}).get("ui", {})
+            session_data = generate_cipher_session(content_ui)
+            progress = dict(player_mission.progress or {})
+            progress["cipher_session"] = session_data
+            player_mission.progress = progress
 
         if player_mission.started_at is None:
             started = _utcnow()
