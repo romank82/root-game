@@ -140,6 +140,37 @@ class Segment(TimestampMixin, Base):
     )
 
 
+class MinigameProfile(TimestampMixin, Base):
+    """Профиль настроек мини-игры (Sprint 8.17).
+
+    Отдельно от Mission: один профиль может использоваться во многих миссиях.
+    Настройки зависят от game_type (cipher, code_repair, text_answer).
+    """
+
+    __tablename__ = "minigame_profiles"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    game_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # JSON: { drumCount, alphabet, falseChoicesPerDrum, combination, timeLimitSeconds }
+    # или { blocks, correctSequence } (code_repair)
+    # или { acceptedAnswers } (text_answer)
+    settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="draft",
+        index=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')",
+            name="ck_minigame_profiles_status",
+        ),
+    )
+
+
 class Mission(TimestampMixin, Base):
     __tablename__ = "missions"
 
