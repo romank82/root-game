@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './AdminApp.css'
 import {
+  archiveMinigameProfile,
   archiveSegment,
   createAdmin,
   createAdminMission,
   createARObject,
   createGeoZone,
   createKeyItem,
+  createMinigameProfile,
   createSegment,
   deactivateAdmin,
   getAdminMe,
@@ -19,11 +21,13 @@ import {
   listGeoZones,
   listKeyItems,
   listKeyRules,
+  listMinigameProfiles,
   listSegments,
   listSystemSettings,
   loginAdmin,
   logoutAdmin,
   publishAdminMission,
+  publishMinigameProfile,
   publishMissionRuntimePolicy,
   publishSegment,
   reactivateAdmin,
@@ -33,6 +37,7 @@ import {
   updateAdminMission,
   updateARObject,
   updateGeoZone,
+  updateMinigameProfile,
   updateKeyRule,
   updateSegment,
   updateSystemSetting,
@@ -40,6 +45,7 @@ import {
   PERMISSION_CATALOG,
   type AdminARObject,
   type AdminGeoZone,
+  type AdminMinigameProfile,
   type AdminMission,
   type AdminMissionPayload,
   type AdminSegment,
@@ -474,7 +480,12 @@ function AdminApp() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [form, setForm] = useState<MissionForm>(emptyForm)
   const [section, setSection] = useState<
-    'missions' | 'settings' | 'admins' | 'keys' | 'content'
+    'missions'
+    | 'settings'
+    | 'admins'
+    | 'keys'
+    | 'content'
+    | 'minigame-profiles'
   >(
     () =>
       (localStorage.getItem('chimera-admin-section') as
@@ -482,7 +493,8 @@ function AdminApp() {
         | 'settings'
         | 'admins'
         | 'keys'
-        | 'content') ?? 'missions',
+        | 'content'
+        | 'minigame-profiles') ?? 'missions',
   )
   const [settings, setSettings] = useState<AdminSystemSetting[]>([])
   const [selectedSettingKey, setSelectedSettingKey] = useState<string | null>(
@@ -592,6 +604,32 @@ function AdminApp() {
   const [publishingPolicy, setPublishingPolicy] = useState(false)
   const [selectedKeyRuleId, setSelectedKeyRuleId] = useState<string | null>(null)
   const [loadingKeyRules, setLoadingKeyRules] = useState(false)
+  // Minigame profiles (Sprint 8.17)
+  const [minigameProfiles, setMinigameProfiles] = useState<
+    AdminMinigameProfile[]
+  >([])
+  const [loadingMinigameProfiles, setLoadingMinigameProfiles] = useState(false)
+  const [minigameProfilesError, setMinigameProfilesError] = useState<
+    string | null
+  >(null)
+  const [selectedMinigameProfileId, setSelectedMinigameProfileId] = useState<
+    string | null
+  >(null)
+  const [showCreateMinigameProfile, setShowCreateMinigameProfile] =
+    useState(false)
+  const [minigameProfileName, setMinigameProfileName] = useState('')
+  const [minigameProfileGameType, setMinigameProfileGameType] = useState(
+    'cipher',
+  )
+  const [minigameProfileSettingsJson, setMinigameProfileSettingsJson] =
+    useState('{}')
+  const [savingMinigameProfile, setSavingMinigameProfile] = useState(false)
+  const [minigameProfileError, setMinigameProfileError] = useState<
+    string | null
+  >(null)
+  const [minigameProfileNotice, setMinigameProfileNotice] = useState<
+    string | null
+  >(null)
   const [keyRulesError, setKeyRulesError] = useState<string | null>(null)
   const [showCreateKey, setShowCreateKey] = useState(false)
   const [newKeyTitle, setNewKeyTitle] = useState('')
@@ -693,6 +731,28 @@ function AdminApp() {
       })
       .finally(() => {
         if (!cancelled) setLoadingKeyRules(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [section])
+
+  useEffect(() => {
+    if (section !== 'minigame-profiles') return
+    let cancelled = false
+    setLoadingMinigameProfiles(true)
+    setMinigameProfilesError(null)
+    listMinigameProfiles()
+      .then((data) => {
+        if (cancelled) return
+        setMinigameProfiles(data)
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setMinigameProfilesError(err.message)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMinigameProfiles(false)
       })
     return () => {
       cancelled = true
@@ -907,6 +967,30 @@ function AdminApp() {
     setShowCreateARObject(false)
     setARObjectError(null)
   }, [selectedARObjectId, section, contentTab])
+
+  useEffect(() => {
+    setShowCreateMinigameProfile(false)
+    setMinigameProfileError(null)
+    setMinigameProfileNotice(null)
+  }, [section])
+
+  useEffect(() => {
+    if (!selectedMinigameProfileId) {
+      setMinigameProfileName('')
+      setMinigameProfileGameType('cipher')
+      setMinigameProfileSettingsJson('{}')
+      setMinigameProfileError(null)
+      setMinigameProfileNotice(null)
+      return
+    }
+    const p = minigameProfiles.find((x) => x.id === selectedMinigameProfileId)
+    if (!p) return
+    setMinigameProfileName(p.name)
+    setMinigameProfileGameType(p.gameType)
+    setMinigameProfileSettingsJson(prettyJson(p.settings))
+    setMinigameProfileError(null)
+    setMinigameProfileNotice(null)
+  }, [selectedMinigameProfileId, minigameProfiles])
 
   useEffect(() => {
     if (section !== 'content') return
@@ -1271,6 +1355,103 @@ function AdminApp() {
       setSavingKeyError((err as Error).message)
     } finally {
       setSavingKey(false)
+    }
+  }
+
+  function handleShowCreateMinigameProfile() {
+    setShowCreateMinigameProfile(true)
+    setSelectedMinigameProfileId(null)
+    setMinigameProfileName('')
+    setMinigameProfileGameType('cipher')
+    setMinigameProfileSettingsJson('{}')
+    setMinigameProfileError(null)
+    setMinigameProfileNotice(null)
+  }
+
+  async function handleCreateMinigameProfile() {
+    setSavingMinigameProfile(true)
+    setMinigameProfileError(null)
+    try {
+      let settings: Record<string, unknown>
+      try {
+        settings = parseObject(minigameProfileSettingsJson, 'settings')
+      } catch (e) {
+        throw new Error((e as Error).message)
+      }
+      const created = await createMinigameProfile({
+        name: minigameProfileName,
+        game_type: minigameProfileGameType,
+        settings,
+      })
+      setMinigameProfiles((prev) => [...prev, created])
+      setSelectedMinigameProfileId(created.id)
+      setShowCreateMinigameProfile(false)
+      setMinigameProfileNotice('Создано.')
+    } catch (err) {
+      setMinigameProfileError((err as Error).message)
+    } finally {
+      setSavingMinigameProfile(false)
+    }
+  }
+
+  async function handleSaveMinigameProfile() {
+    if (!selectedMinigameProfileId) return
+    setSavingMinigameProfile(true)
+    setMinigameProfileError(null)
+    try {
+      let settings: Record<string, unknown>
+      try {
+        settings = parseObject(minigameProfileSettingsJson, 'settings')
+      } catch (e) {
+        throw new Error((e as Error).message)
+      }
+      const updated = await updateMinigameProfile(selectedMinigameProfileId, {
+        name: minigameProfileName,
+        game_type: minigameProfileGameType,
+        settings,
+      })
+      setMinigameProfiles((prev) =>
+        prev.map((p) => (p.id === updated.id ? updated : p)),
+      )
+      setMinigameProfileNotice('Сохранено.')
+    } catch (err) {
+      setMinigameProfileError((err as Error).message)
+    } finally {
+      setSavingMinigameProfile(false)
+    }
+  }
+
+  async function handlePublishMinigameProfile() {
+    if (!selectedMinigameProfileId) return
+    setSavingMinigameProfile(true)
+    setMinigameProfileError(null)
+    try {
+      const updated = await publishMinigameProfile(selectedMinigameProfileId)
+      setMinigameProfiles((prev) =>
+        prev.map((p) => (p.id === updated.id ? updated : p)),
+      )
+      setMinigameProfileNotice('Опубликовано.')
+    } catch (err) {
+      setMinigameProfileError((err as Error).message)
+    } finally {
+      setSavingMinigameProfile(false)
+    }
+  }
+
+  async function handleArchiveMinigameProfile() {
+    if (!selectedMinigameProfileId) return
+    setSavingMinigameProfile(true)
+    setMinigameProfileError(null)
+    try {
+      const updated = await archiveMinigameProfile(selectedMinigameProfileId)
+      setMinigameProfiles((prev) =>
+        prev.map((p) => (p.id === updated.id ? updated : p)),
+      )
+      setMinigameProfileNotice('Архивировано.')
+    } catch (err) {
+      setMinigameProfileError((err as Error).message)
+    } finally {
+      setSavingMinigameProfile(false)
     }
   }
 
@@ -2091,6 +2272,7 @@ function AdminApp() {
             {section === 'settings' && 'Настройки'}
             {section === 'admins' && 'Администраторы'}
             {section === 'keys' && 'Ключи'}
+            {section === 'minigame-profiles' && 'Мини-игры'}
           </h1>
 
           <nav className="admin-nav">
@@ -2125,6 +2307,13 @@ function AdminApp() {
               onClick={() => setSection('keys')}
             >
               Ключи
+            </button>
+
+            <button
+              className={section === 'minigame-profiles' ? 'is-active' : ''}
+              onClick={() => setSection('minigame-profiles')}
+            >
+              Мини-игры
             </button>
           </nav>
         </div>
@@ -3985,6 +4174,196 @@ function AdminApp() {
                   </>
                 )
               })()
+            )}
+          </section>
+        </div>
+      )}
+
+      {section === 'minigame-profiles' && (
+        <div className="admin-layout">
+          <aside className="admin-sidebar">
+            <button
+              className="admin-primary"
+              onClick={handleShowCreateMinigameProfile}
+              disabled={!canWrite}
+            >
+              + Новый профиль
+            </button>
+            <button
+              className="admin-refresh"
+              onClick={() => {
+                setSelectedMinigameProfileId(null)
+                setMinigameProfiles([])
+                setMinigameProfilesError(null)
+                setLoadingMinigameProfiles(true)
+                listMinigameProfiles()
+                  .then(setMinigameProfiles)
+                  .catch((err: Error) => setMinigameProfilesError(err.message))
+                  .finally(() => setLoadingMinigameProfiles(false))
+              }}
+              disabled={loadingMinigameProfiles}
+            >
+              {loadingMinigameProfiles ? 'Обновление…' : '↻ Обновить список'}
+            </button>
+
+            {minigameProfilesError && (
+              <p className="admin-alert admin-error">{minigameProfilesError}</p>
+            )}
+
+            <div className="admin-mission-list">
+              {minigameProfiles.map((p) => (
+                <button
+                  key={p.id}
+                  className={`admin-mission-row ${selectedMinigameProfileId === p.id ? 'is-active' : ''}`}
+                  onClick={() => {
+                    setSelectedMinigameProfileId(p.id)
+                    setShowCreateMinigameProfile(false)
+                  }}
+                >
+                  <span className={`admin-status admin-status-${p.status}`}>
+                    {p.status}
+                  </span>
+                  <strong>{p.name}</strong>
+                  <small>{p.gameType}</small>
+                </button>
+              ))}
+              {!loadingMinigameProfiles &&
+                minigameProfiles.length === 0 &&
+                !minigameProfilesError && (
+                  <p className="admin-muted">Профилей нет.</p>
+                )}
+            </div>
+          </aside>
+
+          <section className="admin-editor">
+            {showCreateMinigameProfile || selectedMinigameProfileId ? (
+              <>
+                <div className="admin-editor-title">
+                  <h2>
+                    {showCreateMinigameProfile
+                      ? 'Новый профиль мини-игры'
+                      : 'Редактирование профиля'}
+                  </h2>
+                  {selectedMinigameProfileId && (
+                    <code>{selectedMinigameProfileId}</code>
+                  )}
+                  {selectedMinigameProfileId && (
+                    <span
+                      className={`admin-status admin-status-${
+                        minigameProfiles.find(
+                          (p) => p.id === selectedMinigameProfileId,
+                        )?.status ?? 'draft'
+                      }`}
+                    >
+                      {minigameProfiles.find(
+                        (p) => p.id === selectedMinigameProfileId,
+                      )?.status}
+                    </span>
+                  )}
+                </div>
+
+                {minigameProfileError && (
+                  <p className="admin-alert admin-error">
+                    {minigameProfileError}
+                  </p>
+                )}
+                {minigameProfileNotice && (
+                  <p className="admin-alert admin-notice">
+                    {minigameProfileNotice}
+                  </p>
+                )}
+
+                <div className="admin-grid">
+                  <label className="admin-span-2">
+                    Имя профиля *
+                    <input
+                      value={minigameProfileName}
+                      disabled={!canWrite}
+                      onChange={(e) => setMinigameProfileName(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Тип игры *
+                    <select
+                      value={minigameProfileGameType}
+                      disabled={!canWrite}
+                      onChange={(e) => setMinigameProfileGameType(e.target.value)}
+                    >
+                      <option value="cipher">cipher</option>
+                      <option value="code_repair">code_repair</option>
+                      <option value="text_answer">text_answer</option>
+                    </select>
+                  </label>
+                  <label className="admin-span-2">
+                    Настройки (JSON) *
+                    <textarea
+                      rows={14}
+                      className="admin-code"
+                      spellCheck={false}
+                      value={minigameProfileSettingsJson}
+                      disabled={!canWrite}
+                      onChange={(e) =>
+                        setMinigameProfileSettingsJson(e.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="admin-actions">
+                  {showCreateMinigameProfile ? (
+                    <>
+                      <button
+                        className="admin-primary"
+                        onClick={handleCreateMinigameProfile}
+                        disabled={!canWrite || savingMinigameProfile}
+                      >
+                        {savingMinigameProfile ? 'Создание…' : 'Создать'}
+                      </button>
+                      <button
+                        className="admin-secondary"
+                        onClick={() => setShowCreateMinigameProfile(false)}
+                        disabled={savingMinigameProfile}
+                      >
+                        Отмена
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="admin-primary"
+                        onClick={handleSaveMinigameProfile}
+                        disabled={!canWrite || savingMinigameProfile}
+                      >
+                        {savingMinigameProfile ? 'Сохранение…' : 'Сохранить'}
+                      </button>
+                      {minigameProfiles.find(
+                        (p) => p.id === selectedMinigameProfileId,
+                      )?.status === 'draft' && (
+                        <button
+                          className="admin-publish"
+                          onClick={handlePublishMinigameProfile}
+                          disabled={!canWrite || savingMinigameProfile}
+                        >
+                          Опубликовать
+                        </button>
+                      )}
+                      {minigameProfiles.find(
+                        (p) => p.id === selectedMinigameProfileId,
+                      )?.status === 'published' && (
+                        <button
+                          className="admin-danger"
+                          onClick={handleArchiveMinigameProfile}
+                          disabled={!canWrite || savingMinigameProfile}
+                        >
+                          Архивировать
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="admin-muted">Выберите профиль или создайте новый.</p>
             )}
           </section>
         </div>
