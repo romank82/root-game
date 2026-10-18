@@ -201,6 +201,15 @@ class Mission(TimestampMixin, Base):
         nullable=True,
         index=True,
     )
+
+    # Профиль мини-игры: переиспользуемые настройки из справочника (Sprint 8.17).
+    # Обязателен для published (правило в admin_missions).
+    minigame_profile_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("minigame_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     mission_type: Mapped[str] = mapped_column(String(64), nullable=False)
     mission_category: Mapped[str] = mapped_column(
