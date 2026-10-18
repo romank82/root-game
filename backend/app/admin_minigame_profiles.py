@@ -36,6 +36,43 @@ MINIGAME_PROFILES_MANAGE_PERMISSION = "minigame_profiles.manage"
 VALID_GAME_TYPES = frozenset({"cipher", "code_repair", "text_answer"})
 
 
+def _validate_settings(game_type: str, settings: dict) -> dict:
+    """Валидирует settings по game_type. Возвращает очищенный dict.
+
+    Sprint 8.17: только параметры сложности. Алфавит и код генерирует
+    backend при каждой попытке (не в профиле).
+    """
+    allowed_by_type = {
+        "cipher": {"drumCount", "falseChoicesPerDrum", "timeLimitSeconds"},
+        "code_repair": {"maxBlocks"},  # пока заглушка
+        "text_answer": set(),  # пока заглушка
+    }
+    allowed = allowed_by_type.get(game_type)
+    if allowed is None:
+        raise HTTPException(422, f"Неизвестный game_type: {game_type}.")
+    extra = set(settings.keys()) - allowed
+    if extra:
+        raise HTTPException(
+            422,
+            f"Лишние поля для {game_type}: {sorted(extra)}. "
+            f"Разрешены: {sorted(allowed)}.",
+        )
+    # Валидация значений для cipher
+    if game_type == "cipher":
+        drum_count = settings.get("drumCount")
+        if not isinstance(drum_count, int) or not (2 <= drum_count <= 12):
+            raise HTTPException(422, "drumCount должен быть int 2..12.")
+        false_choices = settings.get("falseChoicesPerDrum")
+        if not isinstance(false_choices, int) or not (0 <= false_choices <= 36):
+            raise HTTPException(422, "falseChoicesPerDrum должен быть int 0..36.")
+        time_limit = settings.get("timeLimitSeconds")
+        if time_limit is not None and (
+            not isinstance(time_limit, int) or not (1 <= time_limit <= 3600)
+        ):
+            raise HTTPException(422, "timeLimitSeconds должен быть null или int 1..3600.")
+    return settings
+
+
 class AdminMinigameProfileCreatePayload(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     game_type: str = Field(min_length=1, max_length=64)
@@ -158,6 +195,7 @@ def create_admin_minigame_profile(
 ):
     name = _normalize_name(payload.name)
     _validate_game_type(payload.game_type)
+    settings = _validate_settings(payload.game_type, payload.settings or {})
 
     with SessionLocal.begin() as session:
         if session.scalar(
@@ -172,7 +210,7 @@ def create_admin_minigame_profile(
             id=_new_id(),
             name=name,
             game_type=payload.game_type,
-            settings=payload.settings or {},
+            settings=settings,
             status="draft",
         )
         session.add(profile)
@@ -245,7 +283,10 @@ def update_admin_minigame_profile(
             changed_fields.append("game_type")
 
         if payload.settings is not None:
-            profile.settings = payload.settings or {}
+            game_type_used = payload.game_type or profile.game_type
+            profile.settings = _validate_settings(
+                game_type_used, payload.settings or {}
+            )
             changed_fields.append("settings")
 
         session.flush()

@@ -621,8 +621,13 @@ function AdminApp() {
   const [minigameProfileGameType, setMinigameProfileGameType] = useState(
     'cipher',
   )
-  const [minigameProfileSettingsJson, setMinigameProfileSettingsJson] =
-    useState('{}')
+  // Для cipher:
+  const [mgDrumCount, setMgDrumCount] = useState('4')
+  const [mgFalseChoices, setMgFalseChoices] = useState('2')
+  const [mgTimeLimit, setMgTimeLimit] = useState('60')
+
+  // Для code_repair (пока заглушка):
+  const [mgMaxBlocks, setMgMaxBlocks] = useState('3')
   const [savingMinigameProfile, setSavingMinigameProfile] = useState(false)
   const [minigameProfileError, setMinigameProfileError] = useState<
     string | null
@@ -978,7 +983,10 @@ function AdminApp() {
     if (!selectedMinigameProfileId) {
       setMinigameProfileName('')
       setMinigameProfileGameType('cipher')
-      setMinigameProfileSettingsJson('{}')
+      setMgDrumCount('4')
+      setMgFalseChoices('2')
+      setMgTimeLimit('60')
+      setMgMaxBlocks('3')
       setMinigameProfileError(null)
       setMinigameProfileNotice(null)
       return
@@ -987,7 +995,16 @@ function AdminApp() {
     if (!p) return
     setMinigameProfileName(p.name)
     setMinigameProfileGameType(p.gameType)
-    setMinigameProfileSettingsJson(prettyJson(p.settings))
+    const s = p.settings || {}
+    if (p.gameType === 'cipher') {
+      setMgDrumCount(String(s.drumCount ?? '4'))
+      setMgFalseChoices(String(s.falseChoicesPerDrum ?? '2'))
+      setMgTimeLimit(
+        s.timeLimitSeconds != null ? String(s.timeLimitSeconds) : '',
+      )
+    } else if (p.gameType === 'code_repair') {
+      setMgMaxBlocks(String(s.maxBlocks ?? '3'))
+    }
     setMinigameProfileError(null)
     setMinigameProfileNotice(null)
   }, [selectedMinigameProfileId, minigameProfiles])
@@ -1358,12 +1375,35 @@ function AdminApp() {
     }
   }
 
+  function buildSettingsFromForm(): Record<string, unknown> {
+    switch (minigameProfileGameType) {
+      case 'cipher': {
+        return {
+          drumCount: Number(mgDrumCount),
+          falseChoicesPerDrum: Number(mgFalseChoices),
+          timeLimitSeconds: mgTimeLimit.trim() ? Number(mgTimeLimit) : null,
+        }
+      }
+      case 'code_repair': {
+        return { maxBlocks: Number(mgMaxBlocks) }
+      }
+      case 'text_answer': {
+        return {}
+      }
+      default:
+        return {}
+    }
+  }
+
   function handleShowCreateMinigameProfile() {
     setShowCreateMinigameProfile(true)
     setSelectedMinigameProfileId(null)
     setMinigameProfileName('')
     setMinigameProfileGameType('cipher')
-    setMinigameProfileSettingsJson('{}')
+    setMgDrumCount('4')
+    setMgFalseChoices('2')
+    setMgTimeLimit('60')
+    setMgMaxBlocks('3')
     setMinigameProfileError(null)
     setMinigameProfileNotice(null)
   }
@@ -1372,12 +1412,7 @@ function AdminApp() {
     setSavingMinigameProfile(true)
     setMinigameProfileError(null)
     try {
-      let settings: Record<string, unknown>
-      try {
-        settings = parseObject(minigameProfileSettingsJson, 'settings')
-      } catch (e) {
-        throw new Error((e as Error).message)
-      }
+      const settings = buildSettingsFromForm()
       const created = await createMinigameProfile({
         name: minigameProfileName,
         game_type: minigameProfileGameType,
@@ -1399,12 +1434,7 @@ function AdminApp() {
     setSavingMinigameProfile(true)
     setMinigameProfileError(null)
     try {
-      let settings: Record<string, unknown>
-      try {
-        settings = parseObject(minigameProfileSettingsJson, 'settings')
-      } catch (e) {
-        throw new Error((e as Error).message)
-      }
+      const settings = buildSettingsFromForm()
       const updated = await updateMinigameProfile(selectedMinigameProfileId, {
         name: minigameProfileName,
         game_type: minigameProfileGameType,
@@ -4294,19 +4324,63 @@ function AdminApp() {
                       <option value="text_answer">text_answer</option>
                     </select>
                   </label>
-                  <label className="admin-span-2">
-                    Настройки (JSON) *
-                    <textarea
-                      rows={14}
-                      className="admin-code"
-                      spellCheck={false}
-                      value={minigameProfileSettingsJson}
-                      disabled={!canWrite}
-                      onChange={(e) =>
-                        setMinigameProfileSettingsJson(e.target.value)
-                      }
-                    />
-                  </label>
+                  {minigameProfileGameType === 'cipher' && (
+                    <>
+                      <label>
+                        Количество барабанов *
+                        <input
+                          type="number"
+                          min={2}
+                          max={12}
+                          value={mgDrumCount}
+                          disabled={!canWrite}
+                          onChange={(e) => setMgDrumCount(e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Ложных символов на барабан *
+                        <input
+                          type="number"
+                          min={0}
+                          max={36}
+                          value={mgFalseChoices}
+                          disabled={!canWrite}
+                          onChange={(e) => setMgFalseChoices(e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Время на решение (сек, пусто = без лимита)
+                        <input
+                          type="number"
+                          min={1}
+                          max={3600}
+                          value={mgTimeLimit}
+                          disabled={!canWrite}
+                          onChange={(e) => setMgTimeLimit(e.target.value)}
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  {minigameProfileGameType === 'code_repair' && (
+                    <label>
+                      Максимум блоков *
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={mgMaxBlocks}
+                        disabled={!canWrite}
+                        onChange={(e) => setMgMaxBlocks(e.target.value)}
+                      />
+                    </label>
+                  )}
+
+                  {minigameProfileGameType === 'text_answer' && (
+                    <p className="admin-muted">
+                      Для этого типа игры параметров пока нет.
+                    </p>
+                  )}
                 </div>
 
                 <div className="admin-actions">

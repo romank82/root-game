@@ -154,7 +154,9 @@ class AdminMinigameProfilesTests(unittest.TestCase):
         payload = AdminMinigameProfileCreatePayload(
             name=name or f"profile-{uuid.uuid4().hex[:8]}",
             game_type=game_type,
-            settings=settings if settings is not None else {"drumCount": 3},
+            settings=settings
+            if settings is not None
+            else {"drumCount": 3, "falseChoicesPerDrum": 4},
         )
         return create_admin_minigame_profile(
             payload=payload,
@@ -188,13 +190,13 @@ class AdminMinigameProfilesTests(unittest.TestCase):
         admin = self._make_admin()
         self._grant(admin.id, MINIGAME_PROFILES_MANAGE_PERMISSION)
 
-        created = self._create(admin, name="Create-Profile", game_type="text_answer")
+        created = self._create(admin, name="Create-Profile")
 
         self.assertTrue(created["id"].startswith("minigame-profile-"))
         self.assertEqual(created["name"], "Create-Profile")
-        self.assertEqual(created["gameType"], "text_answer")
+        self.assertEqual(created["gameType"], "cipher")
         self.assertEqual(created["status"], "draft")
-        self.assertEqual(created["settings"], {"drumCount": 3})
+        self.assertEqual(created["settings"], {"drumCount": 3, "falseChoicesPerDrum": 4})
 
         stored = self._load_profile(created["id"])
         self.assertIsNotNone(stored)
@@ -228,6 +230,40 @@ class AdminMinigameProfilesTests(unittest.TestCase):
             self._create(admin, game_type="wormhole")
         self.assertEqual(caught.exception.status_code, 422)
         self.assertIn("game_type", caught.exception.detail)
+
+    def test_create_cipher_rejects_alphabet_combination_422(self) -> None:
+        """Sprint 8.17.5: alphabet/combination нельзя сохранить в профиле.
+
+        Их генерирует backend на каждую попытку.
+        """
+        admin = self._make_admin()
+        self._grant(admin.id, MINIGAME_PROFILES_MANAGE_PERMISSION)
+
+        with self.assertRaises(HTTPException) as caught:
+            self._create(
+                admin,
+                name="Bad-Cipher",
+                game_type="cipher",
+                settings={
+                    "drumCount": 3,
+                    "alphabet": ["A", "B", "C"],
+                    "combination": "ABC",
+                },
+            )
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("alphabet", caught.exception.detail)
+        self.assertIn("combination", caught.exception.detail)
+
+    def test_create_cipher_invalid_drum_count_422(self) -> None:
+        admin = self._make_admin()
+        self._grant(admin.id, MINIGAME_PROFILES_MANAGE_PERMISSION)
+
+        with self.assertRaises(HTTPException) as caught:
+            self._create(
+                admin, name="Bad-Drums", game_type="cipher", settings={"drumCount": 1}
+            )
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("drumCount", caught.exception.detail)
 
     def test_create_blank_name_422(self) -> None:
         admin = self._make_admin()
@@ -284,7 +320,7 @@ class AdminMinigameProfilesTests(unittest.TestCase):
             payload=AdminMinigameProfileUpdatePayload(
                 name="After",
                 game_type="code_repair",
-                settings={"blocks": ["A", "B"]},
+                settings={"maxBlocks": 8},
             ),
             request=self._request(),
             admin=admin,
@@ -292,7 +328,7 @@ class AdminMinigameProfilesTests(unittest.TestCase):
 
         self.assertEqual(updated["name"], "After")
         self.assertEqual(updated["gameType"], "code_repair")
-        self.assertEqual(updated["settings"], {"blocks": ["A", "B"]})
+        self.assertEqual(updated["settings"], {"maxBlocks": 8})
         self.assertEqual(
             self._count_audit("minigame_profile.updated", admin.id), 1
         )
@@ -359,13 +395,15 @@ class AdminMinigameProfilesTests(unittest.TestCase):
 
         updated = update_admin_minigame_profile(
             profile_id=created["id"],
-            payload=AdminMinigameProfileUpdatePayload(settings={"drumCount": 5}),
+            payload=AdminMinigameProfileUpdatePayload(
+                settings={"drumCount": 5, "falseChoicesPerDrum": 6}
+            ),
             request=self._request(),
             admin=admin,
         )["minigameProfile"]
 
         self.assertEqual(updated["status"], "published")
-        self.assertEqual(updated["settings"], {"drumCount": 5})
+        self.assertEqual(updated["settings"], {"drumCount": 5, "falseChoicesPerDrum": 6})
 
     def test_archive_published(self) -> None:
         admin = self._make_admin()
@@ -392,7 +430,9 @@ class AdminMinigameProfilesTests(unittest.TestCase):
         admin = self._make_admin()
         self._grant(admin.id, MINIGAME_PROFILES_MANAGE_PERMISSION)
 
-        created = self._create(admin, name="Empty-Settings", settings={})
+        created = self._create(
+            admin, name="Empty-Settings", game_type="text_answer", settings={}
+        )
 
         with self.assertRaises(HTTPException) as caught:
             publish_admin_minigame_profile(
