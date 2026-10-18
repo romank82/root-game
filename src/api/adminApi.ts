@@ -25,6 +25,8 @@ export type AdminMission = {
   storyNodeId: string | null
   geoZoneId: string | null
   arObjectId: string | null
+  // Backend admin API пока не отдаёт это поле (шаг 8.17.5), поэтому поле optional.
+  minigameProfileId?: string | null
   slug: string
   missionType: string
   missionCategory: string
@@ -1027,4 +1029,114 @@ export async function updateARObject(
   if (!response.ok) throw new Error(await readError(response))
   const body = (await response.json()) as { arObject: AdminARObject }
   return body.arObject
+}
+
+// =============================================================================
+// Minigame profiles (Sprint 8.17, шаг 4а)
+// =============================================================================
+
+export type AdminMinigameProfile = {
+  id: string
+  name: string
+  gameType: string
+  settings: Record<string, unknown>
+  status: 'draft' | 'published' | 'archived'
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type CreateMinigameProfilePayload = {
+  name: string
+  game_type: string
+  settings: Record<string, unknown>
+}
+
+export type UpdateMinigameProfilePayload = {
+  name?: string
+  game_type?: string
+  settings?: Record<string, unknown>
+}
+
+export async function listMinigameProfiles(): Promise<AdminMinigameProfile[]> {
+  const response = await adminFetch('/api/v1/admin/minigame-profiles')
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    minigameProfiles: AdminMinigameProfile[]
+  }
+  return body.minigameProfiles
+}
+
+export async function getMinigameProfile(
+  id: string,
+): Promise<AdminMinigameProfile> {
+  const response = await adminFetch(
+    `/api/v1/admin/minigame-profiles/${encodeURIComponent(id)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    minigameProfile: AdminMinigameProfile
+  }
+  return body.minigameProfile
+}
+
+export async function createMinigameProfile(
+  payload: CreateMinigameProfilePayload,
+): Promise<AdminMinigameProfile> {
+  const response = await adminFetch('/api/v1/admin/minigame-profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    minigameProfile: AdminMinigameProfile
+  }
+  return body.minigameProfile
+}
+
+export async function updateMinigameProfile(
+  id: string,
+  payload: UpdateMinigameProfilePayload,
+): Promise<AdminMinigameProfile> {
+  const response = await adminFetch(
+    `/api/v1/admin/minigame-profiles/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    minigameProfile: AdminMinigameProfile
+  }
+  return body.minigameProfile
+}
+
+export async function publishMinigameProfile(
+  id: string,
+): Promise<AdminMinigameProfile> {
+  const response = await adminFetch(
+    `/api/v1/admin/minigame-profiles/${encodeURIComponent(id)}/publish`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    minigameProfile: AdminMinigameProfile
+  }
+  return body.minigameProfile
+}
+
+export async function archiveMinigameProfile(
+  id: string,
+): Promise<AdminMinigameProfile> {
+  const response = await adminFetch(
+    `/api/v1/admin/minigame-profiles/${encodeURIComponent(id)}/archive`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    minigameProfile: AdminMinigameProfile
+  }
+  return body.minigameProfile
 }
