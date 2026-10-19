@@ -26,6 +26,7 @@ from app.models import (
     GeoZone,
     Item,
     Mission,
+    MinigameProfile,
     MissionReward,
     StoryNode,
 )
@@ -85,6 +86,7 @@ class AdminMissionCreatePayload(BaseModel):
     story_node_id: str | None = Field(default=None, max_length=64)
     geo_zone_id: str | None = Field(default=None, max_length=64)
     ar_object_id: str | None = Field(default=None, max_length=64)
+    minigame_profile_id: str | None = Field(default=None, max_length=64)
     slug: str = Field(min_length=3, max_length=128)
     mission_type: str = Field(min_length=1, max_length=64)
     mission_category: str = Field(default="solo", min_length=1, max_length=32)
@@ -113,6 +115,7 @@ class AdminMissionUpdatePayload(BaseModel):
     story_node_id: str | None = Field(default=None, max_length=64)
     geo_zone_id: str | None = Field(default=None, max_length=64)
     ar_object_id: str | None = Field(default=None, max_length=64)
+    minigame_profile_id: str | None = Field(default=None, max_length=64)
     slug: str | None = Field(default=None, min_length=3, max_length=128)
     mission_type: str | None = Field(default=None, min_length=1, max_length=64)
     mission_category: str | None = Field(default=None, max_length=32)
@@ -173,6 +176,7 @@ def _serialize_mission(
         "storyNodeId": mission.story_node_id,
         "geoZoneId": mission.geo_zone_id,
         "arObjectId": mission.ar_object_id,
+        "minigameProfileId": mission.minigame_profile_id,
         "slug": mission.slug,
         "missionType": mission.mission_type,
         "missionCategory": mission.mission_category,
@@ -628,6 +632,14 @@ def create_admin_mission(
             geo_zone_id=payload.geo_zone_id,
             ar_object_id=payload.ar_object_id,
         )
+        if (
+            payload.minigame_profile_id is not None
+            and session.get(MinigameProfile, payload.minigame_profile_id) is None
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Указанный профиль мини-игры (minigame_profile_id) не существует.",
+            )
         _validate_unlock_chain(
             session,
             mission_id=None,
@@ -643,6 +655,7 @@ def create_admin_mission(
             story_node_id=payload.story_node_id,
             geo_zone_id=payload.geo_zone_id,
             ar_object_id=payload.ar_object_id,
+            minigame_profile_id=payload.minigame_profile_id,
             slug=slug,
             mission_type=payload.mission_type.strip(),
             mission_category=payload.mission_category,
@@ -742,6 +755,18 @@ def update_admin_mission(
         if "ar_object_id" in updates:
             mission.ar_object_id = updates["ar_object_id"]
             changed_fields.append("arObjectId")
+
+        if "minigame_profile_id" in updates:
+            minigame_profile_id = updates["minigame_profile_id"]
+            if minigame_profile_id is not None and session.get(
+                MinigameProfile, minigame_profile_id
+            ) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Указанный профиль мини-игры (minigame_profile_id) не существует.",
+                )
+            mission.minigame_profile_id = minigame_profile_id
+            changed_fields.append("minigameProfileId")
 
         _validate_references(
             session,

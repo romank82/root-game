@@ -222,4 +222,126 @@ class AdminMissionsCategoryApiTests(unittest.TestCase):
             stored_category = session.scalar(
                 select(Mission.mission_category).where(Mission.id == mission_id)
             )
+
             self.assertEqual(stored_category, "team")
+
+    def test_create_mission_with_minigame_profile(self) -> None:
+        from app.models import MinigameProfile, Mission
+
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+
+        profile_id = f"minigame-profile-{uuid.uuid4().hex[:10]}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                MinigameProfile(
+                    id=profile_id,
+                    name=f"cipher-profile-{uuid.uuid4().hex[:8]}",
+                    game_type="cipher",
+                    settings={
+                        "drumCount": 4,
+                        "alphabet": ["R", "O", "T", "G", "A", "M", "E"],
+                        "falseChoicesPerDrum": 2,
+                    },
+                    status="published",
+                )
+            )
+
+        payload = _create_payload(
+            chapter_id=ids["chapter"],
+            minigame_profile_id=profile_id,
+        )
+
+        created = create_admin_mission(payload, request=None, admin=admin)[
+            "mission"
+        ]
+
+        self.assertEqual(created["minigameProfileId"], profile_id)
+
+        with self.SessionLocal.begin() as session:
+            stored_profile_id = session.scalar(
+                select(Mission.minigame_profile_id).where(Mission.id == created["id"])
+            )
+            self.assertEqual(stored_profile_id, profile_id)
+
+    def test_create_mission_invalid_minigame_profile_returns_422(self) -> None:
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+        payload = _create_payload(
+            chapter_id=ids["chapter"],
+            minigame_profile_id="minigame-profile-does-not-exist",
+        )
+
+        with self.assertRaises(HTTPException) as context:
+            create_admin_mission(payload, request=None, admin=admin)
+
+        self.assertEqual(context.exception.status_code, 422)
+        self.assertIn(
+            "профиль мини-игры",
+            context.exception.detail,
+        )
+
+    def test_update_mission_minigame_profile(self) -> None:
+        from app.models import MinigameProfile, Mission
+
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+
+        mission_id = create_admin_mission(
+            _create_payload(chapter_id=ids["chapter"]),
+            request=None,
+            admin=admin,
+        )["mission"]["id"]
+
+        profile_id = f"minigame-profile-{uuid.uuid4().hex[:10]}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                MinigameProfile(
+                    id=profile_id,
+                    name=f"cipher-profile-{uuid.uuid4().hex[:8]}",
+                    game_type="cipher",
+                    settings={},
+                    status="published",
+                )
+            )
+
+        updated = update_admin_mission(
+            mission_id,
+            AdminMissionUpdatePayload(minigame_profile_id=profile_id),
+            request=None,
+            admin=admin,
+        )["mission"]
+
+        self.assertEqual(updated["minigameProfileId"], profile_id)
+
+        with self.SessionLocal.begin() as session:
+            stored_profile_id = session.scalar(
+                select(Mission.minigame_profile_id).where(Mission.id == mission_id)
+            )
+            self.assertEqual(stored_profile_id, profile_id)
+
+    def test_update_mission_invalid_minigame_profile_returns_422(self) -> None:
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+
+        mission_id = create_admin_mission(
+            _create_payload(chapter_id=ids["chapter"]),
+            request=None,
+            admin=admin,
+        )["mission"]["id"]
+
+        with self.assertRaises(HTTPException) as context:
+            update_admin_mission(
+                mission_id,
+                AdminMissionUpdatePayload(
+                    minigame_profile_id="minigame-profile-does-not-exist"
+                ),
+                request=None,
+                admin=admin,
+            )
+
+        self.assertEqual(context.exception.status_code, 422)
+        self.assertIn(
+            "профиль мини-игры",
+            context.exception.detail,
+        )
