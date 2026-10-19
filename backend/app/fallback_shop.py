@@ -160,9 +160,10 @@ def create_first_failure_entitlements(
 
     Sprint 8.16: при провале первой попытки в fallback-магазин попадают ВСЕ
     item-награды миссии (каждая отдельным entitlement'ом), подтверждённые
-    KeyRules из CMS. Повторные провалы (attempt_count_before != 0) и повторные
-    вызовы ничего не добавляют: guard attempt_count_before == 0 + unique
-    (player_id, mission_id, item_id) делают функцию идемпотентной.
+    KeyRules из CMS. Повторные провалы внутри захода (attempt_count_before != 0)
+    ничего не добавляют, а новый заход переармирует существующие entitlement'ы
+    (Sprint 8.17): quota_limit накапливается на reward.amount каждого захода,
+    consumed_count сохраняется (шаг 8b).
 
     V1 semantics (docs/fallback-shop-contract.md): первый неверный ответ создаёт
     entitlement'ы независимо от того, есть ли у миссии платная entry policy
@@ -228,20 +229,30 @@ def create_first_failure_entitlements(
             )
         )
         if existing is not None:
-            # Sprint 8.17 (шаг 8): многоразовая миссия — каждый заход = новый
-            # шанс. Entitlement прошлого захода (например, exhausted после
-            # покупки) переармируется на текущий заход: снова available, квота
-            # сброшена, run_entry_count = текущий заход. Guard
-            # attempt_count_before == 0 выше гарантирует: не чаще раза за заход.
-            # "disabled" не трогаем — админский отключатель имеет приоритет.
+            # Sprint 8.17 (шаг 8b): НАКОПЛЕНИЕ между заходами. quota_limit —
+            # «сколько всего депонировано» (растёт), consumed_count — «сколько
+            # куплено». Re-arm на новый заход НЕ сбрасывает consumed_count, а
+            # добавляет депозит текущего захода (reward.amount) к quota_limit.
+            # Guard attempt_count_before == 0 выше гарантирует: не чаще раза
+            # за заход. "disabled" не трогаем — админский отключатель выше.
             if (
                 existing.run_entry_count != current_entry_count
                 and existing.status in ("available", "exhausted")
             ):
-                existing.status = "available"
-                existing.consumed_count = 0
+                deposit_amount = reward.amount or 1
+                existing.quota_limit += deposit_amount
                 existing.run_entry_count = current_entry_count
+                # Статус выводится из остатка: осталось что купить → available.
+                if existing.consumed_count < existing.quota_limit:
+                    existing.status = "available"
+                else:
+                    existing.status = "exhausted"
             continue
+        # Sprint 8.17 (шаг 8b): quota_limit = «сколько ключей депонировано».
+        # При создании — количество из награды миссии (reward.amount), а не
+        # system_settings.default_quota_limit (настройка остаётся сентинелом
+        # конфигурации, см. guard выше).
+        deposit_amount = reward.amount or 1
         session.add(
             PlayerFallbackEntitlement(
                 id=_new_id("fallback-entitlement"),
@@ -249,7 +260,7 @@ def create_first_failure_entitlements(
                 mission_id=mission_id,
                 item_id=item.id,
                 offer_id=item.id,
-                quota_limit=quota_limit,
+                quota_limit=deposit_amount,
                 consumed_count=0,
                 run_entry_count=current_entry_count,
                 status="available",
@@ -450,9 +461,10 @@ def purchase_fallback_offer(
         raise MissionEngineError(409, "Ключ недоступен.")
 
     new_count = entitlement.consumed_count + 1
-    # Sprint 8.17 (шаг 8): run_entry_count в reference_id — уникальность per-run.
-    # После re-arm (consumed_count=0, run=N) повторная покупка в новом заходе
-    # получает свежий reference_id, не конфликтуя с проводками прошлых заходов.
+    # Sprint 8.17 (шаг 8/8b): reference_id = {id}:{run}:{count}. run_entry_count
+    # и монотонный consumed_count (после re-arm квота копится, consumed НЕ
+    # сбрасывается) дают сквозную уникальность: проводки каждого захода имеют
+    # свой reference_id и не конфликтуют с прошлыми заходами.
     reference_id = f"{entitlement.id}:{entitlement.run_entry_count}:{new_count}"
 
     # Гонка двух параллельных POST: если проводка под нашим reference_id уже

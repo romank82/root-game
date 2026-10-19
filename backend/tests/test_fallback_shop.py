@@ -1477,12 +1477,13 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             mission.geo_zone_id = zone_id
 
     def test_fallback_rearm_on_new_run(self):
-        """Sprint 8.17 (шаг 8): каждый заход = новый шанс.
+        """Sprint 8.17 (шаг 8b): квота накапливается между заходами.
 
-        Заход 1: провал 1-й попытки → entitlement available (run 1);
-        покупка → exhausted. Новый заход (accept, entry_count=2): провал
-        1-й попытки → re-arm (available, consumed_count=0, run=2);
-        повторная покупка успешна с новым reference_id per-run.
+        Заход 1: провал 1-й попытки → entitlement (quota_limit=1,
+        consumed_count=0), покупка → consumed=1, exhausted. Заход 2 (re-arm):
+        quota_limit=2 (1+1), consumed_count=1 НЕ сбрасывается, available;
+        повторная покупка → consumed=2, exhausted; reference_id монотонен:
+        {id}:1:1 для захода 1, {id}:2:2 для захода 2.
         """
         ids = self._fixture()
         self._seed_root_wallet(ids["player"], 1000)
@@ -1499,6 +1500,7 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         entitlement = self._get_entitlement(ids["player"], ids["target"])
         self.assertIsNotNone(entitlement)
         self.assertEqual(entitlement.status, "available")
+        self.assertEqual(entitlement.quota_limit, 1)  # deposit = reward.amount
         self.assertEqual(entitlement.consumed_count, 0)
         self.assertEqual(entitlement.run_entry_count, 1)
 
@@ -1506,6 +1508,9 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             ids["player"], entitlement.id
         )
         self.assertTrue(first["purchased"])
+        self.assertEqual(first["consumedCount"], 1)
+        self.assertEqual(first["remainingQuota"], 0)
+        self.assertEqual(first["status"], "exhausted")
         self.assertEqual(first["rootBalance"], 900)
 
         # Завершаем заход 1 и берём заход 2 (entry_count → 2).
@@ -1523,13 +1528,18 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         self.assertIsNotNone(rearmed)
         self.assertEqual(rearmed.id, entitlement.id)  # re-arm, не новая строка
         self.assertEqual(rearmed.status, "available")
-        self.assertEqual(rearmed.consumed_count, 0)
+        # Шаг 8b: consumed НЕ сбрасывается, quota_limit накапливается (1+1).
+        self.assertEqual(rearmed.quota_limit, 2)
+        self.assertEqual(rearmed.consumed_count, 1)
         self.assertEqual(rearmed.run_entry_count, 2)
 
         second = self.fallback_shop.purchase_fallback_offer_entrypoint(
             ids["player"], entitlement.id
         )
         self.assertTrue(second["purchased"])
+        self.assertEqual(second["consumedCount"], 2)
+        self.assertEqual(second["remainingQuota"], 0)
+        self.assertEqual(second["status"], "exhausted")
         self.assertEqual(second["rootBalance"], 800)
 
         with self.SessionLocal() as session:
@@ -1546,11 +1556,206 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                 )
             ).all()
             self.assertEqual(len(txs), 2)
-            # reference_id привязан к заходу — у двух заходов ключи различаются.
+            # reference_id привязан к заходу и монотонен по consumed_count:
+            # заход 1 → {id}:1:1, заход 2 (re-arm, consumed=1) → {id}:2:2.
             self.assertEqual(
                 {tx.reference_id for tx in txs},
-                {f"{entitlement.id}:1:1", f"{entitlement.id}:2:1"},
+                {f"{entitlement.id}:1:1", f"{entitlement.id}:2:2"},
             )
+    def test_fallback_rearm_accumulates_without_purchase(self):
+        """Sprint 8.17 (шаг 8b): квота копится между заходами без покупок.
+
+        Заход 1: провал → quota_limit=1, consumed_count=0 (не купил).
+        Заход 2: провал → quota_limit=2, consumed_count=0.
+        build_fallback_offers → remainingQuota=2.
+        """
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self._seed_repeatable_policy(ids["target"])
+        self._attach_geo_zone(ids)
+
+        # Заход 1: провал 1-й попытки → entitlement (quota 1, куплено 0).
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(entitlement)
+        self.assertEqual(entitlement.quota_limit, 1)
+        self.assertEqual(entitlement.consumed_count, 0)
+        self.assertEqual(entitlement.status, "available")
+
+        # Завершаем заход 1 БЕЗ покупки и открываем заход 2 (entry_count → 2).
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="complete"
+        )
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-again"
+        )
+
+        accumulated = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(accumulated)
+        self.assertEqual(accumulated.id, entitlement.id)  # re-arm, не новая строка
+        self.assertEqual(accumulated.quota_limit, 2)  # 1 + 1 без покупок
+        self.assertEqual(accumulated.consumed_count, 0)
+        self.assertEqual(accumulated.status, "available")
+        self.assertEqual(accumulated.run_entry_count, 2)
+
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0]["quotaLimit"], 2)
+        self.assertEqual(offers[0]["consumedCount"], 0)
+        self.assertEqual(offers[0]["remainingQuota"], 2)
+
+    def test_fallback_rearm_accumulates_multiple_runs(self):
+        """Sprint 8.17 (шаг 8b): накопление за 3 захода без покупок.
+
+        После захода 1: quota=1; после захода 2: quota=2; после захода 3:
+        quota=3. consumed_count остаётся 0, remainingQuota=3.
+        """
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self._seed_repeatable_policy(ids["target"])
+        self._attach_geo_zone(ids)
+
+        def _open_next_run(answer: str) -> None:
+            """Завершить текущий заход успехом и открыть новый провалом."""
+            self.mission_engine.submit_mission(
+                ids["player"], ids["target"], answer="complete"
+            )
+            self.mission_engine.accept_mission(
+                ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+            )
+            self.mission_engine.submit_mission(
+                ids["player"], ids["target"], answer=answer
+            )
+
+        # Заход 1: провал 1-й попытки.
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-run-1"
+        )
+        first = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(first)
+        self.assertEqual(first.quota_limit, 1)
+        self.assertEqual(first.consumed_count, 0)
+
+        # Заход 2.
+        _open_next_run("wrong-run-2")
+        second = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(second)
+        self.assertEqual(second.id, first.id)
+        self.assertEqual(second.quota_limit, 2)
+        self.assertEqual(second.consumed_count, 0)
+        self.assertEqual(second.run_entry_count, 2)
+
+        # Заход 3.
+        _open_next_run("wrong-run-3")
+        third = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(third)
+        self.assertEqual(third.id, first.id)
+        self.assertEqual(third.quota_limit, 3)
+        self.assertEqual(third.consumed_count, 0)
+        self.assertEqual(third.status, "available")
+        self.assertEqual(third.run_entry_count, 3)
+
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0]["quotaLimit"], 3)
+        self.assertEqual(offers[0]["consumedCount"], 0)
+        self.assertEqual(offers[0]["remainingQuota"], 3)
+
+    def test_fallback_rearm_respects_reward_amount(self):
+        """Sprint 8.17 (шаг 8b): депозит = reward.amount (количество награды).
+
+        Миссия с двумя ключ-наградами: красный ×1, синий ×2. Заход 1 → квота
+        красного 1, синего 2. Заход 2 → 2 и 4 (пропорция ревардов сохраняется).
+        """
+        ids = self._fixture(second_key_reward=True)
+        # Синий ключ (item_extra) — награда ×2 в CMS.
+        from app.models import MissionReward
+
+        with self.SessionLocal.begin() as session:
+            blue_reward = session.scalar(
+                select(MissionReward).where(
+                    MissionReward.mission_id == ids["target"],
+                    MissionReward.item_id == ids["item_extra"],
+                )
+            )
+            self.assertIsNotNone(blue_reward)
+            blue_reward.amount = 2
+
+        self._seed_root_wallet(ids["player"], 1000)
+        self._seed_repeatable_policy(ids["target"])
+        self._attach_geo_zone(ids)
+
+        def _entitlement_for(item_id: str):
+            from app.geo_team_runtime_models import PlayerFallbackEntitlement
+
+            with self.SessionLocal() as session:
+                return session.scalar(
+                    select(PlayerFallbackEntitlement).where(
+                        PlayerFallbackEntitlement.player_id == ids["player"],
+                        PlayerFallbackEntitlement.mission_id == ids["target"],
+                        PlayerFallbackEntitlement.item_id == item_id,
+                    )
+                )
+
+        # Заход 1: провал 1-й попытки → оба ключа в магазине.
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+
+        red = _entitlement_for(ids["item"])
+        self.assertIsNotNone(red)
+        self.assertEqual(red.quota_limit, 1)  # красный ×1
+        self.assertEqual(red.consumed_count, 0)
+        blue = _entitlement_for(ids["item_extra"])
+        self.assertIsNotNone(blue)
+        self.assertEqual(blue.quota_limit, 2)  # синий ×2
+        self.assertEqual(blue.consumed_count, 0)
+
+        # Завершаем заход 1 и открываем заход 2 (entry_count → 2).
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="complete"
+        )
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-again"
+        )
+
+        red_again = _entitlement_for(ids["item"])
+        self.assertIsNotNone(red_again)
+        self.assertEqual(red_again.id, red.id)  # re-arm, не новая строка
+        self.assertEqual(red_again.quota_limit, 2)  # 1 + 1
+        self.assertEqual(red_again.consumed_count, 0)
+        blue_again = _entitlement_for(ids["item_extra"])
+        self.assertIsNotNone(blue_again)
+        self.assertEqual(blue_again.id, blue.id)
+        self.assertEqual(blue_again.quota_limit, 4)  # 2 + 2
+        self.assertEqual(blue_again.consumed_count, 0)
+
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 2)
+        by_item = {offer["item"]["id"]: offer for offer in offers}
+        self.assertEqual(by_item[ids["item"]]["quotaLimit"], 2)
+        self.assertEqual(by_item[ids["item"]]["consumedCount"], 0)
+        self.assertEqual(by_item[ids["item"]]["remainingQuota"], 2)
+        self.assertEqual(by_item[ids["item_extra"]]["quotaLimit"], 4)
+        self.assertEqual(by_item[ids["item_extra"]]["consumedCount"], 0)
+        self.assertEqual(by_item[ids["item_extra"]]["remainingQuota"], 4)
 
     def test_fallback_xor_on_first_success(self):
         """Sprint 8.17 (шаг 8): успех с 1-й попытки → ключ наградой,
