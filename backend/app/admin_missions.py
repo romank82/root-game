@@ -402,6 +402,19 @@ def _validate_for_publish(
             detail="Для публикации миссии обязательна привязка AR-объекта (ar_object_id).",
         )
 
+    # Sprint 8.17.19: для cipher-миссии профиль мини-игры обязателен.
+    # Legacy-published без профиля не ломаем задним числом, но любая
+    # новая публикация / редактирование content или validation_config
+    # требует профиль (см. docs/roadmap-detailed.md, расхождение №2).
+    if mission.mission_type == "cipher" and not mission.minigame_profile_id:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Для cipher-миссии обязателен профиль мини-игры. "
+                "Выберите профиль в форме миссии перед публикацией."
+            ),
+        )
+
     if mission.mission_layer not in ("story", "team", "solo"):
         raise HTTPException(
             status_code=422,

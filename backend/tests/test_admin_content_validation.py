@@ -244,6 +244,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
             id="mission-test",
+            minigame_profile_id="cipher-profile-test",  # Sprint 8.17.19
         )
 
     @staticmethod
