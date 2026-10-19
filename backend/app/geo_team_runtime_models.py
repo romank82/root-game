@@ -499,6 +499,17 @@ class PlayerFallbackEntitlement(RuntimeTimestampMixin, Base):
     offer_id: Mapped[str] = mapped_column(String(64), nullable=False)
     quota_limit: Mapped[int] = mapped_column(Integer, nullable=False)
     consumed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Sprint 8.17 (шаг 8): номер захода (PlayerMission.entry_count на момент
+    # выдачи/re-arm entitlement'а). Каждый новый заход многоразовой миссии —
+    # новый шанс: exhausted-предложение прошлого захода переармируется, а
+    # reference_id покупки привязывается к заходу ({id}:{run}:{count}),
+    # сохраняя идемпотентность ledger при повторных покупках по runs.
+    run_entry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
 
     __table_args__ = (

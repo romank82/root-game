@@ -957,7 +957,10 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             self.assertEqual(tx.amount, 100)
             self.assertEqual(tx.balance_after, 900)
             self.assertEqual(tx.transaction_type, "debit")
-            self.assertEqual(tx.reference_id, f"{entitlement.id}:1")
+            self.assertEqual(
+                tx.reference_id,
+                f"{entitlement.id}:{entitlement.run_entry_count}:1",
+            )
 
             player_item = session.scalar(
                 select(PlayerItem).where(
@@ -979,7 +982,10 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             self.assertIsNotNone(event)
             self.assertEqual(event.quantity_delta, 1)
             self.assertEqual(event.reference_type, "fallback_purchase")
-            self.assertEqual(event.reference_id, f"{entitlement.id}:1")
+            self.assertEqual(
+                event.reference_id,
+                f"{entitlement.id}:{entitlement.run_entry_count}:1",
+            )
 
     def test_4_4_2_repeated_purchase_is_idempotent(self):
         ids = self._fixture()
@@ -1320,7 +1326,10 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             # ключи различаются даже при одном и том же item.
             self.assertEqual(
                 {tx.reference_id for tx in txs},
-                {f"{first.id}:1", f"{second.id}:1"},
+                {
+                    f"{first.id}:{first.run_entry_count}:1",
+                    f"{second.id}:{second.run_entry_count}:1",
+                },
             )
             self.assertEqual(wallet.available_balance, 800)
 
@@ -1412,3 +1421,233 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             validate_value(definition, 123)
+
+    # ---- Sprint 8.17 (шаг 8): многоразовая миссия — per-run re-arm ----------
+
+    def _seed_repeatable_policy(self, mission_id: str) -> None:
+        """Sprint 8.17 (шаг 8): after_terminal + cooldown=0 — многоразовая миссия.
+
+        Нужна, чтобы после completed _synchronize вернул миссию в available и
+        повторный accept_mission открыл НОВЫЙ заход (entry_count инкрементится).
+        """
+        from app.geo_team_runtime_models import MissionRuntimePolicy
+
+        with self.SessionLocal.begin() as session:
+            session.add(
+                MissionRuntimePolicy(
+                    id=f"policy-{uuid.uuid4().hex}",
+                    mission_id=mission_id,
+                    version=1,
+                    status="published",
+                    entry_root_atomic=0,
+                    max_attempts=3,
+                    repeatability_policy="after_terminal",
+                    required_items_json={"schemaVersion": 1, "items": []},
+                    challenge_policy_json={},
+                    reward_policy_json={},
+                    fallback_policy_json=None,
+                    feature_flags_json={},
+                )
+            )
+
+    def _attach_geo_zone(self, ids: dict[str, str]) -> None:
+        """Настроить target-миссии геозону, чтобы accept_mission прошёл."""
+        from app.models import GeoZone, Mission
+
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, ids["target"])
+            self.assertIsNotNone(mission)
+            zone_id = f"zone-{uuid.uuid4().hex}"
+            session.add(
+                GeoZone(
+                    id=zone_id,
+                    slug=f"zone-{uuid.uuid4().hex}",
+                    title="Fixture geo zone",
+                    description="Accept fixture geo zone",
+                    zone_type="radius",
+                    status="published",
+                    sort_order=1,
+                    latitude=55.751244,
+                    longitude=37.618423,
+                    radius_meters=500,
+                    search_radius_meters=1500,
+                    location_constraints={},
+                )
+            )
+            mission.geo_zone_id = zone_id
+
+    def test_fallback_rearm_on_new_run(self):
+        """Sprint 8.17 (шаг 8): каждый заход = новый шанс.
+
+        Заход 1: провал 1-й попытки → entitlement available (run 1);
+        покупка → exhausted. Новый заход (accept, entry_count=2): провал
+        1-й попытки → re-arm (available, consumed_count=0, run=2);
+        повторная покупка успешна с новым reference_id per-run.
+        """
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self._seed_repeatable_policy(ids["target"])
+        self._attach_geo_zone(ids)
+
+        # Заход 1: провал 1-й попытки → entitlement, покупка → exhausted.
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(entitlement)
+        self.assertEqual(entitlement.status, "available")
+        self.assertEqual(entitlement.consumed_count, 0)
+        self.assertEqual(entitlement.run_entry_count, 1)
+
+        first = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], entitlement.id
+        )
+        self.assertTrue(first["purchased"])
+        self.assertEqual(first["rootBalance"], 900)
+
+        # Завершаем заход 1 и берём заход 2 (entry_count → 2).
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="complete"
+        )
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-again"
+        )
+
+        rearmed = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(rearmed)
+        self.assertEqual(rearmed.id, entitlement.id)  # re-arm, не новая строка
+        self.assertEqual(rearmed.status, "available")
+        self.assertEqual(rearmed.consumed_count, 0)
+        self.assertEqual(rearmed.run_entry_count, 2)
+
+        second = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], entitlement.id
+        )
+        self.assertTrue(second["purchased"])
+        self.assertEqual(second["rootBalance"], 800)
+
+        with self.SessionLocal() as session:
+            from app.models import Wallet, WalletTransaction
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertEqual(wallet.available_balance, 800)
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 2)
+            # reference_id привязан к заходу — у двух заходов ключи различаются.
+            self.assertEqual(
+                {tx.reference_id for tx in txs},
+                {f"{entitlement.id}:1:1", f"{entitlement.id}:2:1"},
+            )
+
+    def test_fallback_xor_on_first_success(self):
+        """Sprint 8.17 (шаг 8): успех с 1-й попытки → ключ наградой,
+        entitlement НЕ создаётся (XOR: либо награда, либо магазин)."""
+        ids = self._fixture()
+        self._seed_repeatable_policy(ids["target"])
+        self._attach_geo_zone(ids)
+
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        result = self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="complete"
+        )
+        self.assertTrue(result["accepted"])
+
+        self.assertIsNone(self._get_entitlement(ids["player"], ids["target"]))
+        self.assertEqual(self._count_entitlements(ids["player"]), 0)
+
+        with self.SessionLocal() as session:
+            from app.models import PlayerItem
+
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(player_item)
+            self.assertEqual(player_item.quantity, 1)
+            self.assertEqual(player_item.obtained_from_type, "mission")
+
+    def test_fallback_after_failure_purchase_then_success(self):
+        """Sprint 8.17 (шаг 8): провал → покупка (exhausted) в заходе 1;
+        успех с 1-й попытки в заходе 2 → ключ наградой (entitlement НЕ влияет)."""
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self._seed_repeatable_policy(ids["target"])
+        self._attach_geo_zone(ids)
+
+        # Заход 1: провал 1-й → entitlement, покупка → exhausted.
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(entitlement)
+        first = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], entitlement.id
+        )
+        self.assertTrue(first["purchased"])
+
+        # Завершаем заход 1 (после провала ключ наградой НЕ выдан).
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="complete"
+        )
+
+        # Заход 2: успех с 1-й попытки → ключ наградой.
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        second_run = self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="complete"
+        )
+        self.assertTrue(second_run["accepted"])
+
+        with self.SessionLocal() as session:
+            from app.models import PlayerItem, Wallet, WalletTransaction
+
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(player_item)
+            # 1 (покупка захода 1) + 1 (награда захода 2).
+            self.assertEqual(player_item.quantity, 2)
+
+            # Успех в заходе 2 не списал ROOT повторно.
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertEqual(wallet.available_balance, 900)
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 1)
+
+        # Entitlement остаётся exhausted от захода 1 (re-arm не происходил).
+        after = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(after)
+        self.assertEqual(after.status, "exhausted")
+        self.assertEqual(after.consumed_count, 1)
+        self.assertEqual(after.run_entry_count, 1)

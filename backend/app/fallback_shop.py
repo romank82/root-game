@@ -14,6 +14,7 @@ from app.models import (
     Mission,
     MissionReward,
     PlayerItem,
+    PlayerMission,
     SystemSetting,
     Wallet,
     WalletTransaction,
@@ -190,6 +191,20 @@ def create_first_failure_entitlements(
         )
         return
 
+    # Sprint 8.17 (шаг 8): номер текущего захода — маркер для re-arm.
+    # Читаем PlayerMission из сессии (identity-map вернёт тот же объект, что
+    # в submit-потоке): entry_count уже инкрементирован при accept нового
+    # захода. Если PlayerMission нет (прямой вызов вне миссии) — 0.
+    player_mission = session.scalar(
+        select(PlayerMission).where(
+            PlayerMission.player_id == player_id,
+            PlayerMission.mission_id == mission_id,
+        )
+    )
+    current_entry_count = (
+        player_mission.entry_count if player_mission is not None else 0
+    )
+
     rewards = session.scalars(
         select(MissionReward).where(
             MissionReward.mission_id == mission_id,
@@ -213,6 +228,19 @@ def create_first_failure_entitlements(
             )
         )
         if existing is not None:
+            # Sprint 8.17 (шаг 8): многоразовая миссия — каждый заход = новый
+            # шанс. Entitlement прошлого захода (например, exhausted после
+            # покупки) переармируется на текущий заход: снова available, квота
+            # сброшена, run_entry_count = текущий заход. Guard
+            # attempt_count_before == 0 выше гарантирует: не чаще раза за заход.
+            # "disabled" не трогаем — админский отключатель имеет приоритет.
+            if (
+                existing.run_entry_count != current_entry_count
+                and existing.status in ("available", "exhausted")
+            ):
+                existing.status = "available"
+                existing.consumed_count = 0
+                existing.run_entry_count = current_entry_count
             continue
         session.add(
             PlayerFallbackEntitlement(
@@ -223,6 +251,7 @@ def create_first_failure_entitlements(
                 offer_id=item.id,
                 quota_limit=quota_limit,
                 consumed_count=0,
+                run_entry_count=current_entry_count,
                 status="available",
             )
         )
@@ -334,8 +363,9 @@ def purchase_fallback_offer(
 
     Единственная атомарная транзакция (вызывать внутри SessionLocal.begin()):
     pre-checks -> идемпотентный возврат -> debit -> credit -> consumed/exhausted.
-    Идемпотентность: reference_id = f"{entitlement.id}:{n}" со сквозными
-    unique-индексами WalletTransaction и InventoryEvent.
+    Идемпотентность: reference_id = f"{entitlement.id}:{run}:{n}" (run —
+    run_entry_count захода, Sprint 8.17) со сквозными unique-индексами
+    WalletTransaction и InventoryEvent.
     """
     # Lazy import из-за циклической связи модулей: mission_engine импортирует
     # fallback_shop на верхнем уровне (create_first_failure_entitlements).
@@ -378,7 +408,10 @@ def purchase_fallback_offer(
     ):
         wallet = _get_root_wallet_for_update(session, player_id)
         if wallet is not None:
-            committed_reference_id = f"{entitlement.id}:{entitlement.consumed_count}"
+            committed_reference_id = (
+                f"{entitlement.id}:{entitlement.run_entry_count}:"
+                f"{entitlement.consumed_count}"
+            )
             committed = session.scalar(
                 select(WalletTransaction.id).where(
                     WalletTransaction.wallet_id == wallet.id,
@@ -417,7 +450,10 @@ def purchase_fallback_offer(
         raise MissionEngineError(409, "Ключ недоступен.")
 
     new_count = entitlement.consumed_count + 1
-    reference_id = f"{entitlement.id}:{new_count}"
+    # Sprint 8.17 (шаг 8): run_entry_count в reference_id — уникальность per-run.
+    # После re-arm (consumed_count=0, run=N) повторная покупка в новом заходе
+    # получает свежий reference_id, не конфликтуя с проводками прошлых заходов.
+    reference_id = f"{entitlement.id}:{entitlement.run_entry_count}:{new_count}"
 
     # Гонка двух параллельных POST: если проводка под нашим reference_id уже
     # закоммичена, вторая транзакция не должна дублировать списание.
