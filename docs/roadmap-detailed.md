@@ -708,7 +708,9 @@
   (available, consumed НЕ сбрасывается, run=current); шаг 8b —
   quota_limit копится на reward.amount захода; reference_id покупки =
   {entitlement.id}:{run}:{count}.
-- 8.17.9 ❌ Frontend: dropdown "Профиль мини-игры" в форме миссии.
+- 8.17.9 ⚠️ частично Frontend: dropdown "Профиль мини-игры" в форме миссии
+  (dropdown есть, форма всё ещё шлёт старые поля content.ui/validation_config;
+  чистый перевод формы на профиль — 8.17.9c → подшаг 8.17.18).
 - 8.17.10 ❌ Backend: чтение профиля в mission_engine (при accept/submit).
 - 8.17.11 ❌ Миграция существующих cipher-миссий в новый формат.
 - 8.17.12 ❌ Тесты.
@@ -728,6 +730,66 @@
   из алфавита, случайный порядок).
 - При каждой попытке — новый код и новые символы.
 - Проверка ответа — на backend (безопаснее).
+
+### Архитектурное решение: реестр обработчиков мини-игр (2026-10-19)
+
+Мини-игр будет несколько, с разной логикой (cipher, code_repair, text_answer и будущие). Каждая настраивается отдельно через профиль (minigame_profile). Миссия ссылается на профиль через minigame_profile_id. Движок НЕ должен содержать жёстких if mission_type == "cipher" — вместо этого вводится реестр обработчиков:
+
+- backend/app/minigame_handlers.py — словарь MINIGAME_HANDLERS: {game_type: handler}.
+- Каждый handler отвечает за: (а) генерацию сессии по profile.settings (для cipher — код + барабаны), (б) валидацию ответа игрока.
+- mission_engine.py при accept/submit берёт mission.minigame_profile_id → грузит MinigameProfile → по profile.game_type выбирает handler из реестра → передаёт ему profile.settings.
+- Legacy-путь: если minigame_profile_id IS NULL (старые миссии) — fallback на текущий код (content.ui), чтобы test-cipher-01/02 не сломались.
+- Новая мини-игра = новый файл-обработчик + одна строка регистрации в MINIGAME_HANDLERS. mission_engine.py не трогается.
+- Валидация настроек профиля (whitelist по game_type) уже есть в admin_minigame_profiles.py:45-49 — её используем как справочник допустимых полей, но диспетчеризация в рантайме — через MINIGAME_HANDLERS.
+
+Новые подшаги (добавить в план 8.17 после 8.17.13):
+- 8.17.14 ❌ Backend: minigame_handlers.py — реестр + CipherHandler (перенос generate_cipher_session и cipher-ветки _validate_submission из mission_engine.py). Legacy-fallback сохраняется.
+- 8.17.15 ❌ Backend: mission_engine.py — accept/submit читают профиль через реестр (8.17.10 переформулировать как «через реестр»).
+- 8.17.16 ❌ Backend: content_contract._validate_cipher_ui — смягчить: если у миссии есть published-профиль, поля drumCount/falseChoicesPerDrum/alphabet/combination не требуются; без профиля — требуются как раньше (legacy).
+- 8.17.17 ❌ Frontend: CipherScreen — рисовать по cipherSession, не гейтить отрисовку по content.ui.drumCount/alphabet/combination.
+- 8.17.18 ❌ Frontend: AdminApp.tsx — для cipher скрыть старые поля формы (drumCount/alphabet/combination/validationCorrectCombination), оставить только dropdown профиля + тексты (label/instruction/successTitle/successText/wrongAnswerText). Это и есть 8.17.9c.
+- 8.17.19 ❌ Backend: publish-валидация — для cipher-миссии с mission_type="cipher" требовать minigame_profile_id (закрыть расхождение: roadmap:686 «профиль обязателен», код не реализует).
+
+**Границы ответственности handler'а (зафиксировано 2026-10-19 по разведке mission_engine.py):**
+
+Handler мини-игры отвечает ТОЛЬКО за:
+- (а) генерацию сессии по profile.settings (для cipher — код + барабаны);
+- (б) проверку ответа игрока → возвращает bool, без side-effect'ов.
+
+Handler НЕ трогает (остаётся в mission_engine.py без изменений):
+
+| Что | Файл:строки (сверить с grep) | Функции |
+|---|---|---|
+| Начисление наград (currency/items/story_node, множители попыток, идемпотентность) | mission_engine.py:685-887 | `_award_mission_rewards` |
+| Смена статуса/счётчиков миссии | mission_engine.py:1128, 1136-1152, 1154, 1159, 1210-1211, 1218-1219 | `_submit_mission_once` (статусы) |
+| Оркестрация submit-флоу | mission_engine.py:1073-1242 | `_submit_mission_once` |
+| Идемпотентный retry-цикл | mission_engine.py:1470-1507 | `submit_mission` |
+| Fallback-офферы при провале | mission_engine.py:1179-1184 | `create_first_failure_entitlements` |
+| Entry-debit legacy-fallback | mission_engine.py:1168-1169, 890+ | `_apply_entry_debit`, `_consume_entry_resources` |
+
+**Порядок начисления наград заморожен (заказчик 2026-10-19). Не менять:**
+1. `_validate_submission` → True (1171-1173)
+2. `player_mission.status = "completed"` (1210)
+3. `completed_at` (1211)
+4. `successful_completions += 1` (1218)
+5. `run_reference_id` (1219)
+6. `_award_mission_rewards` (1221-1233): загрузка MissionReward → кошелёк → множитель попытки → WalletTransaction(credit) → PlayerItem → story ids → flush
+7. return `{accepted: True, awarded, ...}` (1235-1242)
+
+**Два хрупких места при выносе cipher в handler (8.17.14) — сохранить в той же точке флоу:**
+1. Регенерация сессии при провале (mission_engine.py:1188-1193) живёт МЕЖДУ `create_first_failure_entitlements` (1179-1184) и `return` (1194-1208). При выносе вызов handler'а должен остаться в этой же точке — иначе сломается контракт «провал → новый код».
+2. `_serialize_cipher_session_for_bootstrap` (599-622) вызывается из `_build_bootstrap` (471-474) для ВСЕХ миссий и должен продолжать gracefully возвращать `None` для non-cipher. Не сломать.
+
+**Регресс-тест при выносе (8.17.14):** сценарий «успех cipher-миссии → награда начислена ровно один раз, в том же порядке, что и до выноса» должен остаться зелёным. Существующие 620 unittest-тестов — не трогать, они и есть защита.
+
+**Текущие расхождения docs vs код (на 2026-10-19, зафиксировано разведкой):**
+1. 8.17.10 не сделано: mission_engine.py читает content.ui (строки 1189, 1399), а не minigame_profile.settings. MinigameProfile в рантайме не читается вовсе.
+2. «Профиль обязателен для published» (roadmap:686) не реализовано: Mission.minigame_profile_id nullable, _validate_for_publish профиль не проверяет.
+3. 8.17.11 не сделано: test-cipher-01/02 имеют minigame_profile_id = NULL, старые поля в content.ui.
+4. 8.17.9 статус ❌ был устаревшим: dropdown есть (AdminApp.tsx:2520-2532), но форма шлёт и профиль, и старые поля одновременно (formToPayload, строки 382-402, 421-427).
+5. minigame-cipher.md и api-contracts.md не обновлены под профили (этот промпт частично закрывает).
+6. models.py:155 — устаревший комментарий (settings как содержащие alphabet/combination).
+7. CipherScreen.parseCipherContent жёстко требует drumCount/combination/alphabet в content.ui → экран не соберётся, если в новом формате этих полей нет.
 
 **После 8.17:**
 - 8.18 — Улучшения формы (справочники вместо JSON, gate !canWrite для ключей,

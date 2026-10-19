@@ -8,8 +8,8 @@
 - `GET /api/v1/engine/missions/{mission_id}/qr-payload` — подписанный QR-payload для миссии в `in_progress`
 - `GET /api/v1/engine/fallback-offers`
 - `POST /api/v1/engine/fallback-offers/{offer_id}/purchases`
-- `GET /api/v1/engine/shop/items` — @deprecated (каталог shop.catalog; не используется основным UI)
-- `POST /api/v1/engine/shop/items/{item_id}/purchases` — @deprecated (см. выше)
+- `GET /api/v1/engine/shop/items` — актуально (Sprint 8.16: каталог shop.catalog; альтернатива основному UI, зарегистрирован в main.py:568)
+- `POST /api/v1/engine/shop/items/{item_id}/purchases` — актуально (Sprint 8.16, зарегистрирован в main.py:586)
 - `POST /api/v1/engine/teams` — создать команду (201)
 - `GET /api/v1/engine/teams/me` — моя команда
 - `GET /api/v1/engine/teams/{team_id}` — карточка команды
@@ -343,6 +343,19 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
   reference_id=request_id)`; новая строка помечается `obtained_from_type="admin_manual"`,
   `obtained_from_id=request_id`. Player-ограничения (`sale_forbidden`, `transfer_forbidden`,
   `trade_forbidden`, `stack_limit`, `is_consumable`) админ-операции не блокируют.
+
+### Профили мини-игр (admin)
+
+Требуют авторизации админ-панели и прав minigame_profiles.read / minigame_profiles.manage.
+
+- GET /api/v1/admin/minigame-profiles — список профилей (фильтры: game_type, status).
+- GET /api/v1/admin/minigame-profiles/{id} — профиль по id.
+- POST /api/v1/admin/minigame-profiles — создать (name, game_type, settings).
+- PATCH /api/v1/admin/minigame-profiles/{id} — обновить.
+- POST /api/v1/admin/minigame-profiles/{id}/publish — опубликовать (draft → published, пустые settings → 422).
+- POST /api/v1/admin/minigame-profiles/{id}/archive — архивировать (published → archived).
+
+Валидация settings по game_type: whitelist в admin_minigame_profiles.py (_validate_settings). Для cipher: drumCount (2..12), falseChoicesPerDrum (0..36), timeLimitSeconds (1..3600|null). alphabet/combination в профиле отсутствуют.
 
 ---
 

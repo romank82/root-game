@@ -1,5 +1,18 @@
 # Мини-игра Cipher (кодовый замок с барабанами)
 
+## Актуальная модель (с 2026-10-19, Sprint 8.17)
+
+Настройки cipher живут в профиле мини-игры (таблица minigame_profiles, поле settings JSON), а НЕ в content.ui миссии. Миссия ссылается на профиль через mission.minigame_profile_id. Движок читает profile.settings через реестр обработчиков (см. docs/roadmap-detailed.md, Спринт 8.17, «Архитектурное решение: реестр обработчиков мини-игр»).
+
+Состав profile.settings для cipher (whitelist, admin_minigame_profiles.py:45-49):
+- drumCount: int 2..12
+- falseChoicesPerDrum: int 0..36
+- timeLimitSeconds: int 1..3600 | null
+
+В профиле НЕТ alphabet и combination — алфавит фиксированный (A-Z + 0-9, 36 символов), правильный код генерируется на backend случайно (длина = drumCount). Тексты (label, instruction, successTitle, successText, wrongAnswerText) остаются в миссии.
+
+Legacy (миссии без профиля, minigame_profile_id IS NULL): работают по старой схеме — параметры в content.ui, валидация через validation_config.correctCombination. Нужны только для test-cipher-01/02 до миграции (8.17.11).
+
 Универсальная мини-игра. Применяется к заданиям любого слоя (solo / team / story),
 когда админ выбирает `mission_type = "cipher"`. Не привязана к конкретному режиму.
 
@@ -15,6 +28,8 @@
 ## 2. Схема данных
 
 ### content.ui (публичная, приходит на фронт через bootstrap миссии)
+
+> ⚠️ Legacy (до Sprint 8.17). Для новых миссий параметры cipher живут в profile.settings (см. «Актуальная модель» выше). Этот раздел описывает старый формат, который поддерживается только для миссий без профиля.
 
 ```json
 {
@@ -126,11 +141,17 @@ currentIndex инициализированы, но кнопка активна,
 
 ## 5. Backend — что надо
 
+> ⚠️ Требования ниже — для legacy-миссий без профиля (minigame_profile_id IS NULL).
+> Для миссий с профилем combination в content.ui НЕ нужна: правильный код
+> генерируется на backend случайно (длина = drumCount), проверка ответа —
+> сравнение sequence с cipherSession.correct_code (см. реестр обработчиков в
+> roadmap-detailed.md, Sprint 8.17).
+
 - content_contract.py: добавить mission_type == "cipher" в validate_mission_content.
   Схема — как в разделе 2. Переиспользовать anti-ambiguity из runtime_policy_contract.
-- content_contract.py: в схеме cipher поле combination обязательно и непустое.
-  Админ заполняет одно поле, backend копирует его в content.ui.combination
-  и в validation_config.correctCombination.
+- content_contract.py: в схеме cipher поле combination обязательно и непустое —
+  только для legacy-миссий без профиля. Админ заполняет одно поле, backend
+  копирует его в content.ui.combination и в validation_config.correctCombination.
 - mission_engine._validate_submission: добавить validator == "cipher_match".
   Простое сравнение sequence == correctCombination.
 - admin_missions.py: publish-валидация для cipher — correctCombination непустой,
@@ -142,6 +163,14 @@ currentIndex инициализированы, но кнопка активна,
 ## 6. Admin UI
 
 В редакторе миссии при mission_type = "cipher":
+
+Для миссий с профилем (8.17.18, в работе): поля drumCount/alphabet/
+falseChoicesPerDrum/«Правильная комбинация» НЕ показываются. Остаются:
+- dropdown «Профиль мини-игры» (выбор из minigame_profiles, поле minigame_profile_id);
+- label / instruction / successTitle / successText / wrongAnswerText / rewardPreview —
+  как у code_repair.
+
+Для legacy-миссий без профиля (старый редактор, до 8.17.18):
 - drumCount — число.
 - alphabet — список символов (чипы или через запятую).
 - falseChoicesPerDrum — число.
