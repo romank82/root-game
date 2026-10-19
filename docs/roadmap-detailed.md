@@ -708,10 +708,8 @@
   (available, consumed НЕ сбрасывается, run=current); шаг 8b —
   quota_limit копится на reward.amount захода; reference_id покупки =
   {entitlement.id}:{run}:{count}.
-- 8.17.9 ⚠️ частично Frontend: dropdown "Профиль мини-игры" в форме миссии
-  (dropdown есть, форма всё ещё шлёт старые поля content.ui/validation_config;
-  8.17.9c → 8.17.18 — следующий шаг).
-- 8.17.10 ❌ Backend: чтение профиля в mission_engine (при accept/submit).
+- 8.17.9 ✅ Frontend: dropdown "Профиль мини-игры" в форме миссии (dropdown есть; 8.17.9c → 8.17.18 — форма переведена на профиль, старые поля скрыты и не отправляются).
+- 8.17.10 ✅ Backend: чтение профиля в mission_engine (при accept/submit) — реализовано через _resolve_minigame_settings (8.17.15).
 - 8.17.11 ✅ Миграция существующих cipher-миссий в новый формат (обе test-cipher-01/02 мигрированы на профиль test_cipher_ilght; старые поля content.ui вычищены).
 - 8.17.12 ✅ Тесты (7 автотестов published-ветки в test_minigame_profile_cipher_publish.py; 627 OK).
   Обязательные тесты новых шагов: (а) cipher + published-профиль + пустой content.ui →
