@@ -29,6 +29,7 @@ from app.models import (
     MissionRequirement,
     MissionReward,
     MissionRuntimePolicy,
+    MinigameProfile,
     PlayerItem,
     PlayerMission,
     Segment,
@@ -1010,6 +1011,23 @@ def _consume_entry_resources(
     )
 
 
+def _resolve_minigame_settings(session: Session, mission: Mission) -> dict:
+    """Sprint 8.17.15: параметры мини-игры.
+
+    Приоритет:
+      1. Если у миссии есть minigame_profile_id и профиль published —
+         берём profile.settings.
+      2. Иначе (нет профиля / draft / archived) — legacy content.ui.
+    Возврат: dict параметров для handler.generate_session(settings).
+    """
+    profile_id = getattr(mission, "minigame_profile_id", None)
+    if profile_id:
+        profile = session.get(MinigameProfile, profile_id)
+        if profile is not None and profile.status == "published":
+            return dict(profile.settings or {})
+    return dict((mission.content or {}).get("ui", {}))
+
+
 def _submit_mission_once(
     player_id: str,
     mission_id: str,
@@ -1127,9 +1145,9 @@ def _submit_mission_once(
             # сессия больше недействительна).
             handler = get_handler(mission.mission_type)
             if handler is not None:
-                # Sprint 8.17.14: источник параметров пока legacy content.ui
-                # (переключение на profile.settings — шаг 8.17.15).
-                settings = (mission.content or {}).get("ui", {})
+                # Sprint 8.17.15: profile.settings, если есть published-профиль;
+                # иначе legacy content.ui.
+                settings = _resolve_minigame_settings(session, mission)
                 new_session = handler.generate_session(settings)
                 progress = dict(player_mission.progress or {})
                 progress["cipher_session"] = new_session
@@ -1340,9 +1358,9 @@ def _accept_mission_once(
         # при submit сервер сверяется именно с ней, а не с validation_config.
         handler = get_handler(mission.mission_type)
         if handler is not None:
-            # Sprint 8.17.14: источник параметров пока legacy content.ui
-            # (переключение на profile.settings — шаг 8.17.15).
-            settings = (mission.content or {}).get("ui", {})
+            # Sprint 8.17.15: profile.settings, если есть published-профиль;
+            # иначе legacy content.ui.
+            settings = _resolve_minigame_settings(session, mission)
             session_data = handler.generate_session(settings)
             progress = dict(player_mission.progress or {})
             progress["cipher_session"] = session_data
