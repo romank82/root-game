@@ -152,7 +152,8 @@ class MinigameProfile(TimestampMixin, Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     game_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    # JSON: { drumCount, alphabet, falseChoicesPerDrum, combination, timeLimitSeconds }
+    # JSON: настройки по game_type. Для cipher: { drumCount, falseChoicesPerDrum, timeLimitSeconds }.
+    # alphabet/combination живут в mission.content.ui только для legacy-миссий без профиля.
     # или { blocks, correctSequence } (code_repair)
     # или { acceptedAnswers } (text_answer)
     settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
@@ -203,7 +204,7 @@ class Mission(TimestampMixin, Base):
     )
 
     # Профиль мини-игры: переиспользуемые настройки из справочника (Sprint 8.17).
-    # Обязателен для published (правило в admin_missions).
+    # Обязателен для published cipher (реализовано 8.17.19, admin_missions._validate_for_publish).
     minigame_profile_id: Mapped[str | None] = mapped_column(
         String(64),
         ForeignKey("minigame_profiles.id", ondelete="SET NULL"),

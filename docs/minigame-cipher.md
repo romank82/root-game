@@ -4,6 +4,8 @@
 
 Настройки cipher живут в профиле мини-игры (таблица minigame_profiles, поле settings JSON), а НЕ в content.ui миссии. Миссия ссылается на профиль через mission.minigame_profile_id. Движок читает profile.settings через реестр обработчиков (см. docs/roadmap-detailed.md, Спринт 8.17, «Архитектурное решение: реестр обработчиков мини-игр»).
 
+Статус: реализовано в Sprint 8.17.14–8.17.17 (реестр обработчиков, чтение profile.settings, смягчение контракта для published-профиля, отрисовка CipherScreen по cipherSession). Legacy-путь сохранён для миссий без профиля.
+
 Состав profile.settings для cipher (whitelist, admin_minigame_profiles.py:45-49):
 - drumCount: int 2..12
 - falseChoicesPerDrum: int 0..36
@@ -142,10 +144,10 @@ currentIndex инициализированы, но кнопка активна,
 ## 5. Backend — что надо
 
 > ⚠️ Требования ниже — для legacy-миссий без профиля (minigame_profile_id IS NULL).
-> Для миссий с профилем combination в content.ui НЕ нужна: правильный код
-> генерируется на backend случайно (длина = drumCount), проверка ответа —
-> сравнение sequence с cipherSession.correct_code (см. реестр обработчиков в
-> roadmap-detailed.md, Sprint 8.17).
+> combination в content.ui обязательна только для legacy-миссий без профиля.
+> Для миссий с published-профилем combination в content.ui НЕ требуется (код
+> генерируется на backend, см. 8.17.16). Проверка ответа — сравнение sequence
+> с cipherSession.correct_code (см. реестр обработчиков в roadmap-detailed.md, Sprint 8.17).
 
 - content_contract.py: добавить mission_type == "cipher" в validate_mission_content.
   Схема — как в разделе 2. Переиспользовать anti-ambiguity из runtime_policy_contract.
