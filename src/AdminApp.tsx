@@ -388,13 +388,20 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
       ui: {
         label: form.contentLabel.trim(),
         instruction: form.contentInstruction.trim(),
-        drumCount: Number(form.contentDrumCount),
-        alphabet: cleanAlphabet,
-        falseChoicesPerDrum: Number(form.contentFalseChoicesPerDrum),
-        combination: form.contentCombination.trim(),
-        timeLimitSeconds: form.contentTimeLimitSeconds.trim()
-          ? Number(form.contentTimeLimitSeconds)
-          : null,
+        // 8.17.18: для cipher настройки (drumCount/alphabet/falseChoicesPerDrum/
+        // combination/timeLimitSeconds) в content.ui НЕ отправляются — они живут
+        // в профиле мини-игры. Код сборки сохранён за условием (см. 8.17.16).
+        ...(form.missionType !== 'cipher'
+          ? {
+              drumCount: Number(form.contentDrumCount),
+              alphabet: cleanAlphabet,
+              falseChoicesPerDrum: Number(form.contentFalseChoicesPerDrum),
+              combination: form.contentCombination.trim(),
+              timeLimitSeconds: form.contentTimeLimitSeconds.trim()
+                ? Number(form.contentTimeLimitSeconds)
+                : null,
+            }
+          : {}),
         successTitle: form.contentSuccessTitle.trim(),
         successText: form.contentSuccessText.trim(),
         wrongAnswerText: form.contentWrongAnswerText.trim(),
@@ -421,9 +428,16 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     } else if (form.validationValidator === 'cipher_match') {
       validation_config = {
         validator: 'cipher_match',
-        correctCombination: form.validationCorrectCombination
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0),
+        // 8.17.18: для cipher correctCombination в validation_config НЕ
+        // отправляется (правильный код генерируется на backend). Код сборки
+        // сохранён за условием (см. 8.17.16).
+        ...(form.missionType !== 'cipher'
+          ? {
+              correctCombination: form.validationCorrectCombination
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0),
+            }
+          : {}),
       }
     } else {
       validation_config = {
@@ -2894,51 +2908,55 @@ function AdminApp() {
                 />
               </label>
 
-              <label>
-                Количество барабанов
-                <input
-                  type="number"
-                  min={2}
-                  max={12}
-                  value={form.contentDrumCount}
-                  disabled={!canWrite}
-                  onChange={(e) => setForm({ ...form, contentDrumCount: e.target.value })}
-                />
-              </label>
+              {form.missionType !== 'cipher' && (
+                <>
+                  <label>
+                    Количество барабанов
+                    <input
+                      type="number"
+                      min={2}
+                      max={12}
+                      value={form.contentDrumCount}
+                      disabled={!canWrite}
+                      onChange={(e) => setForm({ ...form, contentDrumCount: e.target.value })}
+                    />
+                  </label>
 
-              <label>
-                Ложных символов на барабан
-                <input
-                  type="number"
-                  min={0}
-                  max={10}
-                  value={form.contentFalseChoicesPerDrum}
-                  disabled={!canWrite}
-                  onChange={(e) => setForm({ ...form, contentFalseChoicesPerDrum: e.target.value })}
-                />
-              </label>
+                  <label>
+                    Ложных символов на барабан
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      value={form.contentFalseChoicesPerDrum}
+                      disabled={!canWrite}
+                      onChange={(e) => setForm({ ...form, contentFalseChoicesPerDrum: e.target.value })}
+                    />
+                  </label>
 
-              <label className="admin-span-2">
-                Правильная комбинация
-                <input
-                  value={form.contentCombination}
-                  disabled={!canWrite}
-                  placeholder="Например: ROOT"
-                  onChange={(e) => setForm({ ...form, contentCombination: e.target.value })}
-                />
-              </label>
+                  <label className="admin-span-2">
+                    Правильная комбинация
+                    <input
+                      value={form.contentCombination}
+                      disabled={!canWrite}
+                      placeholder="Например: ROOT"
+                      onChange={(e) => setForm({ ...form, contentCombination: e.target.value })}
+                    />
+                  </label>
 
-              <label className="admin-span-2">
-                Время на решение (сек, пусто = без лимита)
-                <input
-                  type="number"
-                  min={1}
-                  max={3600}
-                  value={form.contentTimeLimitSeconds}
-                  disabled={!canWrite}
-                  onChange={(e) => setForm({ ...form, contentTimeLimitSeconds: e.target.value })}
-                />
-              </label>
+                  <label className="admin-span-2">
+                    Время на решение (сек, пусто = без лимита)
+                    <input
+                      type="number"
+                      min={1}
+                      max={3600}
+                      value={form.contentTimeLimitSeconds}
+                      disabled={!canWrite}
+                      onChange={(e) => setForm({ ...form, contentTimeLimitSeconds: e.target.value })}
+                    />
+                  </label>
+                </>
+              )}
 
               <label className="admin-span-2">
                 Заголовок при успехе
@@ -2967,34 +2985,36 @@ function AdminApp() {
                 />
               </label>
 
-              <div className="admin-validation-list">
-                <div className="admin-section-heading">
-                  <h4>Алфавит символов (публичный)</h4>
-                  <button
-                    className="admin-secondary"
-                    onClick={addContentAlphabet}
-                    disabled={!canWrite}
-                  >
-                    + Добавить символ
-                  </button>
-                </div>
-                {form.contentAlphabet.map((symbol, index) => (
-                  <div className="admin-validation-row" key={index}>
-                    <input
-                      value={symbol}
-                      disabled={!canWrite}
-                      onChange={(e) => changeContentAlphabet(index, e.target.value)}
-                    />
+              {form.missionType !== 'cipher' && (
+                <div className="admin-validation-list">
+                  <div className="admin-section-heading">
+                    <h4>Алфавит символов (публичный)</h4>
                     <button
-                      className="admin-danger"
-                      onClick={() => removeContentAlphabet(index)}
-                      disabled={!canWrite || form.contentAlphabet.length <= 1}
+                      className="admin-secondary"
+                      onClick={addContentAlphabet}
+                      disabled={!canWrite}
                     >
-                      Удалить
+                      + Добавить символ
                     </button>
                   </div>
-                ))}
-              </div>
+                  {form.contentAlphabet.map((symbol, index) => (
+                    <div className="admin-validation-row" key={index}>
+                      <input
+                        value={symbol}
+                        disabled={!canWrite}
+                        onChange={(e) => changeContentAlphabet(index, e.target.value)}
+                      />
+                      <button
+                        className="admin-danger"
+                        onClick={() => removeContentAlphabet(index)}
+                        disabled={!canWrite || form.contentAlphabet.length <= 1}
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           ) : (
             <label className="admin-json-field">
@@ -3114,7 +3134,8 @@ function AdminApp() {
                 </div>
               )}
 
-              {form.validationValidator === 'cipher_match' && (
+              {form.missionType !== 'cipher' &&
+              form.validationValidator === 'cipher_match' && (
                 <div className="admin-validation-list">
                   <div className="admin-section-heading">
                     <h4>Правильная комбинация</h4>
