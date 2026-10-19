@@ -690,7 +690,7 @@
   successTitle) остаются в миссии.
 - Существующие cipher-миссии → автоматически создаём профили.
 
-**План (12 подшагов):**
+**План (13 подшагов):**
 - 8.17.1 ✅ Модель MinigameProfile (id, name, game_type, settings JSON, status).
 - 8.17.2 ✅ Миграция: таблица + FK в Mission.
 - 8.17.3 ✅ Backend CRUD (admin_minigame_profiles.py + main.py).
@@ -705,12 +705,19 @@
   с backend; fallback на content.ui для старых миссий.
 - 8.17.8 ✅ Re-arm per run: run_entry_count в PlayerFallbackEntitlement;
   новый заход (entry_count != run_entry_count) → re-arm
-  (available, consumed=0, run=current); reference_id покупки =
+  (available, consumed НЕ сбрасывается, run=current); шаг 8b —
+  quota_limit копится на reward.amount захода; reference_id покупки =
   {entitlement.id}:{run}:{count}.
 - 8.17.9 ❌ Frontend: dropdown "Профиль мини-игры" в форме миссии.
 - 8.17.10 ❌ Backend: чтение профиля в mission_engine (при accept/submit).
 - 8.17.11 ❌ Миграция существующих cipher-миссий в новый формат.
 - 8.17.12 ❌ Тесты.
+- 8.17.13 ❌ Edge-кейс (stale available): если игрок провалил 1-ю, не купил,
+  а в новом заходе успех с 1-й → ключ наградой, но старый available-оффер
+  остаётся в магазине (можно купить второй ключ). Решение: при успешном
+  submit помечать entitlement'ы run_entry_count текущего захода (исключить
+  покупку после успеха). Требует согласования (трогает
+  mission_engine._submit_mission_once).
 
 **Архитектурное решение:**
 - Настройки профиля — только параметры сложности (drumCount,

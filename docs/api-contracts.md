@@ -67,11 +67,18 @@ id/slug/title, `entitlementId` (уникальный адрес предложе
 содержит pool/mode/expiry, policy JSON или server-only метаданные (в т.ч.
 `run_entry_count` — номер захода, server-only, в ответ не экспонируется).
 
-Примечание (Sprint 8.17, шаг 8): для многоразовой миссии (repeatability
+Примечание (Sprint 8.17, шаги 8/8b): для многоразовой миссии (repeatability
 policy) каждый новый заход переармирует fallback-entitlement: при провале
-в новом заходе `status` → `available`, `consumed_count` → `0`,
-`run_entry_count` → номер текущего захода. Оффер снова доступен к покупке;
-`reference_id` покупки учитывает `run_entry_count` (ниже).
+1-й попытки в новом заходе `status` → `available` (выводится из остатка
+`consumed_count < quota_limit`), `run_entry_count` → номер текущего захода.
+Оффер снова доступен к покупке; `reference_id` покупки учитывает
+`run_entry_count` (ниже).
+
+**Накопление (Sprint 8.17, шаг 8b):** при каждом новом заходе многоразовой
+миссии (провал 1-й попытки в новом заходе) `quota_limit` увеличивается на
+`reward.amount` (количество в item-награде миссии), `consumed_count`
+НЕ сбрасывается. `remainingQuota = quota_limit - consumed_count`
+(накопленное минус купленное).
 
 `POST /api/v1/engine/fallback-offers/{offer_id}/purchases` (4.4) покупает
 fallback-ключ за ROOT в одной атомарной транзакции: debit ROOT
