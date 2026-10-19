@@ -521,27 +521,32 @@ def _validate_for_publish(
 
         elif validator == "cipher_match":
             correct_combination = mission.validation_config.get("correctCombination")
-            if (
-                not isinstance(correct_combination, list)
-                or not correct_combination
-                or not all(
-                    isinstance(symbol, str) and symbol.strip()
-                    for symbol in correct_combination
-                )
-            ):
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "Для validator=cipher_match требуется непустой "
-                        "список validation_config.correctCombination."
-                    ),
-                )
 
-            # Sprint 8.17.16: согласованность correctCombination c legacy
-            # content.ui (drumCount/alphabet) проверяем только для миссий без
-            # published-профиля. Для профильных настройки живут в
-            # profile.settings, а content.ui может быть пустым.
+            # Sprint 8.17.18-hotfix: для published-профиля correctCombination
+            # не требуется — правильный код генерируется на backend, и форма
+            # его больше не отправляет (8.17.18). Для legacy-миссий без
+            # профиля проверка остаётся обязательной, как раньше.
             if not has_published_profile:
+                if (
+                    not isinstance(correct_combination, list)
+                    or not correct_combination
+                    or not all(
+                        isinstance(symbol, str) and symbol.strip()
+                        for symbol in correct_combination
+                    )
+                ):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "Для validator=cipher_match требуется непустой "
+                            "список validation_config.correctCombination."
+                        ),
+                    )
+
+                # Sprint 8.17.16: согласованность correctCombination c legacy
+                # content.ui (drumCount/alphabet) проверяем только для миссий без
+                # published-профиля. Для профильных настройки живут в
+                # profile.settings, а content.ui может быть пустым.
                 ui = mission.content.get("ui", {}) if isinstance(mission.content, dict) else {}
                 drum_count = ui.get("drumCount")
                 alphabet = ui.get("alphabet")
