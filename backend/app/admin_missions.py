@@ -41,15 +41,34 @@ VALID_REWARD_TYPES = {"currency", "item", "story_node"}
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[a-z0-9-]{0,126}[a-z0-9])?$")
 
 
-def _validate_public_mission_content(mission_type: str, content: Any) -> None:
+def _validate_public_mission_content(
+    mission_type: str, content: Any, *, require_full_cipher_ui: bool = True
+) -> None:
     """Do not expose submitted content or protected values in validation errors."""
     try:
-        validate_mission_content(mission_type, content)
+        validate_mission_content(
+            mission_type,
+            content,
+            require_full_cipher_ui=require_full_cipher_ui,
+        )
     except PublicContentValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Публичный content Mission не соответствует опубликованному контракту.",
         ) from exc
+
+
+def _mission_has_published_profile(session: Session, mission: Mission) -> bool:
+    """Sprint 8.17.16: есть ли у миссии published-профиль мини-игры.
+
+    Зеркало gate из mission_engine._resolve_minigame_settings:
+    published-профиль = источник настроек; draft/archived/None = legacy content.ui.
+    """
+    profile_id = getattr(mission, "minigame_profile_id", None)
+    if not profile_id:
+        return False
+    profile = session.get(MinigameProfile, profile_id)
+    return profile is not None and profile.status == "published"
 
 
 def _validate_team_mission_config(validation_config: Any) -> None:
@@ -382,7 +401,15 @@ def _validate_for_publish(
     mission: Mission,
 ) -> None:
     """Reject publishing a mission that the current game engine cannot validate."""
-    _validate_public_mission_content(mission.mission_type, mission.content)
+    # Sprint 8.17.16: для cipher-миссий с published-профилем старые поля
+    # content.ui (drumCount/alphabet/combination) не обязательны — настройки
+    # мини-игры берутся из profile.settings (см. _resolve_minigame_settings).
+    has_published_profile = _mission_has_published_profile(session, mission)
+    _validate_public_mission_content(
+        mission.mission_type,
+        mission.content,
+        require_full_cipher_ui=not has_published_profile,
+    )
     _validate_references(
         session,
         chapter_id=mission.chapter_id,
@@ -510,30 +537,35 @@ def _validate_for_publish(
                     ),
                 )
 
-            ui = mission.content.get("ui", {}) if isinstance(mission.content, dict) else {}
-            drum_count = ui.get("drumCount")
-            alphabet = ui.get("alphabet")
+            # Sprint 8.17.16: согласованность correctCombination c legacy
+            # content.ui (drumCount/alphabet) проверяем только для миссий без
+            # published-профиля. Для профильных настройки живут в
+            # profile.settings, а content.ui может быть пустым.
+            if not has_published_profile:
+                ui = mission.content.get("ui", {}) if isinstance(mission.content, dict) else {}
+                drum_count = ui.get("drumCount")
+                alphabet = ui.get("alphabet")
 
-            if len(correct_combination) != drum_count:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "Для validator=cipher_match длина correctCombination "
-                        "должна совпадать с content.ui.drumCount."
-                    ),
-                )
+                if len(correct_combination) != drum_count:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "Для validator=cipher_match длина correctCombination "
+                            "должна совпадать с content.ui.drumCount."
+                        ),
+                    )
 
-            if isinstance(alphabet, list):
-                alphabet_set = set(alphabet)
-                for symbol in correct_combination:
-                    if symbol not in alphabet_set:
-                        raise HTTPException(
-                            status_code=422,
-                            detail=(
-                                "Для validator=cipher_match все символы correctCombination "
-                                "должны присутствовать в content.ui.alphabet."
-                            ),
-                        )
+                if isinstance(alphabet, list):
+                    alphabet_set = set(alphabet)
+                    for symbol in correct_combination:
+                        if symbol not in alphabet_set:
+                            raise HTTPException(
+                                status_code=422,
+                                detail=(
+                                    "Для validator=cipher_match все символы correctCombination "
+                                    "должны присутствовать в content.ui.alphabet."
+                                ),
+                            )
 
         else:
             raise HTTPException(

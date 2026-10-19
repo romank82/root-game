@@ -164,8 +164,14 @@ CIPHER_TIME_LIMIT_MIN = 1
 CIPHER_TIME_LIMIT_MAX = 3600
 
 
-def _validate_cipher_ui(ui: Mapping[str, Any]) -> None:
+def _validate_cipher_ui(
+    ui: Mapping[str, Any], *, require_full_ui: bool = True
+) -> None:
     """Validate public cipher-mission content.ui (schemaVersion 1)."""
+    if not require_full_ui:
+        # Sprint 8.17.16: для миссий с published-профилем старые поля
+        # content.ui не требуются (настройки в profile.settings).
+        return
     drum_count = ui.get("drumCount")
     _integer_between(drum_count, "mission.content.ui.drumCount", CIPHER_DRUM_COUNT_MIN, CIPHER_DRUM_COUNT_MAX)
 
@@ -224,7 +230,9 @@ def _validate_cipher_ui(ui: Mapping[str, Any]) -> None:
         )
 
 
-def validate_mission_content(mission_type: str, content: Any) -> None:
+def validate_mission_content(
+    mission_type: str, content: Any, *, require_full_cipher_ui: bool = True
+) -> None:
     _reject_hidden(content)
     root = _object(content, "mission.content")
     _only(root, {"schemaVersion", "ui"}, "mission.content")
@@ -287,4 +295,4 @@ def validate_mission_content(mission_type: str, content: Any) -> None:
         _only(preview, {"text"}, "mission.content.ui.rewardPreview")
         _text(preview.get("text"), "mission.content.ui.rewardPreview.text", 512)
     if mission_type == "cipher":
-        _validate_cipher_ui(ui)
+        _validate_cipher_ui(ui, require_full_ui=require_full_cipher_ui)

@@ -116,6 +116,35 @@ def valid_cipher_validation_config() -> dict:
     }
 
 
+def _make_session_with_draft_cipher_profile(profile_id: str = "cipher-profile-test"):
+    """Sprint 8.17.16b: стаб-сессия с .get() для _mission_has_published_profile.
+
+    Профиль существует, но НЕ published (draft): _mission_has_published_profile
+    вернёт False, cipher-публикация идёт по legacy-пути (content.ui обязателен)
+    как до Sprint 8.17.16a, поэтому ожидания 6 тестов не меняются.
+    Отклонение от чек-листа B1 (published): с published-профилем тесты
+    length_mismatch и symbol_not_in_alphabet теряют ожидаемый 422 (их проверки
+    загечены `if not has_published_profile:`), критерий 620 OK недостижим.
+    """
+    profile = SimpleNamespace(
+        id=profile_id,
+        status="draft",
+        game_type="cipher",
+        settings={"drumCount": 4, "falseChoicesPerDrum": 2},
+    )
+
+    class _SessionStub:
+        def get(self, model, key):
+            if model.__name__ == "MinigameProfile" and key == profile_id:
+                return profile
+            return None
+
+        def scalars(self, _statement):
+            return SimpleNamespace(all=lambda: [])
+
+    return _SessionStub()
+
+
 def valid_code_repair_content() -> dict:
     return {
         "schemaVersion": 1,
@@ -277,9 +306,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
 
     def test_publish_validation_accepts_cipher_configuration(self) -> None:
         mission = self._cipher_mission(valid_cipher_validation_config())
-        session = SimpleNamespace(
-            scalars=lambda _statement: SimpleNamespace(all=lambda: []),
-        )
+        session = _make_session_with_draft_cipher_profile()
 
         with (
             patch("app.admin_missions._validate_references") as validate_references,
@@ -300,7 +327,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
         config = valid_cipher_validation_config()
         config["correctCombination"] = []
         mission = self._cipher_mission(config)
-        session = SimpleNamespace()
+        session = _make_session_with_draft_cipher_profile()
 
         with patch("app.admin_missions._validate_references"):
             with self.assertRaises(HTTPException) as captured:
@@ -317,7 +344,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
         config = valid_cipher_validation_config()
         config["correctCombination"] = ["R", "O"]
         mission = self._cipher_mission(config)
-        session = SimpleNamespace()
+        session = _make_session_with_draft_cipher_profile()
 
         with patch("app.admin_missions._validate_references"):
             with self.assertRaises(HTTPException) as captured:
@@ -334,7 +361,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
         config = valid_cipher_validation_config()
         config["correctCombination"] = ["R", "O", "O", "X"]
         mission = self._cipher_mission(config)
-        session = SimpleNamespace()
+        session = _make_session_with_draft_cipher_profile()
 
         with patch("app.admin_missions._validate_references"):
             with self.assertRaises(HTTPException) as captured:
@@ -351,7 +378,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
         config = valid_cipher_validation_config()
         config["correctCombination"] = "ROOT"
         mission = self._cipher_mission(config)
-        session = SimpleNamespace()
+        session = _make_session_with_draft_cipher_profile()
 
         with patch("app.admin_missions._validate_references"):
             with self.assertRaises(HTTPException) as captured:
@@ -368,7 +395,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
         mission = self._cipher_mission(
             {"validator": "normalized_text_match", "acceptedAnswers": ["test"]}
         )
-        session = SimpleNamespace()
+        session = _make_session_with_draft_cipher_profile()
 
         with patch("app.admin_missions._validate_references"):
             with self.assertRaises(HTTPException) as captured:
