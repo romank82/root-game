@@ -74,13 +74,58 @@ function asNumber(
   return value
 }
 
-// ---------- Парсинг content.ui ----------
+// ---------- Парсинг content.ui (приоритет — backend-сессия) ----------
 
 function parseCipherContent(mission: EngineMission): CipherContent | null {
   if (mission.missionType !== 'cipher') return null
 
   const root = asRecord(mission.content)
   const ui = asRecord(root?.ui)
+  // Sprint 8.17 (шаги 6-7): готовая backend-сессия (барабаны + правильный код).
+  // Sprint 8.17.17: если сессия есть — content.ui НЕ требуется: новые миссии
+  // могут не иметь content.ui.drumCount/alphabet/combination. Отрисовка идёт
+  // из сессии, content.ui даёт только опциональные тексты/таймер.
+  const sessionDrums = mission.cipherSession?.drums
+  const sessionCode = mission.cipherSession?.correctCode
+  const sessionUsable =
+    Array.isArray(sessionDrums) &&
+    sessionDrums.length > 0 &&
+    sessionDrums.every(
+      (symbols) =>
+        Array.isArray(symbols) &&
+        symbols.length > 0 &&
+        symbols.every((symbol) => typeof symbol === 'string'),
+    ) &&
+    Array.isArray(sessionCode) &&
+    sessionCode.length > 0 &&
+    sessionCode.every((symbol) => typeof symbol === 'string')
+
+  const timeLimitRaw = ui?.timeLimitSeconds
+  const timeLimitSeconds =
+    timeLimitRaw === null || timeLimitRaw === undefined
+      ? null
+      : asNumber(timeLimitRaw, 1, 3600)
+
+  // Приоритет — backend-сессия: обязательные поля CipherContent (drumCount,
+  // combination) берём из сессии, alphabet собираем из её барабанов.
+  if (sessionUsable) {
+    const sessionSymbols = sessionDrums.flatMap((symbols) => symbols)
+    return {
+      label: asText(ui?.label),
+      instruction: asText(ui?.instruction),
+      drumCount: sessionDrums.length,
+      alphabet: [...new Set(sessionSymbols)],
+      falseChoicesPerDrum: asNumber(ui?.falseChoicesPerDrum, 0, 10),
+      combination: sessionCode.join(''),
+      timeLimitSeconds,
+      successTitle: asText(ui?.successTitle),
+      successText: asText(ui?.successText),
+      wrongAnswerText: asText(ui?.wrongAnswerText),
+    }
+  }
+
+  // Legacy: сессии нет (миссия до миграции) или она невалидна — старое
+  // поведение без изменений: обязателен content.ui.drumCount/alphabet/combination.
   if (!ui) return null
 
   const drumCount = asNumber(ui.drumCount, 2, 12)
@@ -93,12 +138,6 @@ function parseCipherContent(mission: EngineMission): CipherContent | null {
   if (drumCount === null || !combination || alphabet.length === 0) {
     return null
   }
-
-  const timeLimitRaw = ui.timeLimitSeconds
-  const timeLimitSeconds =
-    timeLimitRaw === null || timeLimitRaw === undefined
-      ? null
-      : asNumber(timeLimitRaw, 1, 3600)
 
   return {
     label: asText(ui.label),
