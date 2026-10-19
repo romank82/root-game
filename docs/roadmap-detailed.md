@@ -214,7 +214,7 @@
   исторически назван `offer_id`, но адресует `entitlement.id` (GET отдаёт его
   как `entitlementId`; `offer_id` у одного игрока не уникален). Цена —
   `shop.fallback.default_price_root` (5-й ключ, data-миграция `1c439c558aa7`,
-  дефолт 100 atomic units). Идемпотентность — `reference_id = "{entitlement.id}:{n}"`
+  дефолт 100 atomic units). Идемпотентность — `reference_id = "{entitlement.id}:{run_entry_count}:{n}"` (run_entry_count — номер захода, Sprint 8.17.8)
   + unique-индексы WalletTransaction/InventoryEvent; повторный POST возвращает
   committed-результат. Порядок в транзакции: entitlement FOR UPDATE → enabled →
   ключ published/KeyRules → цена → идемпотентный возврат → статус → квота →
@@ -690,21 +690,27 @@
   successTitle) остаются в миссии.
 - Существующие cipher-миссии → автоматически создаём профили.
 
-**План (11 подшагов):**
+**План (12 подшагов):**
 - 8.17.1 ✅ Модель MinigameProfile (id, name, game_type, settings JSON, status).
 - 8.17.2 ✅ Миграция: таблица + FK в Mission.
 - 8.17.3 ✅ Backend CRUD (admin_minigame_profiles.py + main.py).
 - 8.17.4 ✅ Frontend: раздел в sidebar ("Настройки мини-игр").
-- 8.17.5 ❌ Профиль: только параметры (drumCount, falseChoicesPerDrum,
+- 8.17.5 ✅ Профиль: только параметры (drumCount, falseChoicesPerDrum,
   timeLimitSeconds). Без alphabet/combination.
-- 8.17.6 ❌ Backend: генератор кода и символов на каждую попытку
-  (A-Z + 0-9, 36 символов; drumCount = длина кода; falseChoicesPerDrum
-  ложных + 1 верный на барабан; при превышении алфавита — повторы).
-- 8.17.7 ❌ CipherScreen: получает готовые символы с backend (не генерирует).
-- 8.17.8 ❌ Frontend: dropdown "Профиль мини-игры" в форме миссии.
-- 8.17.9 ❌ Backend: чтение профиля в mission_engine (при accept/submit).
-- 8.17.10 ❌ Миграция существующих cipher-миссий в новый формат.
-- 8.17.11 ❌ Тесты.
+- 8.17.6 ✅ Backend-генератор: CIPHER_ALPHABET (A-Z + 0-9, 36 символов);
+  generate_cipher_session — случайный код (длина = drumCount), барабаны
+  (1 верный + N ложных без повторов, при N>35 — с повторами);
+  генерация при accept, регенерация при промахе.
+- 8.17.7 ✅ CipherScreen: читает mission.cipherSession (drums, correctCode)
+  с backend; fallback на content.ui для старых миссий.
+- 8.17.8 ✅ Re-arm per run: run_entry_count в PlayerFallbackEntitlement;
+  новый заход (entry_count != run_entry_count) → re-arm
+  (available, consumed=0, run=current); reference_id покупки =
+  {entitlement.id}:{run}:{count}.
+- 8.17.9 ❌ Frontend: dropdown "Профиль мини-игры" в форме миссии.
+- 8.17.10 ❌ Backend: чтение профиля в mission_engine (при accept/submit).
+- 8.17.11 ❌ Миграция существующих cipher-миссий в новый формат.
+- 8.17.12 ❌ Тесты.
 
 **Архитектурное решение:**
 - Настройки профиля — только параметры сложности (drumCount,

@@ -64,7 +64,14 @@ id/slug/title, `entitlementId` (уникальный адрес предложе
 (id/slug/code/title/symbol/category/rarity).
 `shop.fallback.enabled=false` → пустой список; item не published / KeyRules
 удалён → `status: "disabled"` (derived, без записи в БД). Response никогда не
-содержит pool/mode/expiry, policy JSON или server-only метаданные.
+содержит pool/mode/expiry, policy JSON или server-only метаданные (в т.ч.
+`run_entry_count` — номер захода, server-only, в ответ не экспонируется).
+
+Примечание (Sprint 8.17, шаг 8): для многоразовой миссии (repeatability
+policy) каждый новый заход переармирует fallback-entitlement: при провале
+в новом заходе `status` → `available`, `consumed_count` → `0`,
+`run_entry_count` → номер текущего захода. Оффер снова доступен к покупке;
+`reference_id` покупки учитывает `run_entry_count` (ниже).
 
 `POST /api/v1/engine/fallback-offers/{offer_id}/purchases` (4.4) покупает
 fallback-ключ за ROOT в одной атомарной транзакции: debit ROOT
@@ -79,9 +86,11 @@ Pre-checks (каждый — HTTP 409 с русским detail): магазин 
 недоступен, цена не настроена, предложение недоступно, квота исчерпана,
 недостаточно ROOT. Чужой/несуществующий entitlement.id → 404.
 Client `Idempotency-Key` не требуется: естественная идемпотентность через
-`reference_id = f"{entitlement.id}:{n}"` на unique-индексах `WalletTransaction`
-и `InventoryEvent`; повторный POST после успешной покупки возвращает прежний
-committed-результат (`purchased: true`).
+`reference_id = f"{entitlement.id}:{run_entry_count}:{n}"` (Sprint 8.17,
+шаг 8: run_entry_count — номер захода, к которому привязан entitlement)
+на unique-индексах `WalletTransaction` и `InventoryEvent`; повторный POST
+после успешной покупки возвращает прежний committed-результат
+(`purchased: true`).
 Response: `{"purchased": true, "entitlementId", "consumedCount",
 "remainingQuota", "status", "priceRoot", "rootBalance", "item": {id, slug,
 code, title, symbol, category, rarity}}`.
