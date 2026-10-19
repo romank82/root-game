@@ -50,6 +50,7 @@ export type AdminMissionPayload = {
   story_node_id?: string | null
   geo_zone_id?: string | null
   ar_object_id?: string | null
+  minigame_profile_id?: string | null
   slug: string
   mission_type: string
   mission_category?: string

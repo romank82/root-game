@@ -72,6 +72,7 @@ type MissionForm = {
   storyNodeId: string
   geoZoneId: string
   arObjectId: string
+  minigameProfileId: string
   slug: string
   missionType: string
   missionCategory: string
@@ -120,6 +121,7 @@ const emptyForm = (): MissionForm => ({
   storyNodeId: '',
   geoZoneId: '',
   arObjectId: '',
+  minigameProfileId: '',
   slug: '',
   missionType: 'text_answer',
   missionCategory: 'solo',
@@ -263,6 +265,7 @@ function formFromMission(mission: AdminMission): MissionForm {
     storyNodeId: mission.storyNodeId ?? '',
     geoZoneId: mission.geoZoneId ?? '',
     arObjectId: mission.arObjectId ?? '',
+    minigameProfileId: mission.minigameProfileId ?? '',
     slug: mission.slug,
     missionType: mission.missionType,
     missionCategory: mission.missionCategory ?? 'solo',
@@ -439,6 +442,7 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     story_node_id: form.storyNodeId.trim() || null,
     geo_zone_id: form.geoZoneId.trim() || null,
     ar_object_id: form.arObjectId.trim() || null,
+    minigame_profile_id: form.minigameProfileId.trim() || null,
     slug: form.slug.trim(),
     mission_type: form.missionType.trim(),
     mission_category: form.missionCategory,
@@ -854,6 +858,16 @@ function AdminApp() {
       .catch((err: Error) => {
         if (cancelled) return
         setARObjectsError(err.message)
+      })
+
+    listMinigameProfiles()
+      .then((data) => {
+        if (cancelled) return
+        setMinigameProfiles(data)
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setMinigameProfilesError(err.message)
       })
 
     return () => {
@@ -2497,6 +2511,38 @@ function AdminApp() {
                     {o.title} · {o.slug} [{o.status}]
                   </option>
                 ))}
+              </select>
+            </label>
+
+            <label>
+              Профиль мини-игры *
+              <select
+                value={form.minigameProfileId}
+                disabled={!canWrite}
+                onChange={(event) =>
+                  setForm({ ...form, minigameProfileId: event.target.value })
+                }
+              >
+                <option value="">— не выбрано —</option>
+                {form.minigameProfileId &&
+                  !minigameProfiles.some(
+                    (p) => p.id === form.minigameProfileId,
+                  ) && (
+                    <option value={form.minigameProfileId}>
+                      (нет в списке: {form.minigameProfileId})
+                    </option>
+                  )}
+                {minigameProfiles
+                  .filter(
+                    (p) =>
+                      p.status === 'published' &&
+                      p.gameType === form.missionType,
+                  )
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.gameType}
+                    </option>
+                  ))}
               </select>
             </label>
 
