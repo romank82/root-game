@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-import random
 import time
 from typing import Any
 from uuid import uuid4
@@ -38,6 +37,8 @@ from app.models import (
     WalletTransaction,
 )
 
+from app.minigame_handlers import CIPHER_ALPHABET, get_handler
+
 ROOT_CURRENCY = "ROOT"
 
 # Reference-типы входа в миссию (шаг 4.1). Значения — по контракту ledger:
@@ -47,10 +48,9 @@ ENTRY_DEBIT_REFERENCE_TYPE = "mission_entry_debit"
 ENTRY_ITEM_REFERENCE_TYPE = "mission_entry"
 ENTRY_ITEM_EVENT_TYPE = "consumed"
 
-# Sprint 8.17 (шаг 6): фиксированный алфавит cipher-игры (A-Z + 0-9).
-# Не редактируется в CMS; drumCount = длина кода, falseChoicesPerDrum ложных
-# символов + 1 верный на барабан.
-CIPHER_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+# Sprint 8.17.14: алфавит cipher живёт в minigame_handlers.py (одна точка истины).
+# Оставлен re-export для обратной совместимости с текущими тестами/импортами.
+CIPHER_ALPHABET = CIPHER_ALPHABET  # noqa: PLW0127 (re-export)
 
 
 class MissionEngineError(Exception):
@@ -546,56 +546,6 @@ def _normalize_text(value: str) -> str:
     return " ".join(value.casefold().strip().split())
 
 
-def generate_cipher_session(content_ui: dict) -> dict:
-    """Сгенерировать код + символы барабанов для одной попытки cipher.
-
-    Sprint 8.17 (шаг 6): правильный код больше не лежит в CMS — он создаётся
-    случайно при accept (и пересоздаётся при каждой неверной попытке) и
-    хранится в PlayerMission.progress.cipher_session.
-
-    - drumCount (по умолчанию 4): длина правильного кода и число барабанов.
-    - falseChoicesPerDrum (по умолчанию 2): ложных символов на барабан.
-    - Алфавит фиксированный: A-Z + 0-9 (36 символов).
-    - Каждый барабан: 1 верный + N ложных; ложные не совпадают с верным и
-      без повторов, пока хватает алфавита (при N > 35 допустимы повторы).
-    """
-    drum_count = content_ui.get("drumCount", 4)
-    false_choices = content_ui.get("falseChoicesPerDrum", 2)
-
-    try:
-        drum_count = int(drum_count)
-        false_choices = int(false_choices)
-    except (TypeError, ValueError):
-        # Надёжность: экранируем неожиданные значения из JS JSON.
-        drum_count = 4
-        false_choices = 2
-
-    # Границы по контракту cipher (content_contract.py); верхняя граница
-    # ложных — размер алфавита за вычетом верного символа.
-    drum_count = max(2, min(drum_count, 12))
-    false_choices = max(0, min(false_choices, 36))
-
-    correct_code = [random.choice(CIPHER_ALPHABET) for _ in range(drum_count)]
-
-    drums: list[list[str]] = []
-    for correct in correct_code:
-        false_pool = [symbol for symbol in CIPHER_ALPHABET if symbol != correct]
-        if false_choices <= len(false_pool):
-            false_symbols = random.sample(false_pool, false_choices)
-        else:
-            false_symbols = [
-                random.choice(false_pool) for _ in range(false_choices)
-            ]
-        symbols = [correct, *false_symbols]
-        random.shuffle(symbols)
-        drums.append(symbols)
-
-    return {
-        "correct_code": correct_code,
-        "drums": drums,
-    }
-
-
 def _serialize_cipher_session_for_bootstrap(
     mission: Mission,
     player_mission: PlayerMission,
@@ -661,23 +611,13 @@ def _validate_submission(
         )
 
     if validator == "cipher_match":
-        # Sprint 8.17 (шаг 6): правильный код — из progress.cipher_session,
-        # а не из validation_config (см. generate_cipher_session).
-        if player_mission is None:
+        handler = get_handler("cipher")
+        if handler is None:
             return False
-        session_data = (player_mission.progress or {}).get("cipher_session")
-        if not isinstance(session_data, dict):
-            return False  # нет сессии — невалидно
-        correct = session_data.get("correct_code")
-        if not isinstance(correct, list):
-            return False
-
-        return (
-            isinstance(sequence, list)
-            and len(sequence) == len(correct)
-            and all(isinstance(s, str) for s in sequence)
-            and sequence == correct
-        )
+        session_data = None
+        if player_mission is not None:
+            session_data = (player_mission.progress or {}).get("cipher_session")
+        return handler.validate_submission(session_data=session_data, sequence=sequence)
 
     return False
 
@@ -1185,9 +1125,12 @@ def _submit_mission_once(
             # Sprint 8.17 (шаг 6): неверная попытка закрыта — следующая попытка
             # получает новый код и новые барабаны (сгенерированная при accept
             # сессия больше недействительна).
-            if mission.mission_type == "cipher":
-                content_ui = (mission.content or {}).get("ui", {})
-                new_session = generate_cipher_session(content_ui)
+            handler = get_handler(mission.mission_type)
+            if handler is not None:
+                # Sprint 8.17.14: источник параметров пока legacy content.ui
+                # (переключение на profile.settings — шаг 8.17.15).
+                settings = (mission.content or {}).get("ui", {})
+                new_session = handler.generate_session(settings)
                 progress = dict(player_mission.progress or {})
                 progress["cipher_session"] = new_session
                 player_mission.progress = progress
@@ -1395,9 +1338,12 @@ def _accept_mission_once(
         # Sprint 8.17 (шаг 6): cipher-игра получает при accept новый случайный
         # код и символы барабанов. Сессия хранится в progress.cipher_session:
         # при submit сервер сверяется именно с ней, а не с validation_config.
-        if mission.mission_type == "cipher":
-            content_ui = (mission.content or {}).get("ui", {})
-            session_data = generate_cipher_session(content_ui)
+        handler = get_handler(mission.mission_type)
+        if handler is not None:
+            # Sprint 8.17.14: источник параметров пока legacy content.ui
+            # (переключение на profile.settings — шаг 8.17.15).
+            settings = (mission.content or {}).get("ui", {})
+            session_data = handler.generate_session(settings)
             progress = dict(player_mission.progress or {})
             progress["cipher_session"] = session_data
             player_mission.progress = progress
