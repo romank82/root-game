@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.geo_team_runtime_models import InventoryEvent, PlayerFallbackEntitlement
+from app.key_price import resolve_key_price
 from app.models import (
     Item,
     KeyRules,
@@ -310,7 +311,12 @@ def build_fallback_offers(session: Session, player_id: str) -> list[dict]:
                 "missionSlug": mission.slug,
                 "missionTitle": mission.title,
                 "offerId": entitlement.offer_id,
-                "priceRoot": _read_setting(session, FALLBACK_PRICE_ROOT_KEY),
+                "priceRoot": resolve_key_price(
+                    session,
+                    item.id if item is not None else None,
+                    global_setting_key=FALLBACK_PRICE_ROOT_KEY,
+                    default=1,
+                ),
                 "quotaLimit": entitlement.quota_limit,
                 "consumedCount": entitlement.consumed_count,
                 "remainingQuota": remaining_quota,
@@ -400,7 +406,12 @@ def purchase_fallback_offer(
     if item is None:
         raise MissionEngineError(409, "Ключ недоступен.")
 
-    price = _read_setting(session, FALLBACK_PRICE_ROOT_KEY)
+    price = resolve_key_price(
+        session,
+        item.id,
+        global_setting_key=FALLBACK_PRICE_ROOT_KEY,
+        default=1,
+    )
     if not isinstance(price, int) or isinstance(price, bool) or price <= 0:
         logger.warning(
             "fallback purchase rejected: %s is not a positive integer "

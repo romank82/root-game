@@ -25,6 +25,7 @@ from sqlalchemy.orm import sessionmaker
 from app.mission_engine import MissionEngineError
 from app.shop_service import (
     SHOP_ENABLED_KEY,
+    SHOP_PRICE_ROOT_KEY,
     SHOP_PURCHASE_REFERENCE_TYPE,
     list_catalog_items,
     purchase_catalog_item,
@@ -382,6 +383,65 @@ class ShopCatalogTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["itemId"], ids["item_key_pub"])
         self.assertEqual(items[0]["owned"], 2)
+
+    # ---- 8.20: per-key цена (key_rules.price) --------------------------------
+    def _add_key_rule(self, item_id: str, price: int | None) -> None:
+        """KeyRules для ключа каталога с заданной (или пустой) ценой."""
+        from app.models import KeyRules
+
+        with self.SessionLocal.begin() as session:
+            session.add(
+                KeyRules(
+                    id=f"key-rules-{uuid.uuid4().hex}",
+                    item_id=item_id,
+                    is_consumable=True,
+                    stack_limit=1,
+                    price=price,
+                )
+            )
+
+    def test_list_catalog_items_uses_key_rules_price(self):
+        # 8.20: key_rules.price=50 имеет приоритет над глобальной (100).
+        ids = self._fixture()
+        self._set_setting(SHOP_ENABLED_KEY, True)
+        self._add_key_rule(ids["item_key_pub"], price=50)
+
+        with self.SessionLocal.begin() as session:
+            items = list_catalog_items(session, ids["player"])
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["itemId"], ids["item_key_pub"])
+        self.assertEqual(items[0]["priceRoot"], 50)
+
+    def test_list_catalog_items_price_null_falls_back_to_global(self):
+        # 8.20: price NULL -> глобальная настройка shop.catalog.default_price_root.
+        ids = self._fixture()
+        self._set_setting(SHOP_ENABLED_KEY, True)
+        self._set_setting(SHOP_PRICE_ROOT_KEY, 42)
+        self._add_key_rule(ids["item_key_pub"], price=None)
+
+        with self.SessionLocal.begin() as session:
+            items = list_catalog_items(session, ids["player"])
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["priceRoot"], 42)
+
+    def test_purchase_uses_key_rules_price(self):
+        # 8.20: списание ROOT по per-key цене (50), а не по глобальной (100).
+        ids = self._fixture()
+        self._set_setting(SHOP_ENABLED_KEY, True)
+        self._seed_root_wallet(ids["player"], 1000)
+        self._add_key_rule(ids["item_key_pub"], price=50)
+
+        with self.SessionLocal.begin() as session:
+            result = purchase_catalog_item(
+                session, ids["player"], ids["item_key_pub"]
+            )
+
+        self.assertTrue(result["purchased"])
+        self.assertEqual(result["priceRoot"], 50)
+        self.assertEqual(result["rootBalance"], 950)
+        self.assertEqual(self._wallet_balance(ids["player"]), 950)
 
     # ---- 8.16.2: покупка ------------------------------------------------------
     def test_purchase_creates_player_item_and_debits_root(self):

@@ -656,11 +656,11 @@ function AdminApp() {
   const [newKeyCode, setNewKeyCode] = useState('')
   const [newKeySymbol, setNewKeySymbol] = useState('')
   const [newKeyConsumable, setNewKeyConsumable] = useState(true)
-  const [newKeyStackLimit, setNewKeyStackLimit] = useState('1')
+  const [newKeyPrice, setNewKeyPrice] = useState('')
   const [creatingKey, setCreatingKey] = useState(false)
   const [createKeyError, setCreateKeyError] = useState<string | null>(null)
   const [keyEditConsumable, setKeyEditConsumable] = useState(false)
-  const [keyEditStackLimit, setKeyEditStackLimit] = useState('1')
+  const [keyEditPrice, setKeyEditPrice] = useState('')
   const [keyEditSortOrder, setKeyEditSortOrder] = useState('0')
   const [keyEditTransferForbidden, setKeyEditTransferForbidden] = useState(true)
   const [keyEditSaleForbidden, setKeyEditSaleForbidden] = useState(true)
@@ -899,7 +899,7 @@ function AdminApp() {
       return
     }
     setKeyEditConsumable(k.isConsumable)
-    setKeyEditStackLimit(String(k.stackLimit))
+    setKeyEditPrice(k.price != null ? String(k.price) : '')
     setKeyEditSortOrder(String(k.sortOrder))
     setKeyEditTransferForbidden(k.transferForbidden)
     setKeyEditSaleForbidden(k.saleForbidden)
@@ -1355,9 +1355,9 @@ function AdminApp() {
       setCreateKeyError('Код ключа обязателен (латиница, цифры, _).')
       return
     }
-    const stackLimit = Number.parseInt(newKeyStackLimit, 10)
-    if (!Number.isFinite(stackLimit) || stackLimit < 1) {
-      setCreateKeyError('Стак-лимит должен быть целым числом ≥ 1.')
+    const price = newKeyPrice.trim() ? Number.parseInt(newKeyPrice, 10) : null
+    if (price !== null && (!Number.isFinite(price) || price < 1)) {
+      setCreateKeyError('Цена должна быть целым числом ≥ 1 (пусто = глобальная).')
       return
     }
     setCreatingKey(true)
@@ -1368,7 +1368,7 @@ function AdminApp() {
         code,
         symbol: newKeySymbol.trim() || null,
         is_consumable: newKeyConsumable,
-        stack_limit: stackLimit,
+        price,
       })
       setKeyRules((prev) => [...prev, created])
       setSelectedKeyRuleId(created.id)
@@ -1377,7 +1377,7 @@ function AdminApp() {
       setNewKeyCode('')
       setNewKeySymbol('')
       setNewKeyConsumable(true)
-      setNewKeyStackLimit('1')
+      setNewKeyPrice('')
     } catch (err) {
       setCreateKeyError((err as Error).message)
     } finally {
@@ -1388,9 +1388,9 @@ function AdminApp() {
   async function handleSaveKey() {
     const k = selectedKeyRule()
     if (!k) return
-    const stackLimit = Number.parseInt(keyEditStackLimit, 10)
-    if (!Number.isFinite(stackLimit) || stackLimit < 1) {
-      setSavingKeyError('Стак-лимит должен быть ≥ 1.')
+    const price = keyEditPrice.trim() ? Number.parseInt(keyEditPrice, 10) : null
+    if (price !== null && (!Number.isFinite(price) || price < 1)) {
+      setSavingKeyError('Цена должна быть целым числом ≥ 1 (пусто = глобальная).')
       return
     }
     const sortOrder = Number.parseInt(keyEditSortOrder, 10)
@@ -1404,7 +1404,7 @@ function AdminApp() {
     try {
       const updated = await updateKeyRule(k.id, {
         is_consumable: keyEditConsumable,
-        stack_limit: stackLimit,
+        price,
         sort_order: sortOrder,
         transfer_forbidden: keyEditTransferForbidden,
         sale_forbidden: keyEditSaleForbidden,
@@ -4007,7 +4007,7 @@ function AdminApp() {
                 setNewKeyCode('')
                 setNewKeySymbol('')
                 setNewKeyConsumable(true)
-                setNewKeyStackLimit('1')
+                setNewKeyPrice('')
               }}
             >
               + Новый ключ
@@ -4115,12 +4115,13 @@ function AdminApp() {
                 </label>
 
                 <label className="admin-field">
-                  <span>Стак-лимит (сколько в инвентаре максимум)</span>
+                  <span>Цена (ROOT) — пусто = глобальная настройка</span>
                   <input
                     type="number"
                     min={1}
-                    value={newKeyStackLimit}
-                    onChange={(e) => setNewKeyStackLimit(e.target.value)}
+                    value={newKeyPrice}
+                    onChange={(e) => setNewKeyPrice(e.target.value)}
+                    placeholder="Пусто = глобальная настройка"
                     disabled={creatingKey}
                   />
                 </label>
@@ -4203,12 +4204,13 @@ function AdminApp() {
                     </label>
 
                     <label className="admin-field">
-                      <span>Стак-лимит</span>
+                      <span>Цена (ROOT) — пусто = глобальная настройка</span>
                       <input
                         type="number"
                         min={1}
-                        value={keyEditStackLimit}
-                        onChange={(e) => setKeyEditStackLimit(e.target.value)}
+                        value={keyEditPrice}
+                        onChange={(e) => setKeyEditPrice(e.target.value)}
+                        placeholder="Пусто = глобальная настройка"
                         disabled={savingKey}
                       />
                     </label>

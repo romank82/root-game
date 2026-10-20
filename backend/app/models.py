@@ -426,6 +426,9 @@ class KeyRules(TimestampMixin, Base):
     stack_limit: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1
     )
+    # 8.20: per-key цена ключа (fallback/каталог). NULL = использовать
+    # глобальную настройку shop.*.default_price_root.
+    price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sort_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
     )

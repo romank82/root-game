@@ -23,6 +23,7 @@ class KeyRuleCreatePayload(BaseModel):
     item_id: str = Field(min_length=1, max_length=64)
     is_consumable: bool = True
     stack_limit: int = Field(default=1, ge=1, le=100_000)
+    price: int | None = Field(default=None, ge=1)
     sort_order: int = Field(default=0, ge=0, le=100_000)
     transfer_forbidden: bool = True
     sale_forbidden: bool = True
@@ -32,6 +33,7 @@ class KeyRuleCreatePayload(BaseModel):
 class KeyRuleUpdatePayload(BaseModel):
     is_consumable: bool | None = None
     stack_limit: int | None = Field(default=None, ge=1, le=100_000)
+    price: int | None = Field(default=None, ge=1)
     sort_order: int | None = Field(default=None, ge=0, le=100_000)
     transfer_forbidden: bool | None = None
     sale_forbidden: bool | None = None
@@ -46,6 +48,7 @@ class CreateKeyItemPayload(BaseModel):
     rarity: str = Field(default="common", max_length=32)
     is_consumable: bool = True
     stack_limit: int = Field(default=1, ge=1, le=100_000)
+    price: int | None = Field(default=None, ge=1)
     sort_order: int = Field(default=0, ge=0, le=100_000)
     transfer_forbidden: bool = True
     sale_forbidden: bool = True
@@ -97,6 +100,7 @@ def _serialize_key_rule(rule: KeyRules, item: Item) -> dict[str, Any]:
         "itemId": rule.item_id,
         "isConsumable": rule.is_consumable,
         "stackLimit": rule.stack_limit,
+        "price": rule.price,
         "sortOrder": rule.sort_order,
         "transferForbidden": rule.transfer_forbidden,
         "saleForbidden": rule.sale_forbidden,
@@ -210,6 +214,7 @@ def create_admin_key_item(
             item_id=item.id,
             is_consumable=payload.is_consumable,
             stack_limit=payload.stack_limit,
+            price=payload.price,
             sort_order=payload.sort_order,
             transfer_forbidden=payload.transfer_forbidden,
             sale_forbidden=payload.sale_forbidden,
@@ -232,6 +237,7 @@ def create_admin_key_item(
                 "itemTitle": item.title,
                 "isConsumable": rule.is_consumable,
                 "stackLimit": rule.stack_limit,
+                "price": rule.price,
                 "sortOrder": rule.sort_order,
                 "transferForbidden": rule.transfer_forbidden,
                 "saleForbidden": rule.sale_forbidden,
@@ -273,6 +279,7 @@ def create_admin_key_rule(
             item_id=payload.item_id,
             is_consumable=payload.is_consumable,
             stack_limit=payload.stack_limit,
+            price=payload.price,
             sort_order=payload.sort_order,
             transfer_forbidden=payload.transfer_forbidden,
             sale_forbidden=payload.sale_forbidden,
@@ -293,6 +300,7 @@ def create_admin_key_rule(
                 "itemId": rule.item_id,
                 "isConsumable": rule.is_consumable,
                 "stackLimit": rule.stack_limit,
+                "price": rule.price,
                 "sortOrder": rule.sort_order,
                 "transferForbidden": rule.transfer_forbidden,
                 "saleForbidden": rule.sale_forbidden,
@@ -329,6 +337,7 @@ def update_admin_key_rule(
         scalar_fields = {
             "is_consumable": "isConsumable",
             "stack_limit": "stackLimit",
+            "price": "price",
             "sort_order": "sortOrder",
             "transfer_forbidden": "transferForbidden",
             "sale_forbidden": "saleForbidden",

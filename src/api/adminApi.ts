@@ -435,6 +435,7 @@ export type KeyRule = {
   itemStatus: string
   isConsumable: boolean
   stackLimit: number
+  price: number | null
   sortOrder: number
   transferForbidden: boolean
   saleForbidden: boolean
@@ -471,6 +472,7 @@ export type CreateKeyRulePayload = {
   item_id: string
   is_consumable?: boolean
   stack_limit?: number
+  price?: number | null
   sort_order?: number
   transfer_forbidden?: boolean
   sale_forbidden?: boolean
@@ -493,6 +495,7 @@ export async function createKeyRule(
 export type UpdateKeyRulePayload = {
   is_consumable?: boolean
   stack_limit?: number
+  price?: number | null
   sort_order?: number
   transfer_forbidden?: boolean
   sale_forbidden?: boolean
@@ -536,6 +539,7 @@ export type CreateKeyItemPayload = {
   rarity?: string
   is_consumable?: boolean
   stack_limit?: number
+  price?: number | null
   sort_order?: number
   transfer_forbidden?: boolean
   sale_forbidden?: boolean

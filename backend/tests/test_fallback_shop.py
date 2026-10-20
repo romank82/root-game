@@ -104,6 +104,7 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         *,
         include_item_reward: bool = True,
         include_key_rules: bool = True,
+        key_rules_price: int | None = None,
         second_mission: bool = False,
         second_player: bool = False,
         second_key_reward: bool = False,
@@ -264,6 +265,7 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                         item_id=ids["item"],
                         is_consumable=True,
                         stack_limit=1,
+                        price=key_rules_price,
                     )
                 )
                 if second_mission:
@@ -986,6 +988,26 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                 event.reference_id,
                 f"{entitlement.id}:{entitlement.run_entry_count}:1",
             )
+
+    def test_8_20_key_rules_price_overrides_global_fallback_price(self):
+        # 8.20: key_rules.price=77 имеет приоритет над глобальной (100)
+        # и в оффере, и при покупке (debit ROOT по per-key цене).
+        ids = self._fixture(key_rules_price=77)
+        self._seed_root_wallet(ids["player"], 1000)
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-answer"
+        )
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0]["priceRoot"], 77)
+
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        result = self.fallback_shop.purchase_fallback_offer_entrypoint(
+            ids["player"], entitlement.id
+        )
+        self.assertTrue(result["purchased"])
+        self.assertEqual(result["priceRoot"], 77)
+        self.assertEqual(result["rootBalance"], 1000 - 77)
 
     def test_4_4_2_repeated_purchase_is_idempotent(self):
         ids = self._fixture()

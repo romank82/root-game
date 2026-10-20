@@ -5,8 +5,9 @@
 покупка возможна любое количество раз, пока есть ROOT, без
 quota_limit / consumed_count / exhausted.
 
-CMS-first: магазин включается настройкой shop.catalog.enabled, цена читается
-из shop.catalog.default_price_root (per-key цена — отдельный Sprint 8.18).
+CMS-first: магазин включается настройкой shop.catalog.enabled, базовая цена
+читается из shop.catalog.default_price_root, per-key цена — из key_rules.price
+(Sprint 8.20): если задана, она имеет приоритет над глобальной настройкой.
 Правила живут в system_settings, в коде — только механизмы и валидация.
 
 Идемпотентность: reference_id = f"{item.id}:{n}", где n — порядковый номер
@@ -28,6 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.geo_team_runtime_models import InventoryEvent
+from app.key_price import resolve_key_price
 from app.models import (
     Item,
     PlayerItem,
@@ -93,15 +95,12 @@ def list_catalog_items(session: Session, player_id: str) -> list[dict]:
 
     Presentation-правила (Sprint 8.16):
     - shop.catalog.enabled is not True -> пустой список;
-    - shop.catalog.default_price_root не положительное целое -> пустой список;
     - в список попадают только Item(category=KEY, status=published);
-    - owned — стэк игрока из player_items (0, если ещё не покупал).
+    - owned — стэк игрока из player_items (0, если ещё не покупал);
+    - цена (Sprint 8.20): key_rules.price, иначе глобальная настройка
+      shop.catalog.default_price_root, иначе default (per item).
     """
     if _read_setting(session, SHOP_ENABLED_KEY, False) is not True:
-        return []
-
-    price = _read_setting(session, SHOP_PRICE_ROOT_KEY, 100)
-    if not isinstance(price, int) or isinstance(price, bool) or price <= 0:
         return []
 
     items = session.scalars(
@@ -125,7 +124,12 @@ def list_catalog_items(session: Session, player_id: str) -> list[dict]:
             "symbol": item.symbol,
             "category": item.category,
             "rarity": item.rarity,
-            "priceRoot": price,
+            "priceRoot": resolve_key_price(
+                session,
+                item.id,
+                global_setting_key=SHOP_PRICE_ROOT_KEY,
+                default=100,
+            ),
             "owned": owned.get(item.id, 0),
         }
         for item in items
@@ -168,7 +172,12 @@ def purchase_catalog_item(
     if _read_setting(session, SHOP_ENABLED_KEY, False) is not True:
         raise MissionEngineError(409, "Магазин отключён.")
 
-    price = _read_setting(session, SHOP_PRICE_ROOT_KEY, 100)
+    price = resolve_key_price(
+        session,
+        item_id,
+        global_setting_key=SHOP_PRICE_ROOT_KEY,
+        default=100,
+    )
     if not isinstance(price, int) or isinstance(price, bool) or price <= 0:
         logger.warning(
             "catalog purchase rejected: %s is not a positive integer (item_id=%s)",
