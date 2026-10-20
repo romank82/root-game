@@ -259,6 +259,8 @@ or settlement internals. Exact behavior is defined in
   - publishing requires at least one active linked Mission, and every active
     linked Mission must be `published`;
   - `archived` Segment is final and cannot be published, unpublished, or edited.
+  - Chapter ID / Story node ID — после 8.24 выбираются из dropdown (созданных через
+    admin/chapters, admin/story-nodes). Сейчас — текстовый input.
 - `/api/v1/admin/reward-pools` — list/get/create/update; entries передаются и заменяются целиком в payload (`entries`); статус меняется через PATCH (draft/published); physical DELETE недоступен.
 - `/api/v1/admin/geo-zones` — list/get/create/update; типы: radius/polygon/poi/event, cross-field-валидация геометрии в Python-контракте; статус меняется через PATCH (draft/published/archived); physical DELETE недоступен.
 - `/api/v1/admin/ar-objects` — list/get/create/update; AR-объекты привязаны к геозонам через `geoZoneId` (FK ondelete=RESTRICT); cross-field-валидация окна доступности `startsAt`/`endsAt`; статус меняется через PATCH (draft/published/archived); physical DELETE недоступен.
@@ -356,6 +358,38 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
 - POST /api/v1/admin/minigame-profiles/{id}/archive — архивировать (published → archived).
 
 Валидация settings по game_type: whitelist в admin_minigame_profiles.py (_validate_settings). Для cipher: drumCount (2..12), falseChoicesPerDrum (0..36), timeLimitSeconds (1..3600|null). alphabet/combination в профиле отсутствуют.
+
+---
+
+### Сезоны, главы, story-ноды (admin)
+
+Требуют авторизации админ-панели. Права: seasons.read/manage, chapters.read/manage, story_nodes.read/manage.
+
+**Сезоны:**
+- GET /api/v1/admin/seasons — список (фильтры: status).
+- GET /api/v1/admin/seasons/{id} — по id.
+- POST /api/v1/admin/seasons — создать (slug, title, description, sort_order).
+- PATCH /api/v1/admin/seasons/{id} — обновить.
+- POST /api/v1/admin/seasons/{id}/publish — draft → published.
+- POST /api/v1/admin/seasons/{id}/archive — published → archived.
+
+**Главы:**
+- GET /api/v1/admin/chapters — список (фильтры: season_id, status).
+- GET /api/v1/admin/chapters/{id} — по id.
+- POST /api/v1/admin/chapters — создать (season_id, slug, title, description, sort_order). season_id опционален: если не передан и сезон 1 — дефолт на него; если 0 — 422; если >1 — обязателен.
+- PATCH /api/v1/admin/chapters/{id} — обновить.
+- POST /api/v1/admin/chapters/{id}/publish — draft → published (только если season published).
+- POST /api/v1/admin/chapters/{id}/archive — published → archived.
+
+**Story-ноды:**
+- GET /api/v1/admin/story-nodes — список (фильтры: chapter_id, status).
+- GET /api/v1/admin/story-nodes/{id} — по id.
+- POST /api/v1/admin/story-nodes — создать (chapter_id, slug, title, body, presentation_type, content, sort_order).
+- PATCH /api/v1/admin/story-nodes/{id} — обновить.
+- POST /api/v1/admin/story-nodes/{id}/publish — draft → published (только если chapter published).
+- POST /api/v1/admin/story-nodes/{id}/archive — published → archived.
+
+Статусная модель: draft → published → archived. Строгая иерархия: chapter published только при season published; story_node published только при chapter published.
 
 ---
 

@@ -820,8 +820,20 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 
 ### Спринт 8.19. Декомпозиция AdminApp.tsx — ❌ запланирован
 
-- Разбить 4800 строк на компоненты (MissionsSection, KeysSection,
-  SettingsSection, AdminsSection, ContentSection).
+AdminApp.tsx — 5336 строк (wc -l), один гигантский компонент (485: `function AdminApp()`,
+~88 useState, ~20 useEffect, ~40 хендлеров). Разбить на компоненты по возрастанию риска,
+после каждого шага — `npm run build` (tsc) + ручной прогон админки:
+
+- SettingsSection — 3464–3690 (~226 строк). Низкий риск.
+- AdminsSection — 3691–3997 (~306). Низкий риск.
+- KeysSection — 3998–4291 (~293). Средний риск: делит `keyItems` с формой миссии.
+- ContentSection — 4526–5336 (~810; вкладки Segment/GeoZone/ARObject).
+  Средний риск: делит `geoZones`/`arObjects` с формой миссии.
+- MissionsSection — 2410–3462 (~1052). Высокий риск: редактор наград + policy-блок,
+  тянет `keyItems`/`geoZones`/`arObjects`/`missions`.
+- Шапка/навигация (2340–2409) → AdminShell; хелперы миссии (1–484) → missionFormModels.ts.
+- Перекрёстные стейты (`keyItems`, `geoZones`, `arObjects`, `missions`) — поднять
+  в родителя/прокинуть пропсами, не дублировать.
 - adminApi.ts (~1030 строк) → по доменам.
 
 ### Спринт 8.20. Fallback per-key цена + offer_id из миссии — ✅ закрыт (2026-10-20)
@@ -842,6 +854,24 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - content/validation JSON → структурированные редакторы для text_answer/code_repair (cipher уже есть) — отдельный шаг (долг из 8.18).
 - Fallback offer_id из миссии — остаётся долгом (входил в состав 8.20, не реализован).
 - per-key цена — реализована в 8.20 (долг из 8.16 закрыт).
+
+### Спринт 8.21–8.26. Иерархия контента — ❌ запланирован
+
+**Зачем:** админ управляет иерархией через каскадный выбор (Сезон → Глава → Сегмент → Миссия), а не вбивает ID вручную. Модель уже готова (Season → Chapter → {Mission, Segment, StoryNode}, FK есть). Миграции не нужны.
+
+**Этапы:**
+- 8.21 ❌ Season CRUD (backend admin_seasons.py + frontend вкладка «Сезоны»; права seasons.read/manage; audit; draft→published→archived).
+- 8.22 ❌ Chapter CRUD (backend admin_chapters.py + frontend вкладка «Главы»; season_id — dropdown; права chapters.*; audit).
+- 8.23 ❌ Каскадный конструктор (Сезон → Глава → Сегмент → Миссия, пошаговый выбор; «создать новый» / «выбрать существующий»).
+- 8.24 ❌ Dropdown вместо input: Chapter ID (миссия, сегмент) → dropdown глав; Story node ID (миссия, награда) → dropdown story-нод главы. «Слой» (solo/team/story) и «Разблокируется после» — уже есть, не трогать.
+- 8.25 ❌ Связь 1:1: миссия не может существовать без места в иерархии (валидация: либо chapter_id+segment_id, либо командная/индивидуальная с unlock_after). Правило, не сущность.
+- 8.26 ❌ StoryNode CRUD (backend admin_story_nodes.py + frontend; chapter_id — dropdown; права story_nodes.*).
+
+**Статусная модель:** draft → published → archived (как у сегментов/мини-игр). Строгая иерархия: глава публикуется только при published сезоне; миссия/сегмент — только при published главе.
+
+**Не трогать:** «3 вкладки» (Слой solo/team/story), «Разблокируется после» (unlock_after_mission_id), «Порядок сортировки» — уже есть.
+
+**Долги после 8.26:** покупка прохождения за ROOT (если игрок не может пройти сюжетную) — отложено.
 
 ### Спринт 8.6 — Content UX (закрыт 2026-10-14)
 
