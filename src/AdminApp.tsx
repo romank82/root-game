@@ -63,7 +63,6 @@ type RewardForm = {
   amount: string
   itemId: string
   storyNodeId: string
-  rewardValue: string
   sortOrder: string
 }
 
@@ -112,7 +111,6 @@ const emptyReward = (): RewardForm => ({
   amount: '1',
   itemId: '',
   storyNodeId: '',
-  rewardValue: '{"currency":"ROOT"}',
   sortOrder: '0',
 })
 
@@ -319,7 +317,6 @@ function formFromMission(mission: AdminMission): MissionForm {
       amount: reward.amount === null ? '' : String(reward.amount),
       itemId: reward.itemId ?? '',
       storyNodeId: reward.storyNodeId ?? '',
-      rewardValue: prettyJson(reward.rewardValue),
       sortOrder: String(reward.sortOrder),
     })),
   }
@@ -347,7 +344,7 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     amount: reward.amount.trim() ? Number(reward.amount) : null,
     item_id: reward.itemId.trim() || null,
     story_node_id: reward.storyNodeId.trim() || null,
-    reward_value: parseObject(reward.rewardValue, 'Reward value'),
+    reward_value: reward.rewardType === 'currency' ? { currency: 'ROOT' } : {},
     sort_order: Number(reward.sortOrder || 0),
   }))
 
@@ -3352,17 +3349,19 @@ function AdminApp() {
                   </select>
                 </label>
 
-                <label>
-                  Amount
-                  <input
-                    type="number"
-                    value={reward.amount}
-                    disabled={!canWrite}
-                    onChange={(event) =>
-                      changeReward(index, 'amount', event.target.value)
-                    }
-                  />
-                </label>
+                {reward.rewardType !== 'story_node' && (
+                  <label>
+                    Amount
+                    <input
+                      type="number"
+                      value={reward.amount}
+                      disabled={!canWrite}
+                      onChange={(event) =>
+                        changeReward(index, 'amount', event.target.value)
+                      }
+                    />
+                  </label>
+                )}
 
                 {reward.rewardType === 'item' && (
                   <label>
@@ -3393,16 +3392,18 @@ function AdminApp() {
                   </label>
                 )}
 
-                <label>
-                  Story node ID
-                  <input
-                    value={reward.storyNodeId}
-                    disabled={!canWrite}
-                    onChange={(event) =>
-                      changeReward(index, 'storyNodeId', event.target.value)
-                    }
-                  />
-                </label>
+                {reward.rewardType === 'story_node' && (
+                  <label>
+                    Story node ID
+                    <input
+                      value={reward.storyNodeId}
+                      disabled={!canWrite}
+                      onChange={(event) =>
+                        changeReward(index, 'storyNodeId', event.target.value)
+                      }
+                    />
+                  </label>
+                )}
 
                 <label>
                   Sort
@@ -3412,17 +3413,6 @@ function AdminApp() {
                     disabled={!canWrite}
                     onChange={(event) =>
                       changeReward(index, 'sortOrder', event.target.value)
-                    }
-                  />
-                </label>
-
-                <label className="admin-reward-json">
-                  Reward value (JSON)
-                  <input
-                    value={reward.rewardValue}
-                    disabled={!canWrite}
-                    onChange={(event) =>
-                      changeReward(index, 'rewardValue', event.target.value)
                     }
                   />
                 </label>
