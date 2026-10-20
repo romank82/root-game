@@ -1124,8 +1124,13 @@ function AdminApp() {
         setAdmin(currentAdmin)
         await refreshMissions()
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        // 8.18: не глотаем молча — сбой сети выглядел как разлогин.
+        console.error('[AdminApp] getAdminMe failed', err)
         setAdmin(null)
+        setError(
+          err instanceof Error ? err.message : 'Не удалось загрузить сессию админа.',
+        )
       })
       .finally(() => setLoading(false))
   }, [])
@@ -1137,8 +1142,14 @@ function AdminApp() {
       .then((data) => {
         if (!cancelled) setKeyItems(data)
       })
-      .catch(() => {
-        /* тихо: dropdown покажет пустой список */
+      .catch((err: unknown) => {
+        // 8.18: не глотаем молча — админ видел пустой dropdown и думал «ключей нет».
+        console.error('[AdminApp] listKeyItems failed', err)
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Не удалось загрузить каталог ключей.',
+        )
       })
       .finally(() => {
         if (!cancelled) setLoadingKeyItems(false)
@@ -1175,8 +1186,18 @@ function AdminApp() {
           setPolicyNotice(null)
         }
       })
-      .catch(() => {
-        if (!cancelled) setMissionPolicy(null)
+      .catch((err: unknown) => {
+        // 8.18: критично — ошибка политики неотличима от «политики нет»
+        // → риск перезаписать существующую политику (вход/ключи/множители).
+        console.error('[AdminApp] getMissionRuntimePolicyByMission failed', err)
+        if (!cancelled) {
+          setMissionPolicy(null)
+          setPolicyError(
+            err instanceof Error
+              ? err.message
+              : 'Не удалось загрузить политику миссии.',
+          )
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingMissionPolicy(false)
