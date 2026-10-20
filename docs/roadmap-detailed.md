@@ -753,6 +753,7 @@
 - 8.17.18 ✅ Frontend: AdminApp.tsx — для cipher скрыть старые поля формы (все параметры сложности cipher: drumCount, falseChoicesPerDrum, combination, alphabet, validationCorrectCombination, timeLimitSeconds — они живут в profile.settings), оставить только dropdown профиля + тексты (label/instruction/successTitle/successText/wrongAnswerText); formToPayload старые поля не отправляет. Это и есть 8.17.9c. Выполнено 2026-10-19.
 - 8.17.18-hotfix ✅ Backend: correctCombination не требуется для published-профиля (гейт в _validate_for_publish, admin_missions.py).
 - 8.17.19 ✅ Backend: publish-валидация — для cipher-миссии с mission_type="cipher" minigame_profile_id обязателен (admin_missions._validate_for_publish:440).
+- 8.17-timer ✅ (внеплановый фикс) Backend + Frontend: timeLimitSeconds из profile.settings доходит до CipherScreen (таймер на попытку cipher). CipherHandler.generate_session кладёт в сессию; _serialize_cipher_session_for_bootstrap пробрасывает в cipherSession; типы CipherSession содержат поле; parseCipherContent читает из cipherSession с приоритетом над content.ui. Фикс e2b2f2b.
 
 Статус: реализовано в 8.17.14–8.17.18. handler-реестр, чтение profile.settings, смягчение контракта для published-профиля, отрисовка CipherScreen по cipherSession. Legacy-путь сохранён для миссий без профиля.
 
