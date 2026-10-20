@@ -3868,7 +3868,13 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             cipher_mission["cipherSession"],
-            {"drums": drums, "correctCode": correct_code},
+            {
+                "drums": drums,
+                "correctCode": correct_code,
+                # 8.17-timer: лимит времени на попытку (у тестовой миссии нет
+                # timeLimitSeconds в settings/content.ui → None).
+                "timeLimitSeconds": None,
+            },
         )
 
     def test_cipher_submit_matches_generated_code(self) -> None:

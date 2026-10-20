@@ -31,7 +31,7 @@ type CipherContent = {
 // Создаётся при accept, пересоздаётся после каждого промаха на сервере.
 // У старых миссий отсутствует → fallback на content.ui (шаг 8.17.10).
 type CipherSession =
-  | { drums: string[][]; correctCode: string[] }
+  | { drums: string[][]; correctCode: string[]; timeLimitSeconds: number | null }
   | null
 
 interface CipherScreenProps {
@@ -100,7 +100,10 @@ function parseCipherContent(mission: EngineMission): CipherContent | null {
     sessionCode.length > 0 &&
     sessionCode.every((symbol) => typeof symbol === 'string')
 
-  const timeLimitRaw = ui?.timeLimitSeconds
+  // 8.17-timer: лимит времени на попытку — приоритет у backend-сессии
+  // (cipherSession.timeLimitSeconds), legacy fallback — content.ui.timeLimitSeconds.
+  const sessionTimeLimit = mission.cipherSession?.timeLimitSeconds
+  const timeLimitRaw = sessionTimeLimit ?? ui?.timeLimitSeconds
   const timeLimitSeconds =
     timeLimitRaw === null || timeLimitRaw === undefined
       ? null

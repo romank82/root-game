@@ -32,6 +32,8 @@ export type EngineMission = {
   cipherSession?: {
     drums: string[][]
     correctCode: string[]
+    // 8.17-timer: лимит времени на попытку cipher (null = без лимита).
+    timeLimitSeconds: number | null
   } | null
   geoZoneId: string | null
   arObjectId: string | null

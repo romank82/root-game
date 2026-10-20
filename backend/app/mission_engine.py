@@ -570,6 +570,9 @@ def _serialize_cipher_session_for_bootstrap(
     return {
         "drums": drums,
         "correctCode": correct_code,
+        # 8.17-timer: лимит времени на попытку (profile.settings.timeLimitSeconds,
+        # прокинут через generate_session) доезжает до фронта.
+        "timeLimitSeconds": session_data.get("timeLimitSeconds"),
     }
 
 

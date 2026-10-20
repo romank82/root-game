@@ -34,8 +34,11 @@ class CipherHandler:
     def generate_session(self, settings: dict) -> dict:
         """Сгенерировать код + символы барабанов.
 
-        settings: {drumCount: int 2..12, falseChoicesPerDrum: int 0..36}.
-        Возврат: {"correct_code": list[str], "drums": list[list[str]]}.
+        settings: {drumCount: int 2..12, falseChoicesPerDrum: int 0..36,
+                   timeLimitSeconds: int 1..3600 | None}.
+        Возврат: {"correct_code": list[str], "drums": list[list[str]],
+                  "timeLimitSeconds": int | None} (8.17-timer: лимит времени на
+                  попытку прокидывается в сессию для таймера на фронте).
         Дефолты и клэмпы сохранены из mission_engine.generate_cipher_session (8.17.6).
         """
         drum_count = settings.get("drumCount", 4)
@@ -59,7 +62,15 @@ class CipherHandler:
             symbols = [correct, *false_symbols]
             random.shuffle(symbols)
             drums.append(symbols)
-        return {"correct_code": correct_code, "drums": drums}
+        time_limit = settings.get("timeLimitSeconds")
+        if time_limit is not None:
+            try:
+                time_limit = int(time_limit)
+            except (TypeError, ValueError):
+                time_limit = None
+            if time_limit is not None:
+                time_limit = max(1, min(time_limit, 3600))
+        return {"correct_code": correct_code, "drums": drums, "timeLimitSeconds": time_limit}
 
     def validate_submission(self, session_data: dict | None, sequence: list[str] | None) -> bool:
         """Проверить ответ: sequence == session_data["correct_code"].
