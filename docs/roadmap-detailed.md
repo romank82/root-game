@@ -824,11 +824,24 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
   SettingsSection, AdminsSection, ContentSection).
 - adminApi.ts (~1030 строк) → по доменам.
 
-### Спринт 8.20. Fallback per-key цена + offer_id из миссии — ❌ запланирован
+### Спринт 8.20. Fallback per-key цена + offer_id из миссии — ✅ закрыт (2026-10-20)
 
-- **Статус**: ❌ запланирован.
-- Per-key цена fallback-магазина (сейчас только глобальная shop.fallback.default_price_root).
-- Fallback offer_id — брать из миссии, а не из глобальной настройки.
+- **Статус**: ✅ закрыт (2026-10-20).
+- **Что сделано (per-key цена ключа):**
+- Добавлено `key_rules.price` (nullable, per-key цена).
+- Хелпер `resolve_key_price` (`app/key_price.py`): приоритет — `key_rules.price` → глобальная настройка (`shop.catalog.default_price_root` / `shop.fallback.default_price_root`) → default.
+- Магазин (`shop_service`) и fallback (`fallback_shop`) берут цену через хелпер. Логика выдачи/списания не тронута.
+- Форма ключа: добавлено «Цена (ROOT)» (пусто = глобальная), убран «Стак-лимит» (мёртвая колонка, не проверяется).
+- Глобальные настройки оставлены как fallback (не удалять).
+- Награды, вход в миссию, выдача — не тронуты.
+
+**Долги после 8.20:**
+- gate !canWrite для ключей — если появится viewer-роль (долг из 8.18).
+- тост-система уведомлений (сейчас inline-баннеры без автоскрытия) — отдельный UX-апгрейд (долг из 8.18).
+- granular-права (фронт проверяет только роль canWrite, не permissions) — отдельный долг (долг из 8.18).
+- content/validation JSON → структурированные редакторы для text_answer/code_repair (cipher уже есть) — отдельный шаг (долг из 8.18).
+- Fallback offer_id из миссии — остаётся долгом (входил в состав 8.20, не реализован).
+- per-key цена — реализована в 8.20 (долг из 8.16 закрыт).
 
 ### Спринт 8.6 — Content UX (закрыт 2026-10-14)
 
