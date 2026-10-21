@@ -876,7 +876,19 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - `MinigameProfiles` — инлайн-блок в `AdminApp` (долг 8.19, не вынесен) — вынести в отдельный компонент.
 - 8.22: запретить PATCH draft-главы в archived-сезон (симметрия с D3а) — мини-долг.
 - 8.23 ❌ Каскадный конструктор (Сезон → Глава → Сегмент → Миссия, пошаговый выбор; «создать новый» / «выбрать существующий»).
-- 8.24 ❌ Dropdown вместо input: Chapter ID (миссия, сегмент) → dropdown глав; Story node ID (миссия, награда) → dropdown story-нод главы. «Слой» (solo/team/story) и «Разблокируется после» — уже есть, не трогать.
+- 8.24 ✅ Chapter ID dropdown — закрыт (2026-10-21).
+  - Frontend: `MissionsSection.tsx` + `SegmentsEditor.tsx` — Chapter ID (текстовый input) → dropdown из `listChapters()` (фильтр `status !== 'archived'`).
+  - Story node ID — отложен (8.26, нет CRUD).
+  - Payload не изменился (`chapter_id` уходит как раньше).
+  - Build EXIT=0. Ручной тест: dropdown виден, сохранение работает.
+
+**Долги после 8.24:**
+- Story node dropdown → после 8.26 (StoryNode CRUD).
+- Сегмент `test-segment-02`: content не соответствует контракту — проверить (не блокер 8.24).
+- Сегменты параллельно (`chapter_id` → nullable) → 8.27+ (отдельный спринт, миграция).
+- Визуальная группировка «Сезоны/Главы/Мини-игры» в «Контент» → 8.27+.
+- `MinigameProfiles` — инлайн в `AdminApp` → долг 8.19.
+- 8.22: запрет PATCH draft-главы в archived-сезон → мини-долг.
 - 8.25 ❌ Связь 1:1: миссия не может существовать без места в иерархии (валидация: либо chapter_id+segment_id, либо командная/индивидуальная с unlock_after). Правило, не сущность.
 - 8.26 ❌ StoryNode CRUD (backend admin_story_nodes.py + frontend; chapter_id — dropdown; права story_nodes.*).
 
