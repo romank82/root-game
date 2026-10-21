@@ -124,10 +124,17 @@ export function SegmentsEditor({
   // Загрузка миссий для привязки (в AdminApp: эффект при section === 'content').
 
   useEffect(() => {
+    if (!segmentChapterId) {
+      setMissionsForLink([])
+      setMissionsForLinkError(null)
+      setLoadingMissionsForLink(false)
+      return
+    }
+
     let cancelled = false
     setLoadingMissionsForLink(true)
     setMissionsForLinkError(null)
-    listAdminMissions()
+    listAdminMissions(segmentChapterId)
       .then((data) => {
         if (cancelled) return
         setMissionsForLink(
@@ -150,7 +157,7 @@ export function SegmentsEditor({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [segmentChapterId])
 
   function selectedSegment(): AdminSegment | null {
     if (selectedSegmentId === null) return null
@@ -417,7 +424,10 @@ export function SegmentsEditor({
                 <span>Chapter ID</span>
                 <select
                   value={segmentChapterId}
-                  onChange={(e) => setSegmentChapterId(e.target.value)}
+                  onChange={(e) => {
+                    setSegmentChapterId(e.target.value)
+                    setSegmentMissions([])
+                  }}
                   disabled={!canWrite}
                 >
                   <option value="">— Выберите главу —</option>
@@ -465,66 +475,85 @@ export function SegmentsEditor({
               <section>
                 <h3 style={{ marginTop: 24 }}>Привязанные миссии</h3>
 
-                {loadingMissionsForLink && (
-                  <p className="admin-muted">Загрузка миссий…</p>
-                )}
-                {missionsForLinkError && (
-                  <p className="admin-alert admin-error">
-                    {missionsForLinkError}
-                  </p>
-                )}
-
-                <button
-                  className="admin-secondary"
-                  onClick={addSegmentMissionLink}
-                  disabled={!canWrite}
-                >
-                  + Добавить миссию
-                </button>
-
-                {segmentMissions.map((link, index) => (
-                  <div key={index} className="admin-link-row">
-                    <select
-                      value={link.missionId}
-                      disabled={!canWrite}
-                      onChange={(e) =>
-                        changeSegmentMissionLink(index, e.target.value)
-                      }
-                    >
-                      {link.missionId === '' && (
-                        <option value="" disabled>
-                          Выберите миссию…
-                        </option>
-                      )}
-                      {missionsForLink.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.title} · {m.slug} [{m.status}]
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      value={link.sortOrder}
-                      disabled={!canWrite}
-                      onChange={(e) =>
-                        changeSegmentMissionSort(index, e.target.value)
-                      }
-                    />
-                    <button
-                      className="admin-danger"
-                      onClick={() => removeSegmentMissionLink(index)}
-                      disabled={!canWrite}
-                    >
-                      Удалить
-                    </button>
-                  </div>
-                ))}
-
-                {segmentMissions.length === 0 && (
+                {!segmentChapterId && (
                   <p className="admin-muted">
-                    Миссии не привязаны. Публикация требует ≥1 published
-                    миссии той же главы.
+                    Выберите главу, чтобы увидеть миссии.
                   </p>
+                )}
+
+                {segmentChapterId && (
+                  <>
+                    {loadingMissionsForLink && (
+                      <p className="admin-muted">Загрузка миссий…</p>
+                    )}
+                    {missionsForLinkError && (
+                      <p className="admin-alert admin-error">
+                        {missionsForLinkError}
+                      </p>
+                    )}
+                    {!loadingMissionsForLink &&
+                      !missionsForLinkError &&
+                      missionsForLink.length === 0 && (
+                        <p className="admin-muted">
+                          В этой главе нет опубликованных миссий.
+                        </p>
+                      )}
+
+                    <button
+                      className="admin-secondary"
+                      onClick={addSegmentMissionLink}
+                      disabled={!canWrite}
+                    >
+                      + Добавить миссию
+                    </button>
+
+                    {segmentMissions.map((link, index) => (
+                      <div key={index} className="admin-link-row">
+                        <select
+                          value={link.missionId}
+                          disabled={!canWrite}
+                          onChange={(e) =>
+                            changeSegmentMissionLink(index, e.target.value)
+                          }
+                        >
+                          {link.missionId === '' && (
+                            <option value="" disabled>
+                              Выберите миссию…
+                            </option>
+                          )}
+                          {missionsForLink.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.title} · {m.slug} [{m.status}]
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          value={link.sortOrder}
+                          disabled={!canWrite}
+                          onChange={(e) =>
+                            changeSegmentMissionSort(index, e.target.value)
+                          }
+                        />
+                        <button
+                          className="admin-danger"
+                          onClick={() => removeSegmentMissionLink(index)}
+                          disabled={!canWrite}
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    ))}
+
+                    {segmentMissions.length === 0 &&
+                      loadingMissionsForLink === false &&
+                      missionsForLink.length > 0 && (
+                        <p className="admin-muted">
+                          Миссии не привязаны. Публикация требует ≥1
+                          published миссии той же главы.
+                        </p>
+                      )}
+                  </>
                 )}
               </section>
 
