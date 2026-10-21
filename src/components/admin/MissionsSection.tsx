@@ -988,7 +988,11 @@ export function MissionsSection({
                 value={form.chapterId}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, chapterId: event.target.value })
+                  setForm({
+                    ...form,
+                    chapterId: event.target.value,
+                    unlockAfterMissionId: '',
+                  })
                 }
               >
                 <option value="">— Выберите главу —</option>
@@ -1249,14 +1253,18 @@ export function MissionsSection({
               Разблокируется после
               <select
                 value={form.unlockAfterMissionId}
-                disabled={!canWrite}
+                disabled={!canWrite || !form.chapterId}
                 onChange={(event) =>
                   setForm({ ...form, unlockAfterMissionId: event.target.value })
                 }
               >
                 <option value="">— без зависимости (доступна сразу) —</option>
+                {!form.chapterId && (
+                  <option value="">Сначала выберите главу</option>
+                )}
                 {missions
                   .filter((m) => m.id !== selectedMission?.id)
+                  .filter((m) => form.chapterId && m.chapterId === form.chapterId)
                   .map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.title} · {m.slug} [{m.status}]
