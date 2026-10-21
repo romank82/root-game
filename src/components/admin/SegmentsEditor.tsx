@@ -287,6 +287,20 @@ export function SegmentsEditor({
   }
 
   function changeSegmentMissionLink(index: number, missionId: string) {
+    if (!missionId.trim()) {
+      setSegmentMissions((prev) =>
+        prev.map((m, i) => (i === index ? { ...m, missionId } : m)),
+      )
+      return
+    }
+    const duplicate = segmentMissions.some(
+      (m, i) => i !== index && m.missionId === missionId,
+    )
+    if (duplicate) {
+      setSegmentError('Эта миссия уже добавлена в текущий сегмент.')
+      return
+    }
+    setSegmentError(null)
     setSegmentMissions((prev) =>
       prev.map((m, i) => (i === index ? { ...m, missionId } : m)),
     )
