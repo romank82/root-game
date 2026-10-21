@@ -311,6 +311,8 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   { code: 'missions.read', title: 'Просмотр миссий', category: 'content' },
   { code: 'segments.manage', title: 'Управление сегментами', category: 'content' },
   { code: 'segments.read', title: 'Просмотр сегментов', category: 'content' },
+  { code: 'seasons.read', title: 'Просмотр сезонов', category: 'content' },
+  { code: 'seasons.manage', title: 'Управление сезонами', category: 'content' },
   { code: 'key_rules.manage', title: 'Управление правилами ключей', category: 'economy' },
   { code: 'key_rules.read', title: 'Просмотр правил ключей', category: 'economy' },
   { code: 'reward_pools.manage', title: 'Управление пулами наград', category: 'economy' },
@@ -1144,4 +1146,99 @@ export async function archiveMinigameProfile(
     minigameProfile: AdminMinigameProfile
   }
   return body.minigameProfile
+}
+
+// Seasons (Sprint 8.21)
+// =============================================================================
+
+export type AdminSeason = {
+  id: string
+  slug: string
+  title: string
+  description: string | null
+  status: 'draft' | 'published' | 'archived'
+  sortOrder: number
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type CreateSeasonPayload = {
+  slug?: string | null
+  title: string
+  description?: string | null
+  sort_order?: number
+}
+
+export type UpdateSeasonPayload = {
+  slug?: string | null
+  title?: string | null
+  description?: string | null
+  sort_order?: number | null
+}
+
+export async function listSeasons(status?: string): Promise<AdminSeason[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : ''
+  const response = await adminFetch(`/api/v1/admin/seasons${query}`)
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { seasons: AdminSeason[] }
+  return body.seasons
+}
+
+export async function getSeason(seasonId: string): Promise<AdminSeason> {
+  const response = await adminFetch(
+    `/api/v1/admin/seasons/${encodeURIComponent(seasonId)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { season: AdminSeason }
+  return body.season
+}
+
+export async function createSeason(
+  payload: CreateSeasonPayload,
+): Promise<AdminSeason> {
+  const response = await adminFetch('/api/v1/admin/seasons', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { season: AdminSeason }
+  return body.season
+}
+
+export async function updateSeason(
+  seasonId: string,
+  payload: UpdateSeasonPayload,
+): Promise<AdminSeason> {
+  const response = await adminFetch(
+    `/api/v1/admin/seasons/${encodeURIComponent(seasonId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { season: AdminSeason }
+  return body.season
+}
+
+export async function publishSeason(seasonId: string): Promise<AdminSeason> {
+  const response = await adminFetch(
+    `/api/v1/admin/seasons/${encodeURIComponent(seasonId)}/publish`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { season: AdminSeason }
+  return body.season
+}
+
+export async function archiveSeason(seasonId: string): Promise<AdminSeason> {
+  const response = await adminFetch(
+    `/api/v1/admin/seasons/${encodeURIComponent(seasonId)}/archive`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { season: AdminSeason }
+  return body.season
 }
