@@ -79,6 +79,7 @@ from app.admin_geo_zones import router as admin_geo_zones_router
 from app.admin_ar_objects import router as admin_ar_objects_router
 from app.admin_minigame_profiles import router as admin_minigame_profiles_router
 from app.admin_seasons import router as admin_seasons_router
+from app.admin_chapters import router as admin_chapters_router
 from app.admin_mission_runtime_policies import (
     router as admin_mission_runtime_policies_router,
     router_missions as admin_mission_runtime_policies_missions_router,
@@ -1181,6 +1182,7 @@ app.include_router(admin_geo_zones_router)
 app.include_router(admin_ar_objects_router)
 app.include_router(admin_minigame_profiles_router)
 app.include_router(admin_seasons_router)
+app.include_router(admin_chapters_router)
 app.include_router(admin_mission_runtime_policies_router)
 app.include_router(admin_mission_runtime_policies_missions_router)
 app.include_router(admin_system_settings_router)
