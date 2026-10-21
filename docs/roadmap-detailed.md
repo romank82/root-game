@@ -818,23 +818,21 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - granular-права (фронт проверяет только роль canWrite, не permissions) — отдельный долг.
 - content/validation JSON → структурированные редакторы для text_answer/code_repair (cipher уже есть) — отдельный шаг.
 
-### Спринт 8.19. Декомпозиция AdminApp.tsx — ❌ запланирован
+### Спринт 8.19. Декомпозиция AdminApp.tsx — ✅ закрыт (2026-10-21)
 
-AdminApp.tsx — 5336 строк (wc -l), один гигантский компонент (485: `function AdminApp()`,
-~88 useState, ~20 useEffect, ~40 хендлеров). Разбить на компоненты по возрастанию риска,
-после каждого шага — `npm run build` (tsc) + ручной прогон админки:
+**Что сделано (5 блоков вынесены в компоненты):**
+- Settings → `SettingsSection.tsx` (06e27bf).
+- Admins → `AdminsSection.tsx` (e58f64a).
+- Keys → `KeysSection.tsx` (44ac1e3).
+- Content → `ContentSection.tsx` + `SegmentsEditor.tsx` + `GeoZonesEditor.tsx` + `ARObjectsEditor.tsx` (07478fb).
+- Missions → `MissionsSection.tsx` (fad518b).
+- `AdminApp.tsx`: 5336 → 808 строк (в 6.6 раза меньше).
+- Общие стейты (`keyItems`, `geoZones`, `arObjects`, `minigameProfiles`) остались в AdminApp, переданы пропсами в секции.
+- Ручной тест: миссии (сохранение, публикация), Content (3 вкладки: Сегменты, Геозоны, AR), dropdown в миссиях (Геозона, AR, Профиль мини-игры, Ключ) — работают. Build EXIT=0.
 
-- SettingsSection — 3464–3690 (~226 строк). Низкий риск.
-- AdminsSection — 3691–3997 (~306). Низкий риск.
-- KeysSection — 3998–4291 (~293). Средний риск: делит `keyItems` с формой миссии.
-- ContentSection — 4526–5336 (~810; вкладки Segment/GeoZone/ARObject).
-  Средний риск: делит `geoZones`/`arObjects` с формой миссии.
-- MissionsSection — 2410–3462 (~1052). Высокий риск: редактор наград + policy-блок,
-  тянет `keyItems`/`geoZones`/`arObjects`/`missions`.
-- Шапка/навигация (2340–2409) → AdminShell; хелперы миссии (1–484) → missionFormModels.ts.
-- Перекрёстные стейты (`keyItems`, `geoZones`, `arObjects`, `missions`) — поднять
-  в родителя/прокинуть пропсами, не дублировать.
-- adminApi.ts (~1030 строк) → по доменам.
+**Долги после 8.19:**
+- `adminApi.ts` (~1030 строк) — разбить по доменам (опционально, низкий риск) — отложено.
+- `MissionsSection.tsx` (1911 строк) — можно разбить дальше (награды, политика) — отложено.
 
 ### Спринт 8.20. Fallback per-key цена + offer_id из миссии — ✅ закрыт (2026-10-20)
 
@@ -855,13 +853,28 @@ AdminApp.tsx — 5336 строк (wc -l), один гигантский комп
 - Fallback offer_id из миссии — остаётся долгом (входил в состав 8.20, не реализован).
 - per-key цена — реализована в 8.20 (долг из 8.16 закрыт).
 
-### Спринт 8.21–8.26. Иерархия контента — ❌ запланирован
+### Спринт 8.21–8.26. Иерархия контента — ⏳ в работе (8.21–8.22 закрыты, 8.23–8.26 открыты)
 
 **Зачем:** админ управляет иерархией через каскадный выбор (Сезон → Глава → Сегмент → Миссия), а не вбивает ID вручную. Модель уже готова (Season → Chapter → {Mission, Segment, StoryNode}, FK есть). Миграции не нужны.
 
 **Этапы:**
-- 8.21 ❌ Season CRUD (backend admin_seasons.py + frontend вкладка «Сезоны»; права seasons.read/manage; audit; draft→published→archived).
-- 8.22 ❌ Chapter CRUD (backend admin_chapters.py + frontend вкладка «Главы»; season_id — dropdown; права chapters.*; audit).
+- 8.21 ✅ Season CRUD — закрыт (2026-10-21).
+  - Backend: `admin_seasons.py` (CRUD list/get/create/update/publish/archive; права `seasons.read/manage`; audit; slug-нормализация, транслитерация кириллицы).
+  - Frontend: `SeasonsSection.tsx` (вкладка «Сезоны», sidebar + форма), `adminApi.ts` (типы + 6 функций + PERMISSION_CATALOG).
+  - Миграция-сид прав: `26f3a9c1d5e7`.
+  - Тесты: 15 (`test_admin_seasons.py`). Всего 646 OK.
+  - Ручной тест: создать/опубликовать сезон — работает.
+- 8.22 ✅ Chapter CRUD — закрыт (2026-10-21).
+  - Backend: `admin_chapters.py` (CRUD; season_id — FK валидация; строгая иерархия: publish только при published-сезоне, create в archived-сезон → 422, смена season_id у published → 409, повторный publish → 422; права `chapters.read/manage`; audit; slug).
+  - Frontend: `ChaptersSection.tsx` (вкладка «Главы», season_id — dropdown из Season), `adminApi.ts` (типы + 6 функций + PERMISSION_CATALOG).
+  - Миграция-сид прав: `a3f9c18e42b7`.
+  - Тесты: 15 (`test_admin_chapters.py`). Всего 661 OK.
+  - Ручной тест: создать/опубликовать главу (dropdown сезона) — работает.
+
+**Долги после 8.21+8.22:**
+- Визуальная группировка «Сезоны/Главы/Мини-игры» в «Контент» (вкладки внутри `ContentSection`) — код остаётся разнесённым (`SeasonsSection`/`ChaptersSection`/`MinigameProfilesSection` — отдельные файлы), только UI-группировка. Долг 8.27+ (после 8.26).
+- `MinigameProfiles` — инлайн-блок в `AdminApp` (долг 8.19, не вынесен) — вынести в отдельный компонент.
+- 8.22: запретить PATCH draft-главы в archived-сезон (симметрия с D3а) — мини-долг.
 - 8.23 ❌ Каскадный конструктор (Сезон → Глава → Сегмент → Миссия, пошаговый выбор; «создать новый» / «выбрать существующий»).
 - 8.24 ❌ Dropdown вместо input: Chapter ID (миссия, сегмент) → dropdown глав; Story node ID (миссия, награда) → dropdown story-нод главы. «Слой» (solo/team/story) и «Разблокируется после» — уже есть, не трогать.
 - 8.25 ❌ Связь 1:1: миссия не может существовать без места в иерархии (валидация: либо chapter_id+segment_id, либо командная/индивидуальная с unlock_after). Правило, не сущность.
