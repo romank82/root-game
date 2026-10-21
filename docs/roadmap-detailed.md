@@ -881,6 +881,7 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
   - Story node ID — отложен (8.26, нет CRUD).
   - Payload не изменился (`chapter_id` уходит как раньше).
   - Build EXIT=0. Ручной тест: dropdown виден, сохранение работает.
+  - 8.24-доп ✅ Story node dropdown — закрыт (2026-10-21). Story node ID (в форме миссии и в награде) → dropdown из story-nodes выбранной главы. При смене главы — перезагрузка списка. Payload не изменён. Build EXIT=0. Ручной тест: dropdown виден, сохранение работает.
 
 **Долги после 8.24:**
 - Story node dropdown → после 8.26 (StoryNode CRUD).
@@ -902,7 +903,6 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 **Не трогать:** «3 вкладки» (Слой solo/team/story), «Разблокируется после» (unlock_after_mission_id), «Порядок сортировки» — уже есть.
 
 **Долги после 8.26:**
-- 8.24-доп: Story node dropdown в миссии/награде (заменить текстовый input на dropdown из story-nodes выбранной главы) — следующий шаг.
 - Сегменты параллельно (chapter_id → nullable) → 8.27+.
 - Визуальная группировка «Сезоны/Главы/Story Nodes/Мини-игры» в «Контент» → 8.27+.
 - MinigameProfiles — инлайн в AdminApp → долг 8.19.
