@@ -315,6 +315,19 @@ export function SegmentsEditor({
     setSegmentNotice(null)
   }
 
+  // Карта занятости: missionId -> названия сегментов (кроме текущего),
+  // где миссия уже привязана. linkedMissions содержит только active
+  // связи (backend _active_links), поэтому archived здесь нет.
+  const missionUsage = segments.reduce((acc, seg) => {
+    if (seg.id === selectedSegmentId) return acc
+    for (const link of seg.linkedMissions) {
+      const list = acc.get(link.missionId) ?? []
+      list.push(seg.title)
+      acc.set(link.missionId, list)
+    }
+    return acc
+  }, new Map<string, string[]>())
+
   return (
     <div className="admin-layout">
       <aside className="admin-sidebar">
@@ -521,11 +534,17 @@ export function SegmentsEditor({
                               Выберите миссию…
                             </option>
                           )}
-                          {missionsForLink.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.title} · {m.slug} [{m.status}]
-                            </option>
-                          ))}
+                          {missionsForLink.map((m) => {
+                            const usedIn = missionUsage.get(m.id) ?? []
+                            return (
+                              <option key={m.id} value={m.id}>
+                                {m.title} · {m.slug} [{m.status}]
+                                {usedIn.length > 0
+                                  ? ` — уже в: ${usedIn.join(', ')}`
+                                  : ''}
+                              </option>
+                            )
+                          })}
                         </select>
                         <input
                           type="number"
