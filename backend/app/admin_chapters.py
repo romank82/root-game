@@ -250,15 +250,31 @@ def _audit(
 @router.get("")
 def list_admin_chapters(
     status: str | None = None,
+    season_id: str | None = None,
     _admin: AdminUser = Depends(require_permission(CHAPTERS_READ_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
         if status is not None:
             _assert_known_status(status)
 
+        # Sprint 8.23 (Этап 1): опциональный фильтр season_id — только главы
+        # этого сезона. Без параметра поведение не меняется (обратная
+        # совместимость). Несуществующий сезон -> 404; валидатор _validate_season
+        # отдаёт 422 и используется create/update, поэтому здесь проверка
+        # через сессию с 404 (согласовано в задаче 8.23).
+        if season_id is not None and session.get(Season, season_id) is None:
+            # 404 целочисленным литералом: имя параметра функции `status`
+            # затеняет модуль fastapi.status (как и было до этого эндпоинта).
+            raise HTTPException(
+                status_code=404,
+                detail="Сезон не найден.",
+            )
+
         query = select(Chapter).order_by(Chapter.sort_order, Chapter.id)
         if status is not None:
             query = query.where(Chapter.status == status)
+        if season_id is not None:
+            query = query.where(Chapter.season_id == season_id)
 
         chapters = session.scalars(query).all()
         return {"chapters": [_serialize(chapter) for chapter in chapters]}

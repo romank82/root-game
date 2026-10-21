@@ -498,6 +498,42 @@ class AdminChaptersTests(unittest.TestCase):
             list_admin_chapters(status="unknown", _admin=admin)
         self.assertEqual(caught.exception.status_code, 422)
 
+    def test_list_chapters_season_filter(self) -> None:
+        admin = self._make_admin()
+        self._grant(admin.id, CHAPTERS_READ_PERMISSION)
+        self._grant(admin.id, CHAPTERS_MANAGE_PERMISSION)
+
+        season_one = self._make_season(
+            slug="ch-season-one", status="published"
+        )
+        season_two = self._make_season(
+            slug="ch-season-two", status="published"
+        )
+
+        self._create(
+            admin,
+            season_id=season_one,
+            slug="chapter-s1",
+            title="S1 глава",
+            sort_order=1,
+        )
+        self._create(
+            admin,
+            season_id=season_two,
+            slug="chapter-s2",
+            title="S2 глава",
+            sort_order=2,
+        )
+
+        filtered = list_admin_chapters(season_id=season_one, _admin=admin)
+        slugs = [chapter["slug"] for chapter in filtered["chapters"]]
+        self.assertIn("chapter-s1", slugs)
+        self.assertNotIn("chapter-s2", slugs)
+
+        with self.assertRaises(HTTPException) as caught:
+            list_admin_chapters(season_id="season-nonexistent", _admin=admin)
+        self.assertEqual(caught.exception.status_code, 404)
+
     def test_lifecycle_writes_audit_records(self) -> None:
         admin = self._make_admin()
         self._grant(admin.id, CHAPTERS_MANAGE_PERMISSION)
