@@ -242,8 +242,10 @@ or settlement internals. Exact behavior is defined in
 - `GET /api/v1/admin/auth/me` — текущий admin без credentials/session token.
 - `POST /api/v1/admin/auth/logout`
 - `/api/v1/admin/missions` — list/get/create/update/publish/unpublish.
+  - `GET /api/v1/admin/missions` — list; query: `chapter_id` (string, optional, 8.23) — фильтр по главе.
 - `/api/v1/admin/segments` — list/get/create/update/publish/unpublish/archive;
   physical `DELETE` is unavailable.
+  - `GET /api/v1/admin/segments` — list; query: `chapter_id` (string, optional, 8.23) — фильтр по главе.
   - `GET /api/v1/admin/segments` and `GET /{segment_id}` require direct
     `segments.read`;
   - create/update/publish/unpublish/archive require direct `segments.manage`;
@@ -375,6 +377,8 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
 
 **Главы:**
 - GET /api/v1/admin/chapters — список (фильтры: season_id, status).
+  - `season_id` (string, optional) — фильтр по сезону (обещан ранее; реализован в 8.23).
+  - `status` (string, optional) — draft | published | archived.
 - GET /api/v1/admin/chapters/{id} — по id.
 - POST /api/v1/admin/chapters — создать (season_id, slug, title, description, sort_order). season_id опционален: если не передан и сезон 1 — дефолт на него; если 0 — 422; если >1 — обязателен.
 - PATCH /api/v1/admin/chapters/{id} — обновить.
