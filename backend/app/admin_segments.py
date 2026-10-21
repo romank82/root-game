@@ -404,12 +404,26 @@ def _ensure_editable(segment: Segment) -> None:
 
 @router.get("")
 def list_admin_segments(
+    chapter_id: str | None = None,
     _admin: AdminUser = Depends(require_permission(SEGMENT_READ_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
-        segments = session.scalars(
-            select(Segment).order_by(Segment.status, Segment.sort_order, Segment.id)
-        ).all()
+        # Sprint 8.23 (Этап 1): опциональный фильтр chapter_id — только
+        # сегменты этой главы. Без параметра поведение не меняется (обратная
+        # совместимость). Несуществующая глава -> 404; валидатор _validate_chapter
+        # отдаёт 422 и используется create/update, поэтому здесь проверка через
+        # сессию с литералом 404 (без затенения fastapi.status).
+        if chapter_id is not None and session.get(Chapter, chapter_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Глава не найдена.",
+            )
+
+        query = select(Segment).order_by(Segment.status, Segment.sort_order, Segment.id)
+        if chapter_id is not None:
+            query = query.where(Segment.chapter_id == chapter_id)
+
+        segments = session.scalars(query).all()
         return {
             "segments": [
                 _serialize_segment(session, segment)
