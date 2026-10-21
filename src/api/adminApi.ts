@@ -135,8 +135,13 @@ export async function logoutAdmin(): Promise<void> {
   }
 }
 
-export async function listAdminMissions(): Promise<AdminMission[]> {
-  const response = await adminFetch('/api/v1/admin/missions')
+export async function listAdminMissions(
+  chapterId?: string,
+): Promise<AdminMission[]> {
+  const params = new URLSearchParams()
+  if (chapterId) params.set('chapter_id', chapterId)
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(`/api/v1/admin/missions${query}`)
 
   if (!response.ok) {
     throw new Error(await readError(response))
@@ -749,8 +754,11 @@ export type UpdateSegmentPayload = {
   linked_missions?: Array<{ mission_id: string; sort_order: number }>
 }
 
-export async function listSegments(): Promise<AdminSegment[]> {
-  const response = await adminFetch('/api/v1/admin/segments')
+export async function listSegments(chapterId?: string): Promise<AdminSegment[]> {
+  const params = new URLSearchParams()
+  if (chapterId) params.set('chapter_id', chapterId)
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(`/api/v1/admin/segments${query}`)
   if (!response.ok) throw new Error(await readError(response))
   const body = (await response.json()) as { segments: AdminSegment[] }
   return body.segments
@@ -1275,8 +1283,14 @@ export type UpdateChapterPayload = {
   sort_order?: number | null
 }
 
-export async function listChapters(status?: string): Promise<AdminChapter[]> {
-  const query = status ? `?status=${encodeURIComponent(status)}` : ''
+export async function listChapters(
+  status?: string,
+  seasonId?: string,
+): Promise<AdminChapter[]> {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  if (seasonId) params.set('season_id', seasonId)
+  const query = params.toString() ? `?${params.toString()}` : ''
   const response = await adminFetch(`/api/v1/admin/chapters${query}`)
   if (!response.ok) throw new Error(await readError(response))
   const body = (await response.json()) as { chapters: AdminChapter[] }
