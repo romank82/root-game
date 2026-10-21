@@ -631,12 +631,27 @@ def _replace_rewards(
 
 @router.get("")
 def list_admin_missions(
+    chapter_id: str | None = None,
     _admin: AdminUser = Depends(require_permission(MISSION_READ_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
-        missions = session.scalars(
-            select(Mission).order_by(Mission.status, Mission.sort_order, Mission.id)
-        ).all()
+        # Sprint 8.23 (Этап 1, часть 2b): опциональный фильтр chapter_id —
+        # только миссии этой главы. Без параметра поведение не меняется
+        # (обратная совместимость). Несуществующая глава -> 404; валидатор
+        # _validate_references отдаёт 422 и используется create/update, поэтому
+        # здесь проверка через сессию с литералом 404 (без затенения
+        # fastapi.status параметром функции).
+        if chapter_id is not None and session.get(Chapter, chapter_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Глава не найдена.",
+            )
+
+        query = select(Mission).order_by(Mission.status, Mission.sort_order, Mission.id)
+        if chapter_id is not None:
+            query = query.where(Mission.chapter_id == chapter_id)
+
+        missions = session.scalars(query).all()
 
         return {
             "missions": [

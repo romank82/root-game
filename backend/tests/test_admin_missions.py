@@ -26,6 +26,7 @@ from app.admin_missions import (
     AdminMissionCreatePayload,
     AdminMissionUpdatePayload,
     create_admin_mission,
+    list_admin_missions,
     update_admin_mission,
 )
 
@@ -345,3 +346,52 @@ class AdminMissionsCategoryApiTests(unittest.TestCase):
             "профиль мини-игры",
             context.exception.detail,
         )
+
+    def test_list_missions_chapter_filter(self) -> None:
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+
+        # Вторая глава в том же сезоне — напрямую через модель (этот стиль
+        # уже используется в тестах файла для MinigameProfile).
+        from app.models import Chapter
+
+        second_chapter_id = f"chapter-second-{uuid.uuid4().hex[:10]}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                Chapter(
+                    id=second_chapter_id,
+                    season_id=ids["season"],
+                    slug=f"chapter-second-{uuid.uuid4().hex[:10]}",
+                    title="Second chapter",
+                    description="Isolated integration fixture",
+                    status="published",
+                    sort_order=2,
+                )
+            )
+
+        mission_one = create_admin_mission(
+            _create_payload(chapter_id=ids["chapter"], title="Mission one"),
+            request=None,
+            admin=admin,
+        )["mission"]
+        mission_two = create_admin_mission(
+            _create_payload(chapter_id=second_chapter_id, title="Mission two"),
+            request=None,
+            admin=admin,
+        )["mission"]
+
+        filtered = list_admin_missions(chapter_id=ids["chapter"], _admin=admin)
+        filtered_ids = [mission["id"] for mission in filtered["missions"]]
+        self.assertIn(mission_one["id"], filtered_ids)
+        self.assertNotIn(mission_two["id"], filtered_ids)
+
+        with self.assertRaises(HTTPException) as caught:
+            list_admin_missions(chapter_id="chapter-nonexistent", _admin=admin)
+        self.assertEqual(caught.exception.status_code, 404)
+
+        # Обратная совместимость: без chapter_id обе миссии в списке
+        # (в списке могут быть и миссии из других тестов).
+        all_missions = list_admin_missions(_admin=admin)["missions"]
+        all_ids = [mission["id"] for mission in all_missions]
+        self.assertIn(mission_one["id"], all_ids)
+        self.assertIn(mission_two["id"], all_ids)
