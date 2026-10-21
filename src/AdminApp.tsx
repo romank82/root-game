@@ -27,6 +27,7 @@ import { ContentSection } from './components/admin/ContentSection'
 import { MissionsSection } from './components/admin/MissionsSection'
 import { SeasonsSection } from './components/admin/SeasonsSection'
 import { ChaptersSection } from './components/admin/ChaptersSection'
+import { StoryNodesSection } from './components/admin/StoryNodesSection'
 
 function AdminApp() {
   const [admin, setAdmin] = useState<AdminUser | null>(null)
@@ -44,6 +45,7 @@ function AdminApp() {
     | 'content'
     | 'seasons'
     | 'chapters'
+    | 'story-nodes'
     | 'minigame-profiles'
   >(
     () =>
@@ -55,6 +57,7 @@ function AdminApp() {
         | 'content'
         | 'seasons'
         | 'chapters'
+        | 'story-nodes'
         | 'minigame-profiles') ?? 'missions',
   )
   const [geoZones, setGeoZones] = useState<AdminGeoZone[]>([])
@@ -459,6 +462,7 @@ function AdminApp() {
             {section === 'keys' && 'Ключи'}
             {section === 'seasons' && 'Сезоны'}
             {section === 'chapters' && 'Главы'}
+            {section === 'story-nodes' && 'Story Nodes'}
             {section === 'minigame-profiles' && 'Мини-игры'}
           </h1>
 
@@ -508,6 +512,13 @@ function AdminApp() {
               onClick={() => setSection('chapters')}
             >
               Главы
+            </button>
+
+            <button
+              className={section === 'story-nodes' ? 'is-active' : ''}
+              onClick={() => setSection('story-nodes')}
+            >
+              Story Nodes
             </button>
 
             <button
@@ -585,6 +596,15 @@ function AdminApp() {
 
       {section === 'chapters' && (
         <ChaptersSection
+          admin={admin}
+          canWrite={canWrite}
+          onError={setError}
+          onNotice={setNotice}
+        />
+      )}
+
+      {section === 'story-nodes' && (
+        <StoryNodesSection
           admin={admin}
           canWrite={canWrite}
           onError={setError}
