@@ -4,6 +4,7 @@ import {
   getMissionRuntimePolicyByMission,
   listAdminMissions,
   listChapters,
+  listStoryNodes,
   publishAdminMission,
   publishMissionRuntimePolicy,
   unpublishAdminMission,
@@ -15,6 +16,7 @@ import {
   type AdminMinigameProfile,
   type AdminMission,
   type AdminMissionPayload,
+  type AdminStoryNode,
   type AdminUser,
   type KeyItem,
   type MissionRuntimePolicy,
@@ -473,6 +475,7 @@ export function MissionsSection({
   const [loadingMissions, setLoadingMissions] = useState(false)
   const [missions, setMissions] = useState<AdminMission[]>([])
   const [chapters, setChapters] = useState<AdminChapter[]>([])
+  const [storyNodes, setStoryNodes] = useState<AdminStoryNode[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [form, setForm] = useState<MissionForm>(emptyForm)
   const [submitting, setSubmitting] = useState(false)
@@ -531,6 +534,31 @@ export function MissionsSection({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!form.chapterId) {
+      setStoryNodes([])
+      return
+    }
+    listStoryNodes(undefined, form.chapterId)
+      .then((data) => {
+        if (!cancelled) setStoryNodes(data)
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          onError(
+            requestError instanceof Error
+              ? requestError.message
+              : 'Не удалось загрузить story-nodes.',
+          )
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.chapterId])
 
   useEffect(() => {
     if (selectedId === null) {
@@ -976,13 +1004,22 @@ export function MissionsSection({
 
             <label>
               Story node ID
-              <input
+              <select
                 value={form.storyNodeId}
-                disabled={!canWrite}
+                disabled={!canWrite || !form.chapterId}
                 onChange={(event) =>
                   setForm({ ...form, storyNodeId: event.target.value })
                 }
-              />
+              >
+                <option value="">— Не выбрано —</option>
+                {storyNodes
+                  .filter((s) => s.status !== 'archived')
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title} ({s.slug})
+                    </option>
+                  ))}
+              </select>
             </label>
 
             <label>
@@ -1875,13 +1912,22 @@ export function MissionsSection({
                 {reward.rewardType === 'story_node' && (
                   <label>
                     Story node ID
-                    <input
+                    <select
                       value={reward.storyNodeId}
-                      disabled={!canWrite}
-                      onChange={(event) =>
-                        changeReward(index, 'storyNodeId', event.target.value)
+                      disabled={!canWrite || !form.chapterId}
+                      onChange={(e) =>
+                        changeReward(index, 'storyNodeId', e.target.value)
                       }
-                    />
+                    >
+                      <option value="">— Не выбрано —</option>
+                      {storyNodes
+                        .filter((s) => s.status !== 'archived')
+                        .map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.title} ({s.slug})
+                          </option>
+                        ))}
+                    </select>
                   </label>
                 )}
 
