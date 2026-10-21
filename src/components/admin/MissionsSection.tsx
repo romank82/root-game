@@ -3,12 +3,14 @@ import {
   createAdminMission,
   getMissionRuntimePolicyByMission,
   listAdminMissions,
+  listChapters,
   publishAdminMission,
   publishMissionRuntimePolicy,
   unpublishAdminMission,
   updateAdminMission,
   upsertMissionRuntimePolicy,
   type AdminARObject,
+  type AdminChapter,
   type AdminGeoZone,
   type AdminMinigameProfile,
   type AdminMission,
@@ -470,6 +472,7 @@ export function MissionsSection({
 }: MissionsSectionProps) {
   const [loadingMissions, setLoadingMissions] = useState(false)
   const [missions, setMissions] = useState<AdminMission[]>([])
+  const [chapters, setChapters] = useState<AdminChapter[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [form, setForm] = useState<MissionForm>(emptyForm)
   const [submitting, setSubmitting] = useState(false)
@@ -507,6 +510,25 @@ export function MissionsSection({
   useEffect(() => {
     refreshMissions()
     // Загрузка на mount секции (в оригинале вызывалась из AdminApp при входе).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    listChapters()
+      .then((data) => {
+        if (!cancelled) setChapters(data)
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          onError(
+            requestError instanceof Error ? requestError.message : 'Не удалось загрузить главы.',
+          )
+        }
+      })
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -934,13 +956,22 @@ export function MissionsSection({
         <div className="admin-grid">
           <label>
               Chapter ID *
-              <input
+              <select
                 value={form.chapterId}
                 disabled={!canWrite}
                 onChange={(event) =>
                   setForm({ ...form, chapterId: event.target.value })
                 }
-              />
+              >
+                <option value="">— Выберите главу —</option>
+                {chapters
+                  .filter((c) => c.status !== 'archived')
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title} ({c.slug})
+                    </option>
+                  ))}
+              </select>
             </label>
 
             <label>

@@ -3,10 +3,12 @@ import {
   archiveSegment,
   createSegment,
   listAdminMissions,
+  listChapters,
   listSegments,
   publishSegment,
   unpublishSegment,
   updateSegment,
+  type AdminChapter,
   type AdminSegment,
   type AdminUser,
 } from '../../api/adminApi'
@@ -49,6 +51,7 @@ export function SegmentsEditor({
   >([])
   const [loadingMissionsForLink, setLoadingMissionsForLink] = useState(false)
   const [missionsForLinkError, setMissionsForLinkError] = useState<string | null>(null)
+  const [chapters, setChapters] = useState<AdminChapter[]>([])
 
   // Загрузка сегментов (в AdminApp: эффект при section === 'content').
   useEffect(() => {
@@ -66,6 +69,23 @@ export function SegmentsEditor({
       })
       .finally(() => {
         if (!cancelled) setLoadingSegments(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Загрузка глав для dropdown Chapter ID.
+  useEffect(() => {
+    let cancelled = false
+    listChapters()
+      .then((data) => {
+        if (cancelled) return
+        setChapters(data)
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setSegmentsError(err.message)
       })
     return () => {
       cancelled = true
@@ -395,12 +415,20 @@ export function SegmentsEditor({
               </label>
               <label className="admin-field">
                 <span>Chapter ID</span>
-                <input
-                  type="text"
+                <select
                   value={segmentChapterId}
                   onChange={(e) => setSegmentChapterId(e.target.value)}
                   disabled={!canWrite}
-                />
+                >
+                  <option value="">— Выберите главу —</option>
+                  {chapters
+                    .filter((c) => c.status !== 'archived')
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title} ({c.slug})
+                      </option>
+                    ))}
+                </select>
               </label>
               <label className="admin-field">
                 <span>Описание</span>
