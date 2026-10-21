@@ -853,7 +853,7 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - Fallback offer_id из миссии — остаётся долгом (входил в состав 8.20, не реализован).
 - per-key цена — реализована в 8.20 (долг из 8.16 закрыт).
 
-### Спринт 8.21–8.26. Иерархия контента — ⏳ в работе (8.21–8.22 закрыты, 8.23–8.26 открыты)
+### Спринт 8.21–8.26. Иерархия контента — ⏳ в работе (8.21/8.22/8.24/8.26 закрыты, 8.23/8.25 открыты)
 
 **Зачем:** админ управляет иерархией через каскадный выбор (Сезон → Глава → Сегмент → Миссия), а не вбивает ID вручную. Модель уже готова (Season → Chapter → {Mission, Segment, StoryNode}, FK есть). Миграции не нужны.
 
@@ -890,13 +890,25 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - `MinigameProfiles` — инлайн в `AdminApp` → долг 8.19.
 - 8.22: запрет PATCH draft-главы в archived-сезон → мини-долг.
 - 8.25 ❌ Связь 1:1: миссия не может существовать без места в иерархии (валидация: либо chapter_id+segment_id, либо командная/индивидуальная с unlock_after). Правило, не сущность.
-- 8.26 ❌ StoryNode CRUD (backend admin_story_nodes.py + frontend; chapter_id — dropdown; права story_nodes.*).
+- 8.26 ✅ StoryNode CRUD — закрыт (2026-10-21).
+  - Backend: `admin_story_nodes.py` (CRUD list/get/create/update/publish/archive; chapter_id — FK валидация; строгая иерархия: publish только при published главе, повторный publish → 422, archived → 409; права `story_nodes.read/manage`; audit; slug).
+  - Frontend: `StoryNodesSection.tsx` (вкладка «Story Nodes», chapter_id — dropdown; поля: title, slug, body (textarea), presentation_type (input), content (JSON textarea), sort_order), `adminApi.ts` (типы + 6 функций + PERMISSION_CATALOG).
+  - Миграция-сид прав: `90de6dad12b`.
+  - Тесты: 17 (`test_admin_story_nodes.py`). Всего 678 OK.
+  - Ручной тест: создать/опубликовать story-node (dropdown главы, body, presentation_type, content) — работает.
 
 **Статусная модель:** draft → published → archived (как у сегментов/мини-игр). Строгая иерархия: глава публикуется только при published сезоне; миссия/сегмент — только при published главе.
 
 **Не трогать:** «3 вкладки» (Слой solo/team/story), «Разблокируется после» (unlock_after_mission_id), «Порядок сортировки» — уже есть.
 
-**Долги после 8.26:** покупка прохождения за ROOT (если игрок не может пройти сюжетную) — отложено.
+**Долги после 8.26:**
+- 8.24-доп: Story node dropdown в миссии/награде (заменить текстовый input на dropdown из story-nodes выбранной главы) — следующий шаг.
+- Сегменты параллельно (chapter_id → nullable) → 8.27+.
+- Визуальная группировка «Сезоны/Главы/Story Nodes/Мини-игры» в «Контент» → 8.27+.
+- MinigameProfiles — инлайн в AdminApp → долг 8.19.
+- 8.22: запрет PATCH draft-главы в archived-сезон → мини-долг.
+- Сегмент test-segment-02: content не соответствует контракту — проверить.
+- Покупка прохождения за ROOT (если игрок не может пройти сюжетную) — отложено.
 
 ### Спринт 8.6 — Content UX (закрыт 2026-10-14)
 
