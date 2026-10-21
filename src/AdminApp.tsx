@@ -28,6 +28,7 @@ import { MissionsSection } from './components/admin/MissionsSection'
 import { SeasonsSection } from './components/admin/SeasonsSection'
 import { ChaptersSection } from './components/admin/ChaptersSection'
 import { StoryNodesSection } from './components/admin/StoryNodesSection'
+import { CascadeSection } from './components/admin/CascadeSection'
 
 function AdminApp() {
   const [admin, setAdmin] = useState<AdminUser | null>(null)
@@ -47,6 +48,7 @@ function AdminApp() {
     | 'chapters'
     | 'story-nodes'
     | 'minigame-profiles'
+    | 'cascade'
   >(
     () =>
       (localStorage.getItem('chimera-admin-section') as
@@ -58,7 +60,8 @@ function AdminApp() {
         | 'seasons'
         | 'chapters'
         | 'story-nodes'
-        | 'minigame-profiles') ?? 'missions',
+        | 'minigame-profiles'
+        | 'cascade') ?? 'missions',
   )
   const [geoZones, setGeoZones] = useState<AdminGeoZone[]>([])
   // setGeoZonesError и setARObjectsError всё ещё используются эффектом загрузки миссий;
@@ -464,6 +467,7 @@ function AdminApp() {
             {section === 'chapters' && 'Главы'}
             {section === 'story-nodes' && 'Story Nodes'}
             {section === 'minigame-profiles' && 'Мини-игры'}
+            {section === 'cascade' && 'Конструктор'}
           </h1>
 
           <nav className="admin-nav">
@@ -526,6 +530,13 @@ function AdminApp() {
               onClick={() => setSection('minigame-profiles')}
             >
               Мини-игры
+            </button>
+
+            <button
+              className={section === 'cascade' ? 'is-active' : ''}
+              onClick={() => setSection('cascade')}
+            >
+              Конструктор
             </button>
           </nav>
         </div>
@@ -605,6 +616,15 @@ function AdminApp() {
 
       {section === 'story-nodes' && (
         <StoryNodesSection
+          admin={admin}
+          canWrite={canWrite}
+          onError={setError}
+          onNotice={setNotice}
+        />
+      )}
+
+      {section === 'cascade' && (
+        <CascadeSection
           admin={admin}
           canWrite={canWrite}
           onError={setError}
