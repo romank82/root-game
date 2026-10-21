@@ -268,11 +268,21 @@ def _validate_references(
             detail="Указанная глава (chapter_id) не существует.",
         )
 
-    if story_node_id is not None and session.get(StoryNode, story_node_id) is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Указанный story_node_id не существует.",
-        )
+    if story_node_id is not None:
+        story_node = session.get(StoryNode, story_node_id)
+        if story_node is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Указанный story_node_id не существует.",
+            )
+        if story_node.chapter_id != chapter_id:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "StoryNode должен принадлежать той же главе, "
+                    "что и миссия."
+                ),
+            )
 
     if geo_zone_id is not None and session.get(GeoZone, geo_zone_id) is None:
         raise HTTPException(
@@ -341,6 +351,8 @@ def _validate_unlock_chain(
 
 def _validate_rewards(
     session: Session,
+    *,
+    chapter_id: str,
     rewards: list[AdminMissionRewardPayload],
 ) -> None:
     for reward in rewards:
@@ -386,12 +398,22 @@ def _validate_rewards(
                     detail="Награда story_node должна содержать story_node_id.",
                 )
 
-            if session.get(StoryNode, reward.story_node_id) is None:
+            story_node = session.get(StoryNode, reward.story_node_id)
+            if story_node is None:
                 raise HTTPException(
                     status_code=422,
                     detail=(
                         "Награда story_node ссылается на несуществующий "
                         "story_node_id."
+                    ),
+                )
+
+            if story_node.chapter_id != chapter_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "StoryNode награды должен принадлежать той же "
+                        "главе, что и миссия."
                     ),
                 )
 
@@ -596,7 +618,11 @@ def _validate_for_publish(
         )
         for reward in rewards
     ]
-    _validate_rewards(session, reward_payloads)
+    _validate_rewards(
+        session,
+        chapter_id=mission.chapter_id,
+        rewards=reward_payloads,
+    )
 
 
 def _replace_rewards(
@@ -711,7 +737,11 @@ def create_admin_mission(
             unlock_after_mission_id=payload.unlock_after_mission_id,
             chapter_id=payload.chapter_id,
         )
-        _validate_rewards(session, payload.rewards)
+        _validate_rewards(
+            session,
+            chapter_id=payload.chapter_id,
+            rewards=payload.rewards,
+        )
         _validate_mission_category(payload.mission_category)
 
         mission = Mission(
@@ -901,7 +931,11 @@ def update_admin_mission(
             changed_fields.append(audit_name)
 
         if "rewards" in updates:
-            _validate_rewards(session, payload.rewards or [])
+            _validate_rewards(
+                session,
+                chapter_id=mission.chapter_id,
+                rewards=payload.rewards or [],
+            )
             _replace_rewards(
                 session,
                 mission_id=mission.id,

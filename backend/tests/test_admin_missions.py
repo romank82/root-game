@@ -395,3 +395,88 @@ class AdminMissionsCategoryApiTests(unittest.TestCase):
         all_ids = [mission["id"] for mission in all_missions]
         self.assertIn(mission_one["id"], all_ids)
         self.assertIn(mission_two["id"], all_ids)
+
+    def test_create_mission_rejects_cross_chapter_story_node(self) -> None:
+        from app.models import Chapter, StoryNode
+
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+
+        # Вторая глава в том же сезоне — стиль test_list_missions_chapter_filter.
+        second_chapter_id = f"chapter-second-{uuid.uuid4().hex[:10]}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                Chapter(
+                    id=second_chapter_id,
+                    season_id=ids["season"],
+                    slug=f"chapter-second-{uuid.uuid4().hex[:10]}",
+                    title="Second chapter",
+                    description="Isolated integration fixture",
+                    status="published",
+                    sort_order=2,
+                )
+            )
+            session.flush()
+            story_node_id = f"story-node-{uuid.uuid4().hex[:10]}"
+            session.add(
+                StoryNode(
+                    id=story_node_id,
+                    chapter_id=ids["chapter"],
+                    slug=f"story-{uuid.uuid4().hex[:10]}",
+                    title="Cross-chapter story node",
+                    body="Story node of the first chapter",
+                    presentation_type="archive",
+                    content={},
+                    status="published",
+                    sort_order=1,
+                )
+            )
+
+        with self.assertRaises(HTTPException) as context:
+            create_admin_mission(
+                _create_payload(
+                    chapter_id=second_chapter_id,
+                    story_node_id=story_node_id,
+                ),
+                request=None,
+                admin=admin,
+            )
+
+        self.assertEqual(context.exception.status_code, 422)
+        self.assertIn(
+            "StoryNode должен принадлежать той же главе",
+            context.exception.detail,
+        )
+
+    def test_create_mission_accepts_same_chapter_story_node(self) -> None:
+        from app.models import StoryNode
+
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+
+        story_node_id = f"story-node-{uuid.uuid4().hex[:10]}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                StoryNode(
+                    id=story_node_id,
+                    chapter_id=ids["chapter"],
+                    slug=f"story-{uuid.uuid4().hex[:10]}",
+                    title="Same-chapter story node",
+                    body="Story node of the mission chapter",
+                    presentation_type="archive",
+                    content={},
+                    status="published",
+                    sort_order=1,
+                )
+            )
+
+        created = create_admin_mission(
+            _create_payload(
+                chapter_id=ids["chapter"],
+                story_node_id=story_node_id,
+            ),
+            request=None,
+            admin=admin,
+        )["mission"]
+
+        self.assertEqual(created["storyNodeId"], story_node_id)

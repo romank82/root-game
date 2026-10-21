@@ -233,7 +233,11 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             ar_object_id="ar-test",
         )
         validate_team_config.assert_called_once_with(mission.validation_config)
-        validate_rewards.assert_called_once_with(session, [])
+        validate_rewards.assert_called_once_with(
+            session,
+            chapter_id="chapter-test",
+            rewards=[],
+        )
 
     def test_publish_validation_rejects_invalid_team_configuration_safely(self) -> None:
         mission = SimpleNamespace(
@@ -321,7 +325,11 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
         )
-        validate_rewards.assert_called_once_with(session, [])
+        validate_rewards.assert_called_once_with(
+            session,
+            chapter_id="chapter-test",
+            rewards=[],
+        )
 
     def test_publish_validation_rejects_cipher_empty_combination(self) -> None:
         config = valid_cipher_validation_config()
@@ -451,7 +459,11 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
         )
-        validate_rewards.assert_called_once_with(session, [])
+        validate_rewards.assert_called_once_with(
+            session,
+            chapter_id="chapter-test",
+            rewards=[],
+        )
 
     def test_accepts_valid_segment_content(self) -> None:
         _validate_public_segment_content(valid_segment_content())
