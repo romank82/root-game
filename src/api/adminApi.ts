@@ -313,6 +313,8 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   { code: 'segments.read', title: 'Просмотр сегментов', category: 'content' },
   { code: 'seasons.read', title: 'Просмотр сезонов', category: 'content' },
   { code: 'seasons.manage', title: 'Управление сезонами', category: 'content' },
+  { code: 'chapters.read', title: 'Просмотр глав', category: 'content' },
+  { code: 'chapters.manage', title: 'Управление главами', category: 'content' },
   { code: 'key_rules.manage', title: 'Управление правилами ключей', category: 'economy' },
   { code: 'key_rules.read', title: 'Просмотр правил ключей', category: 'economy' },
   { code: 'reward_pools.manage', title: 'Управление пулами наград', category: 'economy' },
@@ -1242,3 +1244,99 @@ export async function archiveSeason(seasonId: string): Promise<AdminSeason> {
   const body = (await response.json()) as { season: AdminSeason }
   return body.season
 }
+
+export type AdminChapter = {
+  id: string
+  seasonId: string
+  slug: string
+  title: string
+  description: string | null
+  status: 'draft' | 'published' | 'archived'
+  sortOrder: number
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type CreateChapterPayload = {
+  season_id: string
+  slug?: string | null
+  title: string
+  description?: string | null
+  sort_order?: number
+}
+
+export type UpdateChapterPayload = {
+  season_id?: string | null
+  slug?: string | null
+  title?: string | null
+  description?: string | null
+  sort_order?: number | null
+}
+
+export async function listChapters(status?: string): Promise<AdminChapter[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : ''
+  const response = await adminFetch(`/api/v1/admin/chapters${query}`)
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { chapters: AdminChapter[] }
+  return body.chapters
+}
+
+export async function getChapter(chapterId: string): Promise<AdminChapter> {
+  const response = await adminFetch(
+    `/api/v1/admin/chapters/${encodeURIComponent(chapterId)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { chapter: AdminChapter }
+  return body.chapter
+}
+
+export async function createChapter(
+  payload: CreateChapterPayload,
+): Promise<AdminChapter> {
+  const response = await adminFetch('/api/v1/admin/chapters', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { chapter: AdminChapter }
+  return body.chapter
+}
+
+export async function updateChapter(
+  chapterId: string,
+  payload: UpdateChapterPayload,
+): Promise<AdminChapter> {
+  const response = await adminFetch(
+    `/api/v1/admin/chapters/${encodeURIComponent(chapterId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { chapter: AdminChapter }
+  return body.chapter
+}
+
+export async function publishChapter(chapterId: string): Promise<AdminChapter> {
+  const response = await adminFetch(
+    `/api/v1/admin/chapters/${encodeURIComponent(chapterId)}/publish`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { chapter: AdminChapter }
+  return body.chapter
+}
+
+export async function archiveChapter(chapterId: string): Promise<AdminChapter> {
+  const response = await adminFetch(
+    `/api/v1/admin/chapters/${encodeURIComponent(chapterId)}/archive`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { chapter: AdminChapter }
+  return body.chapter
+}
+
