@@ -110,6 +110,31 @@ def _get_or_create_root_wallet(session: Session, player_id: str) -> Wallet:
     return wallet
 
 
+def _get_root_wallet_for_update(session: Session, player_id: str) -> Wallet:
+    """ROOT-кошелёк с FOR UPDATE (PostgreSQL; SQLite — no-op).
+
+    Создаётся при отсутствии. Использовать только в мутирующих
+    путях (reward, entry-debit).
+    """
+    wallet = session.scalar(
+        select(Wallet).where(
+            Wallet.player_id == player_id,
+            Wallet.currency == ROOT_CURRENCY,
+        ).with_for_update()
+    )
+    if wallet is None:
+        wallet = Wallet(
+            id=_new_id("wallet"),
+            player_id=player_id,
+            currency=ROOT_CURRENCY,
+            available_balance=0,
+            locked_balance=0,
+        )
+        session.add(wallet)
+        session.flush()
+    return wallet
+
+
 def _get_published_runtime_policy(
     session: Session,
     mission_id: str,
@@ -668,7 +693,7 @@ def _award_mission_rewards(
         .order_by(MissionReward.sort_order, MissionReward.id)
     ).all()
 
-    wallet = _get_or_create_root_wallet(session, player_id)
+    wallet = _get_root_wallet_for_update(session, player_id)
     awarded_root = 0
     awarded_items: list[dict] = []
     unlocked_story_node_ids: list[str] = []
@@ -868,7 +893,7 @@ def _apply_entry_debit(
     policy (если есть) ищется только для audit-метаданных
     (policyId/policyVersion); правила списания приходят от вызывающего кода.
     """
-    wallet = _get_or_create_root_wallet(session, player_id)
+    wallet = _get_root_wallet_for_update(session, player_id)
 
     metadata: dict = {
         "missionId": mission.id,
