@@ -24,6 +24,7 @@ import { SettingsSection } from './components/admin/SettingsSection'
 import { AdminsSection } from './components/admin/AdminsSection'
 import { KeysSection } from './components/admin/KeysSection'
 import { ContentSection } from './components/admin/ContentSection'
+import { EconomySection } from './components/admin/EconomySection'
 import { MissionsSection } from './components/admin/MissionsSection'
 import { SeasonsSection } from './components/admin/SeasonsSection'
 import { ChaptersSection } from './components/admin/ChaptersSection'
@@ -49,6 +50,7 @@ function AdminApp() {
     | 'story-nodes'
     | 'minigame-profiles'
     | 'cascade'
+    | 'economy'
   >(
     () =>
       (localStorage.getItem('chimera-admin-section') as
@@ -61,7 +63,8 @@ function AdminApp() {
         | 'chapters'
         | 'story-nodes'
         | 'minigame-profiles'
-        | 'cascade') ?? 'missions',
+        | 'cascade'
+        | 'economy') ?? 'missions',
   )
   const [geoZones, setGeoZones] = useState<AdminGeoZone[]>([])
   // setGeoZonesError и setARObjectsError всё ещё используются эффектом загрузки миссий;
@@ -468,6 +471,7 @@ function AdminApp() {
             {section === 'story-nodes' && 'Story Nodes'}
             {section === 'minigame-profiles' && 'Мини-игры'}
             {section === 'cascade' && 'Конструктор'}
+            {section === 'economy' && 'Экономика'}
           </h1>
 
           <nav className="admin-nav">
@@ -502,6 +506,13 @@ function AdminApp() {
               onClick={() => setSection('keys')}
             >
               Ключи
+            </button>
+
+            <button
+              className={section === 'economy' ? 'is-active' : ''}
+              onClick={() => setSection('economy')}
+            >
+              Экономика
             </button>
 
             <button
@@ -593,6 +604,15 @@ function AdminApp() {
           onError={setError}
           onNotice={setNotice}
           keyItems={keyItems}
+        />
+      )}
+
+      {section === 'economy' && (
+        <EconomySection
+          admin={admin}
+          canWrite={canWrite}
+          onError={setError}
+          onNotice={setNotice}
         />
       )}
 

@@ -1464,4 +1464,53 @@ export async function archiveStoryNode(id: string): Promise<AdminStoryNode> {
   return body.story_node
 }
 
+export type AdminEconomyTransaction = {
+  id: string
+  walletId: string
+  playerId: string
+  playerDisplayName: string | null
+  amount: number
+  balanceAfter: number
+  transactionType: 'credit' | 'debit'
+  reason: string
+  referenceType: string | null
+  referenceId: string | null
+  createdAt: string | null
+}
+
+export type EconomyTransactionsFilters = {
+  playerId?: string
+  type?: 'credit' | 'debit'
+  from?: string
+  to?: string
+  limit?: number
+  offset?: number
+}
+
+export async function listEconomyTransactions(
+  filters: EconomyTransactionsFilters = {},
+): Promise<{
+  transactions: AdminEconomyTransaction[]
+  total: number
+  limit: number
+  offset: number
+}> {
+  const params = new URLSearchParams()
+  if (filters.playerId) params.set('player_id', filters.playerId)
+  if (filters.type) params.set('type', filters.type)
+  if (filters.from) params.set('from', filters.from)
+  if (filters.to) params.set('to', filters.to)
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) params.set('offset', String(filters.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(`/api/v1/admin/economy/transactions${query}`)
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    transactions: AdminEconomyTransaction[]
+    total: number
+    limit: number
+    offset: number
+  }
+  return body
+}
 
