@@ -51,7 +51,7 @@ export type AdminMissionPayload = {
   geo_zone_id?: string | null
   ar_object_id?: string | null
   minigame_profile_id?: string | null
-  slug: string
+  slug?: string
   mission_type: string
   mission_category?: string
   mission_layer?: string
@@ -736,7 +736,7 @@ export type AdminSegment = {
 
 export type CreateSegmentPayload = {
   chapter_id: string
-  slug: string
+  slug?: string
   title: string
   description?: string | null
   content?: Record<string, unknown>

@@ -420,7 +420,6 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     geo_zone_id: form.geoZoneId.trim() || null,
     ar_object_id: form.arObjectId.trim() || null,
     minigame_profile_id: form.minigameProfileId.trim() || null,
-    slug: form.slug.trim(),
     mission_type: form.missionType.trim(),
     mission_category: form.missionCategory,
     mission_layer: form.missionLayer,
@@ -839,8 +838,8 @@ export function MissionsSection({
     try {
       const payload = formToPayload(form)
 
-      if (!payload.chapter_id || !payload.slug || !payload.title) {
-        throw new Error('Заполните chapter ID, slug и название миссии.')
+      if (!payload.chapter_id || !payload.title) {
+        throw new Error('Заполните chapter ID и название миссии.')
       }
 
       const mission = selectedMission
@@ -1105,10 +1104,12 @@ export function MissionsSection({
             </label>
 
             <label>
-              Slug *
+              Slug (генерируется из названия)
               <input
                 value={form.slug}
                 disabled={!canWrite}
+                readOnly
+                placeholder="сгенерируется автоматически"
                 onChange={(event) =>
                   setForm({ ...form, slug: event.target.value })
                 }

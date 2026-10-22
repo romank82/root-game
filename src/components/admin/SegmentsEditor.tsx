@@ -180,10 +180,8 @@ export function SegmentsEditor({
 
   async function handleCreateSegment() {
     const title = segmentTitle.trim()
-    const slug = segmentSlug.trim()
     const chapterId = segmentChapterId.trim()
     if (title.length < 1) { setSegmentError('Название сегмента обязательно.'); return }
-    if (slug.length < 3) { setSegmentError('Slug минимум 3 символа.'); return }
     if (chapterId.length < 1) { setSegmentError('Chapter ID обязателен.'); return }
     let content: Record<string, unknown>
     try { content = parseSegmentContentJson() }
@@ -195,7 +193,6 @@ export function SegmentsEditor({
     try {
       const created = await createSegment({
         chapter_id: chapterId,
-        slug,
         title,
         description: segmentDescription.trim() || null,
         content,
@@ -217,10 +214,8 @@ export function SegmentsEditor({
     const s = selectedSegment()
     if (!s) return
     const title = segmentTitle.trim()
-    const slug = segmentSlug.trim()
     const chapterId = segmentChapterId.trim()
     if (title.length < 1) { setSegmentError('Название сегмента обязательно.'); return }
-    if (slug.length < 3) { setSegmentError('Slug минимум 3 символа.'); return }
     if (chapterId.length < 1) { setSegmentError('Chapter ID обязателен.'); return }
     let content: Record<string, unknown>
     try { content = parseSegmentContentJson() }
@@ -232,7 +227,6 @@ export function SegmentsEditor({
     try {
       const updated = await updateSegment(s.id, {
         chapter_id: chapterId,
-        slug,
         title,
         description: segmentDescription.trim() || null,
         content,
@@ -453,12 +447,14 @@ export function SegmentsEditor({
                 />
               </label>
               <label className="admin-field">
-                <span>Slug</span>
+                <span>Slug (генерируется из названия)</span>
                 <input
                   type="text"
                   value={segmentSlug}
                   onChange={(e) => setSegmentSlug(e.target.value)}
                   disabled={!canWrite}
+                  readOnly
+                  placeholder="сгенерируется автоматически"
                 />
               </label>
               <label className="admin-field">
