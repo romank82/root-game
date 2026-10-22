@@ -21,7 +21,6 @@ _lock_season). Archived — финальный и не изменяется (409
 
 from __future__ import annotations
 
-import re
 from typing import Any
 from uuid import uuid4
 
@@ -34,6 +33,7 @@ from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
 from app.models import AdminUser, Chapter, Season
+from app.slug_utils import _normalize_slug, _slugify_title
 
 router = APIRouter(prefix="/api/v1/admin/chapters", tags=["admin-chapters"])
 
@@ -42,20 +42,6 @@ CHAPTERS_MANAGE_PERMISSION = "chapters.manage"
 
 # В chapters.status нет DB CHECK — допустимые значения валидируются в коде.
 VALID_CHAPTER_STATUSES = frozenset({"draft", "published", "archived"})
-
-# Скопировано из admin_seasons.py / admin_segments.py (общий контракт slug).
-SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[a-z0-9-]{0,126}[a-z0-9])?$")
-
-# Транслитерация кириллицы для автогенерации slug из русскоязычного title.
-_CYRILLIC_TO_LATIN = {
-    ord("а"): "a", ord("б"): "b", ord("в"): "v", ord("г"): "g", ord("д"): "d",
-    ord("е"): "e", ord("ё"): "e", ord("ж"): "zh", ord("з"): "z", ord("и"): "i",
-    ord("й"): "y", ord("к"): "k", ord("л"): "l", ord("м"): "m", ord("н"): "n",
-    ord("о"): "o", ord("п"): "p", ord("р"): "r", ord("с"): "s", ord("т"): "t",
-    ord("у"): "u", ord("ф"): "f", ord("х"): "kh", ord("ц"): "ts", ord("ч"): "ch",
-    ord("ш"): "sh", ord("щ"): "sch", ord("ъ"): "", ord("ы"): "y", ord("ь"): "",
-    ord("э"): "e", ord("ю"): "yu", ord("я"): "ya",
-}
 
 
 class ChapterCreatePayload(BaseModel):
@@ -102,43 +88,6 @@ class ChapterResponse(BaseModel):
 def _new_id() -> str:
     return f"chapter-{uuid4().hex}"
 
-
-def _normalize_slug(value: str) -> str:
-    slug = value.strip().lower()
-
-    if not SLUG_PATTERN.fullmatch(slug):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "slug должен содержать строчные латинские буквы, цифры и дефисы; "
-                "длина — от 3 до 128 символов."
-            ),
-        )
-
-    return slug
-
-
-def _slugify_title(title: str) -> str:
-    """Генерирует валидный slug из title (транслитерация + дефисы)."""
-    candidate = title.lower().translate(_CYRILLIC_TO_LATIN)
-    candidate = re.sub(r"[^a-z0-9]+", "-", candidate).strip("-")
-
-    if not candidate:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Не удалось сгенерировать slug из title; передайте slug явно.",
-        )
-
-    try:
-        return _normalize_slug(candidate)
-    except HTTPException as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Из title не удалось сгенерировать корректный slug; "
-                "укажите slug явно."
-            ),
-        ) from exc
 
 
 def _normalize_title(value: str) -> str:
