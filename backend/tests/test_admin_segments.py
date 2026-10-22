@@ -288,6 +288,65 @@ class AdminSegmentsTests(unittest.TestCase):
         self.assertIn("segment-all-1", slug_set)
         self.assertIn("segment-all-2", slug_set)
 
+    def test_create_segment_without_slug_generates_from_title(self) -> None:
+        admin = self._make_admin()
+        self._grant(admin.id, SEGMENT_READ_PERMISSION)
+        self._grant(admin.id, SEGMENT_MANAGE_PERMISSION)
+
+        season = self._make_season(slug="seg-season-autoslug", status="published")
+        chapter_id = self._make_chapter(
+            season_id=season,
+            slug="chapter-autoslug",
+            title="Глава для автогенерации",
+        )
+
+        created = create_admin_segment(
+            payload=AdminSegmentCreatePayload(
+                chapter_id=chapter_id,
+                slug=None,
+                title="Тестовый сегмент",
+                sort_order=0,
+            ),
+            request=self._request(),
+            admin=admin,
+        )["segment"]
+
+        # "Тестовый сегмент" -> транслит "testovyy-segment", суффикс не нужен.
+        self.assertEqual(created["slug"], "testovyy-segment")
+
+    def test_create_segment_with_same_title_appends_suffix(self) -> None:
+        admin = self._make_admin()
+        self._grant(admin.id, SEGMENT_READ_PERMISSION)
+        self._grant(admin.id, SEGMENT_MANAGE_PERMISSION)
+
+        season = self._make_season(slug="seg-season-suffix", status="published")
+        chapter_id = self._make_chapter(
+            season_id=season,
+            slug="chapter-suffix",
+            title="Глава для суффиксов",
+        )
+
+        # Уникальный маркер в title — БД класса общая, изолируем от других тестов.
+        marker = uuid.uuid4().hex[:6]
+
+        def _create_with_title(title: str) -> dict:
+            return create_admin_segment(
+                payload=AdminSegmentCreatePayload(
+                    chapter_id=chapter_id,
+                    slug=None,
+                    title=title,
+                    sort_order=0,
+                ),
+                request=self._request(),
+                admin=admin,
+            )["segment"]
+
+        first = _create_with_title(f"Тест-сегмент-{marker}")
+        second = _create_with_title(f"Тест-сегмент-{marker}")
+
+        self.assertEqual(first["slug"], f"test-segment-{marker}")
+        self.assertEqual(second["slug"], f"test-segment-{marker}-2")
+
 
 if __name__ == "__main__":
     unittest.main()

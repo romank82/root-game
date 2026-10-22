@@ -480,3 +480,41 @@ class AdminMissionsCategoryApiTests(unittest.TestCase):
         )["mission"]
 
         self.assertEqual(created["storyNodeId"], story_node_id)
+
+    def test_create_mission_without_slug_generates_from_title(self) -> None:
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+
+        created = create_admin_mission(
+            _create_payload(
+                chapter_id=ids["chapter"],
+                slug=None,
+                title="Тестовая миссия",
+            ),
+            request=None,
+            admin=admin,
+        )["mission"]
+
+        # "Тестовая миссия" -> транслит "testovaya-missiya", суффикс не нужен.
+        self.assertEqual(created["slug"], "testovaya-missiya")
+
+    def test_create_mission_with_same_title_appends_suffix(self) -> None:
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+
+        def _create_with_title(title: str) -> dict:
+            return create_admin_mission(
+                _create_payload(
+                    chapter_id=ids["chapter"],
+                    slug=None,
+                    title=title,
+                ),
+                request=None,
+                admin=admin,
+            )["mission"]
+
+        first = _create_with_title("Транслит-миссия")
+        second = _create_with_title("Транслит-миссия")
+
+        self.assertEqual(first["slug"], "translit-missiya")
+        self.assertEqual(second["slug"], "translit-missiya-2")

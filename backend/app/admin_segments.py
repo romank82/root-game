@@ -14,7 +14,7 @@ from app.admin_audit import write_admin_audit
 from app.content_contract import PublicContentValidationError, validate_segment_content
 from app.db import SessionLocal
 from app.models import AdminUser, Chapter, Mission, Segment, SegmentMission
-from app.slug_utils import _normalize_slug
+from app.slug_utils import _normalize_slug, _slugify_title, unique_slug
 
 
 router = APIRouter(prefix="/api/v1/admin/segments", tags=["admin-segments"])
@@ -62,7 +62,7 @@ class AdminSegmentCreatePayload(AdminSegmentPayloadModel):
         max_length=64,
         alias="chapterId",
     )
-    slug: str = Field(min_length=3, max_length=128)
+    slug: str | None = Field(default=None, min_length=3, max_length=128)
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
     content: dict[str, Any] = Field(default_factory=dict)
@@ -435,10 +435,21 @@ def create_admin_segment(
     admin: AdminUser = Depends(require_permission(SEGMENT_MANAGE_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
-        slug = _normalize_slug(payload.slug)
         title = _normalize_required(payload.title, "title")
+        slug = (
+            _normalize_slug(payload.slug)
+            if payload.slug is not None
+            else _slugify_title(title)
+        )
 
-        if session.scalar(select(Segment.id).where(Segment.slug == slug)) is not None:
+        if payload.slug is None:
+            slug = unique_slug(
+                slug,
+                lambda s: session.scalar(
+                    select(Segment.id).where(Segment.slug == s)
+                ) is not None,
+            )
+        elif session.scalar(select(Segment.id).where(Segment.slug == slug)) is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Segment с таким slug уже существует.",
@@ -510,7 +521,7 @@ def update_admin_segment(
         changed_fields: list[str] = []
         link_summary: dict[str, int] | None = None
 
-        if "slug" in updates:
+        if "slug" in updates and updates["slug"] is not None:
             slug = _normalize_slug(updates["slug"])
             existing_id = session.scalar(
                 select(Segment.id).where(

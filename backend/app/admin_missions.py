@@ -29,7 +29,7 @@ from app.models import (
     MissionReward,
     StoryNode,
 )
-from app.slug_utils import _normalize_slug
+from app.slug_utils import _normalize_slug, _slugify_title, unique_slug
 
 
 router = APIRouter(prefix="/api/v1/admin/missions", tags=["admin-missions"])
@@ -105,7 +105,7 @@ class AdminMissionCreatePayload(BaseModel):
     geo_zone_id: str | None = Field(default=None, max_length=64)
     ar_object_id: str | None = Field(default=None, max_length=64)
     minigame_profile_id: str | None = Field(default=None, max_length=64)
-    slug: str = Field(min_length=3, max_length=128)
+    slug: str | None = Field(default=None, min_length=3, max_length=128)
     mission_type: str = Field(min_length=1, max_length=64)
     mission_category: str = Field(default="solo", min_length=1, max_length=32)
     mission_layer: str = Field(default="solo", min_length=1, max_length=32)
@@ -692,9 +692,21 @@ def create_admin_mission(
     admin: AdminUser = Depends(require_permission(MISSION_MANAGE_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
-        slug = _normalize_slug(payload.slug)
+        title = payload.title.strip()
+        slug = (
+            _normalize_slug(payload.slug)
+            if payload.slug is not None
+            else _slugify_title(title)
+        )
 
-        if session.scalar(select(Mission.id).where(Mission.slug == slug)):
+        if payload.slug is None:
+            slug = unique_slug(
+                slug,
+                lambda s: session.scalar(
+                    select(Mission.id).where(Mission.slug == s)
+                ) is not None,
+            )
+        elif session.scalar(select(Mission.id).where(Mission.slug == slug)):
             raise HTTPException(
                 status_code=409,
                 detail="Миссия с таким slug уже существует.",
@@ -747,7 +759,7 @@ def create_admin_mission(
             ),
             reentry_cooldown_seconds=payload.reentry_cooldown_seconds,
             unlock_after_mission_id=payload.unlock_after_mission_id or None,
-            title=payload.title.strip(),
+            title=title,
             description=payload.description.strip() if payload.description else None,
             content=payload.content,
             validation_config=payload.validation_config,
@@ -803,7 +815,7 @@ def update_admin_mission(
 
         changed_fields: list[str] = []
 
-        if "slug" in updates:
+        if "slug" in updates and updates["slug"] is not None:
             slug = _normalize_slug(updates["slug"])
             existing_id = session.scalar(
                 select(Mission.id).where(
