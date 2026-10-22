@@ -88,6 +88,7 @@ from app.admin_mission_runtime_policies import (
 from app.admin_system_settings import router as admin_system_settings_router
 from app.admin_players import router as admin_players_router
 from app.admin_player_wallet import router as admin_player_wallet_router
+from app.admin_economy import router as admin_economy_router
 from app.admin_player_inventory import router as admin_player_inventory_router
 from app.admin_player_mission import router as admin_player_mission_router
 from app.admin_player_restrictions import router as admin_player_restrictions_router
@@ -1190,6 +1191,7 @@ app.include_router(admin_mission_runtime_policies_missions_router)
 app.include_router(admin_system_settings_router)
 app.include_router(admin_players_router)
 app.include_router(admin_player_wallet_router)
+app.include_router(admin_economy_router)
 app.include_router(admin_player_inventory_router)
 app.include_router(admin_player_mission_router)
 app.include_router(admin_player_restrictions_router)
