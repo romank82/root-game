@@ -14,6 +14,9 @@ Endpoint-функция audit_balances вызывается напрямую с 
     и запись economy.audit в immutable admin_audit_log;
   - отсутствие права economy.read -> 403 (право проверяется зависимостью
     require_permission, поэтому тест дергает сам dependency).
+  - реестр транзакций (9.2) list_economy_transactions: список всех
+    операций, фильтр type=credit, фильтр player_id (все — по полной
+    схеме из миграций, включая индексы ec7a5b3f1984).
 """
 
 from __future__ import annotations
@@ -33,7 +36,11 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
 from app.admin_access import DIRECT_EXECUTION_MODE, require_permission
-from app.admin_economy import ECONOMY_READ_PERMISSION, audit_balances
+from app.admin_economy import (
+    ECONOMY_READ_PERMISSION,
+    audit_balances,
+    list_economy_transactions,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
@@ -288,3 +295,66 @@ class AdminEconomyTests(unittest.TestCase):
             dependency(admin=admin)
 
         self.assertEqual(context.exception.status_code, 403)
+
+    def test_transactions_lists_all(self) -> None:
+        """Реестр без фильтров возвращает все операции с данными игрока."""
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+
+        wallet_a = self._make_wallet()
+        self._make_transaction(wallet_a, 100, "credit", 100)
+        wallet_b = self._make_wallet()
+        self._make_transaction(wallet_b, 40, "debit", 40)
+
+        result = list_economy_transactions(admin=admin)
+        transactions = result["transactions"]
+
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(len(transactions), 2)
+        self.assertEqual(
+            {tx["transactionType"] for tx in transactions},
+            {"credit", "debit"},
+        )
+        self.assertEqual({tx["amount"] for tx in transactions}, {100, 40})
+        self.assertTrue(all(tx["playerDisplayName"] for tx in transactions))
+        self.assertTrue(all(tx["createdAt"] for tx in transactions))
+
+    def test_transactions_filters_by_type(self) -> None:
+        """Фильтр type=credit оставляет только credit-операции."""
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+
+        wallet_id = self._make_wallet()
+        self._make_transaction(wallet_id, 100, "credit", 100)
+        self._make_transaction(wallet_id, 40, "debit", 60)
+
+        result = list_economy_transactions(admin=admin, type="credit")
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(len(result["transactions"]), 1)
+        self.assertEqual(result["transactions"][0]["transactionType"], "credit")
+        self.assertEqual(result["transactions"][0]["amount"], 100)
+
+    def test_transactions_filters_by_player(self) -> None:
+        """Фильтр player_id возвращает операции только указанного игрока."""
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+
+        player1 = self._make_player()
+        wallet1 = self._make_wallet(player_id=player1)
+        self._make_transaction(wallet1, 100, "credit", 100)
+
+        player2 = self._make_player()
+        wallet2 = self._make_wallet(player_id=player2)
+        self._make_transaction(wallet2, 40, "debit", 40)
+
+        result = list_economy_transactions(admin=admin, player_id=player1)
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(len(result["transactions"]), 1)
+        self.assertEqual(result["transactions"][0]["playerId"], player1)
+        self.assertEqual(result["transactions"][0]["transactionType"], "credit")
+
+        # Контроль: без фильтра видны обе операции.
+        all_result = list_economy_transactions(admin=admin)
+        self.assertEqual(all_result["total"], 2)
