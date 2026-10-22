@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -14,6 +13,7 @@ from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
 from app.models import AdminUser, ARObject, GeoZone
+from app.slug_utils import _normalize_slug
 
 
 router = APIRouter(prefix="/api/v1/admin/ar-objects", tags=["admin-ar-objects"])
@@ -21,7 +21,6 @@ router = APIRouter(prefix="/api/v1/admin/ar-objects", tags=["admin-ar-objects"])
 AR_OBJECTS_READ_PERMISSION = "ar_objects.read"
 AR_OBJECTS_MANAGE_PERMISSION = "ar_objects.manage"
 VALID_AR_STATUSES = {"draft", "published", "archived"}
-SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[a-z0-9-]{0,126}[a-z0-9])?$")
 
 
 class AdminARObjectCreatePayload(BaseModel):
@@ -67,21 +66,6 @@ class AdminARObjectUpdatePayload(BaseModel):
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex}"
-
-
-def _normalize_slug(value: str) -> str:
-    slug = value.strip().lower()
-
-    if not SLUG_PATTERN.fullmatch(slug):
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "slug должен содержать строчные латинские буквы, цифры "
-                "и дефисы; длина — от 3 до 128 символов."
-            ),
-        )
-
-    return slug
 
 
 def _validate_geo_zone_exists(session: Session, geo_zone_id: str) -> None:

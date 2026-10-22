@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 from uuid import uuid4
 
@@ -13,6 +12,7 @@ from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
 from app.models import AdminUser, Item, RewardPool, RewardPoolEntry, StoryNode
+from app.slug_utils import _normalize_slug
 
 
 router = APIRouter(prefix="/api/v1/admin/reward-pools", tags=["admin-reward-pools"])
@@ -21,7 +21,6 @@ REWARD_POOLS_READ_PERMISSION = "reward_pools.read"
 REWARD_POOLS_MANAGE_PERMISSION = "reward_pools.manage"
 VALID_POOL_STATUSES = {"draft", "published"}
 VALID_REWARD_TYPES = {"currency", "item", "story_node"}
-SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[a-z0-9-]{0,126}[a-z0-9])?$")
 
 
 class AdminRewardPoolEntryPayload(BaseModel):
@@ -53,21 +52,6 @@ class AdminRewardPoolUpdatePayload(BaseModel):
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex}"
-
-
-def _normalize_slug(value: str) -> str:
-    slug = value.strip().lower()
-
-    if not SLUG_PATTERN.fullmatch(slug):
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "slug должен содержать строчные латинские буквы, цифры "
-                "и дефисы; длина — от 3 до 128 символов."
-            ),
-        )
-
-    return slug
 
 
 def _validate_entries(

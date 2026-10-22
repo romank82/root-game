@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -14,6 +13,7 @@ from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
 from app.models import AdminUser, GeoZone
+from app.slug_utils import _normalize_slug
 
 
 router = APIRouter(prefix="/api/v1/admin/geo-zones", tags=["admin-geo-zones"])
@@ -22,7 +22,6 @@ GEO_ZONES_READ_PERMISSION = "geo_zones.read"
 GEO_ZONES_MANAGE_PERMISSION = "geo_zones.manage"
 VALID_ZONE_TYPES = {"radius", "polygon", "poi", "event"}
 VALID_ZONE_STATUSES = {"draft", "published", "archived"}
-SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[a-z0-9-]{0,126}[a-z0-9])?$")
 
 
 class AdminGeoZoneCreatePayload(BaseModel):
@@ -66,21 +65,6 @@ class AdminGeoZoneUpdatePayload(BaseModel):
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex}"
-
-
-def _normalize_slug(value: str) -> str:
-    slug = value.strip().lower()
-
-    if not SLUG_PATTERN.fullmatch(slug):
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "slug должен содержать строчные латинские буквы, цифры "
-                "и дефисы; длина — от 3 до 128 символов."
-            ),
-        )
-
-    return slug
 
 
 def _resolve_effective(
