@@ -853,7 +853,7 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - Fallback offer_id из миссии — остаётся долгом (входил в состав 8.20, не реализован).
 - per-key цена — реализована в 8.20 (долг из 8.16 закрыт).
 
-### Спринт 8.21–8.26. Иерархия контента — ⏳ в работе (8.21/8.22/8.23/8.23.1/8.23.3/8.23.4/8.23.5/8.24/8.26 закрыты, 8.25 открыт; 8.23.2 — в очереди)
+### Спринт 8.21–8.26. Иерархия контента — ⏳ в работе (8.21/8.22/8.23/8.23.1/8.23.3/8.23.4/8.23.5/8.24/8.25.1/8.26 закрыты, 8.25 открыт; 8.23.2 — в очереди)
 
 **Зачем:** админ управляет иерархией через каскадный выбор (Сезон → Глава → Сегмент → Миссия), а не вбивает ID вручную. Модель уже готова (Season → Chapter → {Mission, Segment, StoryNode}, FK есть). Миграции не нужны.
 
@@ -896,6 +896,7 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - `MinigameProfiles` — инлайн в `AdminApp` → долг 8.19.
 - 8.22: запрет PATCH draft-главы в archived-сезон → мини-долг.
 - 8.25 ❌ Связь 1:1: миссия не может существовать без места в иерархии (валидация: либо chapter_id+segment_id, либо командная/индивидуальная с unlock_after). Правило, не сущность.
+- 8.25.1 ✅ Slug: вынос хелперов + автогенерация для Segment/Mission + read-only на фронте — закрыт (2026-10-22). Реализовано: (1) вынос SLUG_PATTERN/_normalize_slug/_slugify_title в backend/app/slug_utils.py из 8 копий (b700fce, 5455e8d, a4e3723); (2) автогенерация slug из title для Segment/Mission + unique_slug (суффикс -2/-3 при коллизии) (4014a62); (3) фронт: slug read-only в 5 секциях (Seasons/Chapters/Segments/Missions/StoryNodes), не отправляется в payload (22af10f, 8272cb3); типы выровнены (slug?: string в CreateSegmentPayload и AdminMissionPayload). Существующие ручные slug'и не меняются, новые генерируются.
 - 8.26 ✅ StoryNode CRUD — закрыт (2026-10-21).
   - Backend: `admin_story_nodes.py` (CRUD list/get/create/update/publish/archive; chapter_id — FK валидация; строгая иерархия: publish только при published главе, повторный publish → 422, archived → 409; права `story_nodes.read/manage`; audit; slug).
   - Frontend: `StoryNodesSection.tsx` (вкладка «Story Nodes», chapter_id — dropdown; поля: title, slug, body (textarea), presentation_type (input), content (JSON textarea), sort_order), `adminApi.ts` (типы + 6 функций + PERMISSION_CATALOG).
