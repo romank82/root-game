@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -15,6 +14,7 @@ from app.admin_audit import write_admin_audit
 from app.content_contract import PublicContentValidationError, validate_segment_content
 from app.db import SessionLocal
 from app.models import AdminUser, Chapter, Mission, Segment, SegmentMission
+from app.slug_utils import _normalize_slug
 
 
 router = APIRouter(prefix="/api/v1/admin/segments", tags=["admin-segments"])
@@ -23,7 +23,6 @@ SEGMENT_READ_PERMISSION = "segments.read"
 SEGMENT_MANAGE_PERMISSION = "segments.manage"
 ACTIVE_LINK_STATUS = "active"
 ARCHIVED_LINK_STATUS = "archived"
-SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[a-z0-9-]{0,126}[a-z0-9])?$")
 
 
 def _validate_public_segment_content(content: Any) -> None:
@@ -108,21 +107,6 @@ def _new_id(prefix: str) -> str:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _normalize_slug(value: str) -> str:
-    slug = value.strip().lower()
-
-    if not SLUG_PATTERN.fullmatch(slug):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "slug должен содержать строчные латинские буквы, цифры и дефисы; "
-                "длина — от 3 до 128 символов."
-            ),
-        )
-
-    return slug
 
 
 def _normalize_required(value: str, field_name: str) -> str:
