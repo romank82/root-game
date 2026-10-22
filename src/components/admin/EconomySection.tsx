@@ -54,13 +54,13 @@ export function EconomySection({
 
   // Черновики фильтров — применяются только по кнопке «Применить»,
   // чтобы не дёргать запрос на каждый введённый символ.
-  const [draftPlayerId, setDraftPlayerId] = useState('')
+  const [draftSearch, setDraftSearch] = useState('')
   const [draftType, setDraftType] = useState<'' | 'credit' | 'debit'>('')
   const [draftFrom, setDraftFrom] = useState('')
   const [draftTo, setDraftTo] = useState('')
 
   // Применённые фильтры + пагинация.
-  const [playerId, setPlayerId] = useState('')
+  const [search, setSearch] = useState('')
   const [type, setType] = useState<'' | 'credit' | 'debit'>('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -72,7 +72,7 @@ export function EconomySection({
     setLoading(true)
 
     listEconomyTransactions({
-      playerId: playerId.trim() || undefined,
+      search: search.trim() || undefined,
       type: type || undefined,
       from: from || undefined,
       to: to || undefined,
@@ -102,10 +102,10 @@ export function EconomySection({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerId, type, from, to, offset])
+  }, [search, type, from, to, offset])
 
   function applyFilters() {
-    setPlayerId(draftPlayerId)
+    setSearch(draftSearch)
     setType(draftType)
     setFrom(draftFrom)
     setTo(draftTo)
@@ -134,11 +134,11 @@ export function EconomySection({
         }}
       >
         <label style={{ flex: '1 1 180px' }}>
-          Player ID
+          Игрок (ID или имя)
           <input
             type="text"
-            value={draftPlayerId}
-            onChange={(event) => setDraftPlayerId(event.target.value)}
+            value={draftSearch}
+            onChange={(event) => setDraftSearch(event.target.value)}
           />
         </label>
         <label style={{ flex: '0 0 140px' }}>

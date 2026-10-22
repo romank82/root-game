@@ -152,7 +152,7 @@ class AdminEconomyTests(unittest.TestCase):
                 )
             )
 
-    def _make_player(self) -> str:
+    def _make_player(self, display_name: str = "Economy audit player") -> str:
         from app.models import GamePlayer
 
         player_id = f"player-{uuid.uuid4().hex}"
@@ -160,7 +160,7 @@ class AdminEconomyTests(unittest.TestCase):
             session.add(
                 GamePlayer(
                     id=player_id,
-                    display_name="Economy audit player",
+                    display_name=display_name,
                     auth_provider="test",
                     external_id=f"test-{uuid.uuid4().hex}",
                     status="active",
@@ -358,3 +358,44 @@ class AdminEconomyTests(unittest.TestCase):
         # Контроль: без фильтра видны обе операции.
         all_result = list_economy_transactions(admin=admin)
         self.assertEqual(all_result["total"], 2)
+
+    def test_transactions_filters_by_search(self) -> None:
+        """search: по подстроке display_name (регистронезависимо) и по player_id.
+
+        display_name на латинице («Roman»/«Other»): SQLite lower() не
+        нормализует кириллицу, а LIKE по кириллице байтово регистрозависим —
+        тест обязан оставаться зелёным на SQLite (dev) и PostgreSQL (прод).
+        """
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+
+        player1 = self._make_player(display_name="Roman")
+        wallet1 = self._make_wallet(player_id=player1)
+        self._make_transaction(wallet1, 100, "credit", 100)
+
+        player2 = self._make_player(display_name="Other")
+        wallet2 = self._make_wallet(player_id=player2)
+        self._make_transaction(wallet2, 40, "debit", 40)
+
+        # По подстроке display_name — только «Roman».
+        result = list_economy_transactions(admin=admin, search="Roman")
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(len(result["transactions"]), 1)
+        self.assertEqual(result["transactions"][0]["playerId"], player1)
+        self.assertEqual(result["transactions"][0]["playerDisplayName"], "Roman")
+        self.assertEqual(result["transactions"][0]["transactionType"], "credit")
+
+        # Регистронезависимость: lower-запрос находит «Roman».
+        lower_result = list_economy_transactions(admin=admin, search="roman")
+        self.assertEqual(lower_result["total"], 1)
+        self.assertEqual(lower_result["transactions"][0]["playerId"], player1)
+
+        # По player_id (uuid) — точное равенство не сломано.
+        id_result = list_economy_transactions(admin=admin, search=player1)
+        self.assertEqual(id_result["total"], 1)
+        self.assertEqual(id_result["transactions"][0]["playerId"], player1)
+
+        # Контроль: «Other» не попадает в фильтр по «Roman».
+        other_result = list_economy_transactions(admin=admin, search="Other")
+        self.assertEqual(other_result["total"], 1)
+        self.assertEqual(other_result["transactions"][0]["playerId"], player2)

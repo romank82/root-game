@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 
 from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
@@ -116,6 +116,7 @@ def list_economy_transactions(
     type: str | None = None,
     from_: Annotated[str | None, Query(alias="from")] = None,
     to: str | None = None,
+    search: str | None = None,
     limit: int = 50,
     offset: int = 0,
     admin: AdminUser = Depends(require_permission(ECONOMY_READ_PERMISSION)),
@@ -124,6 +125,9 @@ def list_economy_transactions(
 
     Фильтры:
       - player_id — транзакции конкретного игрока (join через Wallet);
+      - search — поиск по display_name (регистронезависимая подстрока,
+        func.lower + like, работает на PostgreSQL и SQLite) ИЛИ точный
+        player_id; display_name не уникален — вернутся все совпавшие;
       - type — только "credit" или "debit" (иначе 422);
       - from/to — диапазон created_at, ISO 8601 (иначе 422);
       - limit (1..200) / offset — пагинация.
@@ -139,6 +143,19 @@ def list_economy_transactions(
         # ORM relationship() на Wallet/WalletTransaction нет — join вручную.
         if player_id:
             query = query.where(Wallet.player_id == player_id)
+
+        if search:
+            search_value = search.strip()
+            search_lower = search_value.lower()
+            if search_lower:
+                query = query.where(
+                    or_(
+                        Wallet.player_id == search_value,
+                        func.lower(GamePlayer.display_name).like(
+                            f"%{search_lower}%"
+                        ),
+                    )
+                )
 
         if type is not None:
             if type not in ("credit", "debit"):

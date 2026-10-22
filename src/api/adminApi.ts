@@ -1480,6 +1480,7 @@ export type AdminEconomyTransaction = {
 
 export type EconomyTransactionsFilters = {
   playerId?: string
+  search?: string
   type?: 'credit' | 'debit'
   from?: string
   to?: string
@@ -1497,6 +1498,7 @@ export async function listEconomyTransactions(
 }> {
   const params = new URLSearchParams()
   if (filters.playerId) params.set('player_id', filters.playerId)
+  if (filters.search) params.set('search', filters.search)
   if (filters.type) params.set('type', filters.type)
   if (filters.from) params.set('from', filters.from)
   if (filters.to) params.set('to', filters.to)
