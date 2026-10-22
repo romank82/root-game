@@ -208,6 +208,7 @@ export function SegmentsEditor({
       setSelectedSegmentId(created.id)
       setShowCreateSegment(false)
       setSegmentNotice('Сегмент создан.')
+      await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setSavingSegment(false) }
   }
@@ -242,6 +243,7 @@ export function SegmentsEditor({
       })
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       setSegmentNotice('Сохранено.')
+      await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setSavingSegment(false) }
   }
@@ -254,6 +256,7 @@ export function SegmentsEditor({
       const updated = await publishSegment(s.id)
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       setSegmentNotice('Сегмент опубликован.')
+      await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setPublishingSegment(false) }
   }
@@ -266,6 +269,7 @@ export function SegmentsEditor({
       const updated = await unpublishSegment(s.id)
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       setSegmentNotice('Сегмент снят с публикации.')
+      await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setPublishingSegment(false) }
   }
@@ -278,8 +282,18 @@ export function SegmentsEditor({
       const updated = await archiveSegment(s.id)
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       setSegmentNotice('Сегмент архивирован.')
+      await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setPublishingSegment(false) }
+  }
+
+  async function reloadSegments() {
+    try {
+      const data = await listSegments()
+      setSegments(data)
+    } catch (err) {
+      setSegmentsError((err as Error).message)
+    }
   }
 
   function addSegmentMissionLink() {
