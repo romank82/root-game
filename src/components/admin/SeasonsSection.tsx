@@ -106,7 +106,6 @@ export function SeasonsSection({
     setSavingSeasonNotice(null)
     try {
       const created = await createSeason({
-        slug: seasonSlug.trim() === '' ? undefined : seasonSlug.trim(),
         title,
         description:
           seasonDescription.trim() === '' ? undefined : seasonDescription.trim(),
@@ -140,7 +139,6 @@ export function SeasonsSection({
     setSavingSeasonNotice(null)
     try {
       const updated = await updateSeason(season.id, {
-        slug: seasonSlug.trim() === '' ? null : seasonSlug.trim(),
         title,
         description:
           seasonDescription.trim() === '' ? null : seasonDescription.trim(),
@@ -290,12 +288,14 @@ export function SeasonsSection({
               </label>
 
               <label className="admin-span-2">
-                Slug (пусто — сгенерируется из названия)
+                Slug (генерируется из названия)
                 <input
                   type="text"
                   value={seasonSlug}
                   onChange={(e) => setSeasonSlug(e.target.value)}
                   disabled={!canWrite || savingSeason}
+                  readOnly
+                  placeholder="сгенерируется автоматически"
                   maxLength={128}
                 />
               </label>

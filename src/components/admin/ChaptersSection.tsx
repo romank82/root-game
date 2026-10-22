@@ -128,7 +128,6 @@ export function ChaptersSection({
     try {
       const created = await createChapter({
         season_id: seasonId,
-        slug: chapterSlug.trim() === '' ? undefined : chapterSlug.trim(),
         title,
         description:
           chapterDescription.trim() === '' ? undefined : chapterDescription.trim(),
@@ -168,7 +167,6 @@ export function ChaptersSection({
     try {
       const updated = await updateChapter(chapter.id, {
         season_id: seasonId,
-        slug: chapterSlug.trim() === '' ? null : chapterSlug.trim(),
         title,
         description:
           chapterDescription.trim() === '' ? null : chapterDescription.trim(),
@@ -339,12 +337,14 @@ export function ChaptersSection({
               </label>
 
               <label className="admin-span-2">
-                Slug (пусто — сгенерируется из названия)
+                Slug (генерируется из названия)
                 <input
                   type="text"
                   value={chapterSlug}
                   onChange={(e) => setChapterSlug(e.target.value)}
                   disabled={!canWrite || savingChapter}
+                  readOnly
+                  placeholder="сгенерируется автоматически"
                   maxLength={128}
                 />
               </label>

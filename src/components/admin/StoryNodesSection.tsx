@@ -180,7 +180,6 @@ export function StoryNodesSection({
     try {
       const created = await createStoryNode({
         chapter_id: chapterId,
-        slug: storyNodeSlug.trim() === '' ? undefined : storyNodeSlug.trim(),
         title,
         body,
         presentation_type: presentationType,
@@ -233,7 +232,6 @@ export function StoryNodesSection({
     try {
       const updated = await updateStoryNode(node.id, {
         chapter_id: chapterId,
-        slug: storyNodeSlug.trim() === '' ? null : storyNodeSlug.trim(),
         title,
         body,
         presentation_type: presentationType,
@@ -409,12 +407,14 @@ async function handlePublishStoryNode() {
               </label>
 
               <label className="admin-span-2">
-                Slug (пусто — сгенерируется из названия)
+                Slug (генерируется из названия)
                 <input
                   type="text"
                   value={storyNodeSlug}
                   onChange={(e) => setStoryNodeSlug(e.target.value)}
                   disabled={!canWrite || savingStoryNode}
+                  readOnly
+                  placeholder="сгенерируется автоматически"
                   maxLength={128}
                 />
               </label>
