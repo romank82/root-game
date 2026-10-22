@@ -916,7 +916,6 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - Сегмент test-segment-02: content не соответствует контракту — проверить.
 - Покупка прохождения за ROOT (если игрок не может пройти сюжетную) — отложено.
 - Лог ошибок (сбор ошибок приложения: middleware, AppError, CorrelationID, админ-раздел «Ошибки и события») — Этап 13.4/13.5; отдельным долгом не записан. При создании спринта 8.27+ — включить в него.
-- Row-lock в mission_engine._get_or_create_root_wallet (mission_engine.py:91-110): чтение кошелька без FOR UPDATE — риск lost-update при параллельных accept/reward (найден разведкой 23-A, B6). Сверка 9.1 его обнаружит (если случится), но фикс — отдельно: добавить with_for_update() в _get_or_create_root_wallet.
 
 ### Спринт 8.6 — Content UX (закрыт 2026-10-14)
 
@@ -975,6 +974,8 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - **Проверка**: искусственное расхождение → отчёт в админке.
 - **Зависит от**: —
 - **Риск**: низкий
+
+### Шаг 9.1.1 ✅ Row-lock кошелька в mission_engine — закрыт (2026-10-22). Добавлена функция _get_root_wallet_for_update (with_for_update) в mission_engine.py; используется в _award_mission_rewards и _apply_entry_debit (мутирующие пути). Bootstrap — без лока (read-only). На PostgreSQL — защита от lost-update; SQLite — no-op (тесты зелёные). Коммит e616fda. Регрессия: 81/81 (mission) + 52/52 (shop/fallback).
 
 ### Шаг 9.2: Реестр финансовых операций в админке
 - **Что**: страница просмотра всех проводок с фильтрами.
