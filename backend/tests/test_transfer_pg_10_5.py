@@ -1,13 +1,15 @@
-"""Этап 10.5-a — PG-тесты перевода ROOT (transfer_service.transfer_root).
+"""Этап 10.5-a + газ 10.4-i — PG-тесты перевода ROOT (transfer_service).
 
-Сервис перевода (10.5-a): атомарный debit/credit, лимиты из CMS, порог
-earned (только mission_reward-кредиты), daily-лимит (UTC-сутки),
-идемпотентность по (from_player_id, request_id), детерминированная
-блокировка двух кошельков (sorted по player_id), transfer_restricted/
-blocked/suspended. Инфраструктура — по образцу test_economy_pg_9_3_1:
-чистая PG-схема через alembic upgrade head на chimera_test (порт 5433),
-SessionLocal патчится на PG; без PG — unittest.skipTest (локальный
-SQLite-прогон не ломается).
+Сервис перевода: атомарный debit/credit, лимиты из CMS, порог earned
+(только mission_reward-кредиты), daily-лимит (UTC-сутки), идемпотентность
+по (from_player_id, request_id), детерминированная блокировка двух
+кошельков (sorted по player_id), transfer_restricted/blocked/suspended.
+С 10.4-i за перевод списывается газ: fee = amount * percent / 100
+(economy.gas_fee_percent, по умолчанию 1), атомарно в той же транзакции;
+при percent=0 газ не трогается. Инфраструктура — по образцу
+test_economy_pg_9_3_1: чистая PG-схема через alembic upgrade head на
+chimera_test (порт 5433), SessionLocal патчится на PG; без PG —
+unittest.skipTest (локальный SQLite-прогон не ломается).
 
 Покрывает:
   1. test_transfer_success — успешный перевод: балансы, ledger, PlayerTransfer;
@@ -15,7 +17,10 @@ SQLite-прогон не ломается).
   3. test_transfer_errors — 422/404/403/409 + ROLLBACK (баланс не меняется);
   4. test_transfer_daily_limit — 5x1000 при daily=5000, 6-й -> 429;
   5. test_transfer_parallel_no_overspend — 2 потока с одного кошелька,
-     FOR UPDATE сериализует, без ухода в минус, ledger сходится.
+     FOR UPDATE сериализует, без ухода в минус, ledger сходится;
+  6. test_transfer_insufficient_gas — газ < fee -> 402, ROOT/газ откаты;
+  7. test_transfer_deducts_gas — fee=1% списана газом (debit
+     transfer_fee_gas) атомарно с ROOT-переводом.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import sys
 import threading
 import unittest
 import uuid
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -49,6 +55,8 @@ TRANSFER_MIN_KEY = "economy.transfer_min_amount"
 TRANSFER_MAX_KEY = "economy.transfer_max_amount"
 DAILY_TRANSFER_LIMIT_KEY = "economy.daily_transfer_limit"
 TRANSFER_MINIMUM_EARNED_ROOT_KEY = "economy.transfer_minimum_earned_root"
+GAS_FEE_PERCENT_KEY = "economy.gas_fee_percent"
+TRANSFER_FEE_GAS_REFERENCE_TYPE = "transfer_fee_gas"
 
 
 def _pg_available() -> bool:
@@ -212,6 +220,7 @@ class TransferPg105Tests(unittest.TestCase):
             TRANSFER_MAX_KEY: 10000,
             DAILY_TRANSFER_LIMIT_KEY: 50000,
             TRANSFER_MINIMUM_EARNED_ROOT_KEY: 50,
+            GAS_FEE_PERCENT_KEY: 1,
         }
         if overrides:
             defaults.update(overrides)
@@ -247,6 +256,55 @@ class TransferPg105Tests(unittest.TestCase):
             )
             return wallet.available_balance if wallet is not None else 0
 
+    def _seed_gas_wallet(
+        self, session, player_id: str, balance: int | Decimal = 1000
+    ) -> str:
+        """Газовый кошелёк (10.4-i): баланс + seed credit-проводка.
+
+        balance=0 — только кошелёк без ledger-проводки (кредит на 0 нарушил
+        бы ck_gas_transactions_amount_positive). reference_type="test_seed"
+        — газовый ledger не засчитывается в earned (mission_reward).
+        """
+        from app.models import GasTransaction, GasWallet
+
+        gas_wallet_id = f"gas-wallet-{uuid.uuid4().hex}"
+        decimal_balance = Decimal(balance)
+        session.add(
+            GasWallet(
+                id=gas_wallet_id,
+                player_id=player_id,
+                balance=decimal_balance,
+            )
+        )
+        session.flush()  # FK: gas_transactions.gas_wallet_id -> gas_wallets
+        if decimal_balance > 0:
+            session.add(
+                GasTransaction(
+                    id=f"gas-transaction-{uuid.uuid4().hex}",
+                    gas_wallet_id=gas_wallet_id,
+                    amount=decimal_balance,
+                    balance_after=decimal_balance,
+                    transaction_type="credit",
+                    reason="PG 10.5-i gas seed",
+                    reference_type="test_seed",
+                    reference_id=f"gas-seed-{uuid.uuid4().hex}",
+                    metadata_json={},
+                )
+            )
+        return gas_wallet_id
+
+    def _gas_balance(self, player_id: str) -> Decimal:
+        """Баланс газа игрока (0, если кошелька нет)."""
+        from app.models import GasWallet
+
+        with self.SessionLocal() as session:
+            gas_wallet = session.scalar(
+                select(GasWallet).where(GasWallet.player_id == player_id)
+            )
+            return (
+                gas_wallet.balance if gas_wallet is not None else Decimal("0")
+            )
+
 
     # ---- Тесты ------------------------------------------------------------
 
@@ -259,6 +317,7 @@ class TransferPg105Tests(unittest.TestCase):
             p1 = self._make_player(session, "sender")
             p2 = self._make_player(session, "recipient")
             w1 = self._seed_wallet(session, p1, 1000)  # earned=1000
+            self._seed_gas_wallet(session, p1)  # газ: fee=100*1%=1
             w2 = self._seed_wallet(session, p2, 500)
 
             result = transfer_root(session, p1, p2, 100, "req-1")
@@ -304,6 +363,7 @@ class TransferPg105Tests(unittest.TestCase):
         # Коммит произошёл (SessionLocal.begin) — проверяем пост-фактум.
         self.assertEqual(self._root_balance(p1), 900)
         self.assertEqual(self._root_balance(p2), 600)
+        self.assertEqual(self._gas_balance(p1), 999)  # 1000 - 100*1%
 
     def test_transfer_idempotent(self) -> None:
         """Повторный request_id — тот же transferId, без двойного списания."""
@@ -314,6 +374,7 @@ class TransferPg105Tests(unittest.TestCase):
             p1 = self._make_player(session, "sender")
             p2 = self._make_player(session, "recipient")
             w1 = self._seed_wallet(session, p1, 1000)
+            self._seed_gas_wallet(session, p1)  # газ: повторный вызов не спишет
             w2 = self._seed_wallet(session, p2, 500)
             first = transfer_root(session, p1, p2, 100, "req-1")
 
@@ -354,6 +415,7 @@ class TransferPg105Tests(unittest.TestCase):
         self.assertEqual(pt_count, 1)
         self.assertEqual(debit, 1)
         self.assertEqual(credit, 1)
+        self.assertEqual(self._gas_balance(p1), 999)  # списали один раз
 
 
     def test_transfer_errors(self) -> None:
@@ -366,6 +428,7 @@ class TransferPg105Tests(unittest.TestCase):
         with self.SessionLocal.begin() as session:
             p_self = self._make_player(session, "self")
             self._seed_wallet(session, p_self, 1000)
+            self._seed_gas_wallet(session, p_self)
         with self.SessionLocal.begin() as session:
             with self.assertRaises(MissionEngineError) as ctx:
                 transfer_root(session, p_self, p_self, 100, "req-self")
@@ -376,6 +439,7 @@ class TransferPg105Tests(unittest.TestCase):
         with self.SessionLocal.begin() as session:
             p_nf = self._make_player(session, "nf-sender")
             self._seed_wallet(session, p_nf, 1000)
+            self._seed_gas_wallet(session, p_nf)
         with self.SessionLocal.begin() as session:
             with self.assertRaises(MissionEngineError) as ctx:
                 transfer_root(session, p_nf, "no-such-player", 100, "req-nf")
@@ -386,6 +450,7 @@ class TransferPg105Tests(unittest.TestCase):
         with self.SessionLocal.begin() as session:
             p_blk = self._make_player(session, "blk-sender")
             self._seed_wallet(session, p_blk, 1000)
+            self._seed_gas_wallet(session, p_blk)
             p_blocked = self._make_player(session, "blk-recipient", status="blocked")
             self._seed_wallet(session, p_blocked, 0)
         with self.SessionLocal.begin() as session:
@@ -411,6 +476,7 @@ class TransferPg105Tests(unittest.TestCase):
                 )
             p_tr = self._make_player(session, "restricted-sender")
             self._seed_wallet(session, p_tr, 1000)
+            self._seed_gas_wallet(session, p_tr)
             p_tr_r = self._make_player(session, "restricted-recipient")
             self._seed_wallet(session, p_tr_r, 0)
             session.add(
@@ -434,6 +500,7 @@ class TransferPg105Tests(unittest.TestCase):
             self._ensure_cms_settings(session)
             p_mm = self._make_player(session, "minmax-sender")
             self._seed_wallet(session, p_mm, 1000)
+            self._seed_gas_wallet(session, p_mm)
             p_mm_r = self._make_player(session, "minmax-recipient")
             self._seed_wallet(session, p_mm_r, 0)
         with self.SessionLocal.begin() as session:
@@ -451,6 +518,7 @@ class TransferPg105Tests(unittest.TestCase):
             self._ensure_cms_settings(session)
             p_er = self._make_player(session, "earned-sender")
             self._seed_wallet(session, p_er, 10, reference_type="test_seed")
+            self._seed_gas_wallet(session, p_er)
             p_er_r = self._make_player(session, "earned-recipient")
             self._seed_wallet(session, p_er_r, 0)
         with self.SessionLocal.begin() as session:
@@ -464,6 +532,7 @@ class TransferPg105Tests(unittest.TestCase):
             self._ensure_cms_settings(session)
             p_bs = self._make_player(session, "balshort-sender")
             self._seed_wallet(session, p_bs, 100)
+            self._seed_gas_wallet(session, p_bs)
             p_bs_r = self._make_player(session, "balshort-recipient")
             self._seed_wallet(session, p_bs_r, 0)
         with self.SessionLocal.begin() as session:
@@ -483,6 +552,7 @@ class TransferPg105Tests(unittest.TestCase):
             )
             p1 = self._make_player(session, "daily-sender")
             self._seed_wallet(session, p1, 10000)  # earned=10000
+            self._seed_gas_wallet(session, p1)  # 5x1000 -> fee=10 each
             p2 = self._make_player(session, "daily-recipient")
             self._seed_wallet(session, p2, 0)
 
@@ -493,6 +563,7 @@ class TransferPg105Tests(unittest.TestCase):
 
         self.assertEqual(self._root_balance(p1), 5000)
         self.assertEqual(self._root_balance(p2), 5000)
+        self.assertEqual(self._gas_balance(p1), 950)  # 1000 - 5*10 gas
 
         # 6-й перевод за сутки: 5000+1000 = 6000 > 5000 -> 429
         with self.SessionLocal.begin() as session:
@@ -525,6 +596,7 @@ class TransferPg105Tests(unittest.TestCase):
             self._ensure_cms_settings(session)
             p1 = self._make_player(session, "parallel-sender")
             w1 = self._seed_wallet(session, p1, 1000)  # earned=1000
+            self._seed_gas_wallet(session, p1)  # 2x400 -> fee=4 each
             p2 = self._make_player(session, "parallel-r1")
             w2 = self._seed_wallet(session, p2, 0)
             p3 = self._make_player(session, "parallel-r2")
@@ -600,4 +672,86 @@ class TransferPg105Tests(unittest.TestCase):
         self.assertEqual(debit_count, 2)
         self.assertEqual(credit_p2, 1)
         self.assertEqual(credit_p3, 1)
+        self.assertEqual(self._gas_balance(p1), 992)  # 1000 - 2*4 gas
+
+    def test_transfer_insufficient_gas(self) -> None:
+        """Газа меньше комиссии -> 402, ROOT не переведён (атомарный откат).
+
+        gas_fee = 100 * 1% = 1; газовый баланс 0 < 1 -> 402 до блокировки
+        ROOT-кошельков; транзакция откатывается: ROOT и газ не изменились,
+        gas-debit не записан.
+        """
+        from app.models import GasTransaction
+
+        with self.SessionLocal.begin() as session:
+            self._ensure_cms_settings(session)
+            p1 = self._make_player(session, "no-gas-sender")
+            self._seed_wallet(session, p1, 1000)  # earned=1000
+            gas_w1 = self._seed_gas_wallet(session, p1, balance=0)
+            p2 = self._make_player(session, "no-gas-recipient")
+            self._seed_wallet(session, p2, 0)
+
+            with self.assertRaises(MissionEngineError) as ctx:
+                transfer_root(session, p1, p2, 100, "req-no-gas")
+            self.assertEqual(ctx.exception.status_code, 402)
+
+        # Откат после 402: ROOT не переведён, газ не ушёл, debit нет.
+        self.assertEqual(self._root_balance(p1), 1000)
+        self.assertEqual(self._root_balance(p2), 0)
+        self.assertEqual(self._gas_balance(p1), 0)
+        with self.SessionLocal() as session:
+            gas_tx_count = session.scalar(
+                select(func.count(GasTransaction.id)).where(
+                    GasTransaction.gas_wallet_id == gas_w1,
+                    GasTransaction.transaction_type == "debit",
+                    GasTransaction.reference_type
+                    == TRANSFER_FEE_GAS_REFERENCE_TYPE,
+                )
+            )
+        self.assertEqual(gas_tx_count, 0)
+
+    def test_transfer_deducts_gas(self) -> None:
+        """Комиссия 1% списана газом: 100-1=99, debit transfer_fee_gas.
+
+        ROOT-перевод как раньше (from 900, to +100); газовый ledger
+        атомарно в той же транзакции.
+        """
+        from app.models import GasTransaction, GasWallet
+
+        with self.SessionLocal.begin() as session:
+            self._ensure_cms_settings(session)
+            p1 = self._make_player(session, "gas-sender")
+            self._seed_wallet(session, p1, 1000)  # earned=1000
+            gas_w1 = self._seed_gas_wallet(session, p1, balance=100)
+            p2 = self._make_player(session, "gas-recipient")
+            self._seed_wallet(session, p2, 0)
+
+            result = transfer_root(session, p1, p2, 100, "req-gas")
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["fromBalance"], 900)
+            self.assertEqual(result["toBalance"], 100)
+
+            gas_wallet = session.get(GasWallet, gas_w1)
+            self.assertEqual(gas_wallet.balance, 99)  # 100 - 100*1%
+
+            gas_tx = session.scalar(
+                select(GasTransaction).where(
+                    GasTransaction.gas_wallet_id == gas_w1,
+                    GasTransaction.transaction_type == "debit",
+                    GasTransaction.reference_type
+                    == TRANSFER_FEE_GAS_REFERENCE_TYPE,
+                    GasTransaction.reference_id == "req-gas",
+                )
+            )
+            self.assertIsNotNone(gas_tx, "GasTransaction debit не создан")
+            self.assertEqual(gas_tx.amount, 1)  # 100 * 1 / 100
+            self.assertEqual(gas_tx.balance_after, 99)
+            self.assertEqual(gas_tx.metadata_json["percent"], 1)
+            self.assertEqual(gas_tx.metadata_json["toPlayerId"], p2)
+
+        # Коммит: ROOT и газ зафиксированы в БД.
+        self.assertEqual(self._root_balance(p1), 900)
+        self.assertEqual(self._root_balance(p2), 100)
+        self.assertEqual(self._gas_balance(p1), 99)
 

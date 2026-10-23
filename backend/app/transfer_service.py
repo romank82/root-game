@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,8 @@ from app.mission_engine import (
 )
 from app.models import (
     GamePlayer,
+    GasTransaction,
+    GasWallet,
     PlayerTransfer,
     SystemSetting,
     Wallet,
@@ -27,10 +31,13 @@ TRANSFER_MIN_KEY = "economy.transfer_min_amount"
 TRANSFER_MAX_KEY = "economy.transfer_max_amount"
 DAILY_TRANSFER_LIMIT_KEY = "economy.daily_transfer_limit"
 TRANSFER_MINIMUM_EARNED_ROOT_KEY = "economy.transfer_minimum_earned_root"
+GAS_FEE_PERCENT_KEY = "economy.gas_fee_percent"
 
 # Reference types проводок перевода: у debit и credit общий reference_id = request_id.
 TRANSFER_DEBIT_REFERENCE_TYPE = "player_transfer_debit"
 TRANSFER_CREDIT_REFERENCE_TYPE = "player_transfer_credit"
+# Комиссия за перевод списывается газом (10.4-i): debit gas-проводка.
+TRANSFER_FEE_GAS_REFERENCE_TYPE = "transfer_fee_gas"
 # В mission_engine "mission_reward" — инлайн-строка (константы нет); зеркало здесь.
 MISSION_REWARD_REFERENCE_TYPE = "mission_reward"
 
@@ -200,6 +207,43 @@ def transfer_root(
         raise MissionEngineError(
             429,
             f"Превышен дневной лимит переводов ({limits['daily']} ROOT).",
+        )
+
+    # 5b. Комиссия за перевод газом (10.4-i): fee = amount * percent / 100,
+    # дробная (без ceil). Процент — из CMS (economy.gas_fee_percent).
+    # При percent=0 газ не трогаем (обратная совместимость).
+    gas_percent = _read_int_setting(session, GAS_FEE_PERCENT_KEY, 1)
+    gas_fee = (
+        Decimal(amount) * Decimal(gas_percent) / Decimal(100)
+        if gas_percent > 0
+        else Decimal("0")
+    )
+    if gas_fee > 0:
+        gas_wallet = session.scalar(
+            select(GasWallet)
+            .where(GasWallet.player_id == from_player_id)
+            .with_for_update()
+        )
+        if gas_wallet is None or gas_wallet.balance < gas_fee:
+            raise MissionEngineError(
+                402, "Недостаточно газа для перевода. Купите газ."
+            )
+        gas_wallet.balance -= gas_fee
+        session.add(
+            GasTransaction(
+                id=_new_id("gas-transaction"),
+                gas_wallet_id=gas_wallet.id,
+                amount=gas_fee,
+                balance_after=gas_wallet.balance,
+                transaction_type="debit",
+                reason=f"Transfer fee {request_id}",
+                reference_type=TRANSFER_FEE_GAS_REFERENCE_TYPE,
+                reference_id=request_id,
+                metadata_json={
+                    "toPlayerId": to_player_id,
+                    "percent": gas_percent,
+                },
+            )
         )
 
     # 6. Блокировка двух кошельков в детерминированном порядке
