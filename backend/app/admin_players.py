@@ -106,6 +106,9 @@ class GasAdjustmentPayload(BaseModel):
 
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 200
+DEFAULT_GAS_TX_LIMIT = 50
+MAX_GAS_TX_LIMIT = 200
+
 RECENT_TRANSACTIONS_LIMIT = 20
 MISSION_HISTORY_LIMIT = 10
 RESTRICTIONS_LIMIT = 20
@@ -404,6 +407,22 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
     }
 
 
+def _serialize_gas_transaction(tx: GasTransaction) -> dict[str, Any]:
+    """Проводка газа (10.4-d): Decimal → строка (точность), metadata —
+    через sanitize_audit_data, как recentTransactions в карточке."""
+    return {
+        "id": tx.id,
+        "amount": str(tx.amount),
+        "balanceAfter": str(tx.balance_after),
+        "transactionType": tx.transaction_type,
+        "reason": tx.reason,
+        "referenceType": tx.reference_type,
+        "referenceId": tx.reference_id,
+        "metadata": sanitize_audit_data(tx.metadata_json or {}),
+        "createdAt": tx.created_at.isoformat() if tx.created_at else None,
+    }
+
+
 @router.get("")
 def list_admin_players(
     search: str | None = None,
@@ -632,3 +651,52 @@ def update_admin_player_gas(
 
         session.flush()
         return {"player": _serialize_player_card(session, player)}
+
+
+@router.get("/{player_id}/gas-transactions")
+def list_admin_player_gas_transactions(
+    player_id: str,
+    limit: int = DEFAULT_GAS_TX_LIMIT,
+    offset: int = 0,
+    _admin: AdminUser = Depends(require_permission(PLAYERS_READ_PERMISSION)),
+):
+    """История транзакций газа игрока (10.4-d), пагинация (limit/offset)."""
+    safe_limit = max(1, min(limit, MAX_GAS_TX_LIMIT))
+    safe_offset = max(0, offset)
+    with SessionLocal() as session:  # read-only, не begin()
+        player = _get_player_or_404(session, player_id)
+        gas_wallet = session.scalar(
+            select(GasWallet).where(GasWallet.player_id == player.id)
+        )
+        # GasWallet может отсутствовать: read-only ручка не создаёт.
+        if gas_wallet is None:
+            return {
+                "transactions": [],
+                "total": 0,
+                "limit": safe_limit,
+                "offset": safe_offset,
+            }
+        base = select(GasTransaction).where(
+            GasTransaction.gas_wallet_id == gas_wallet.id
+        )
+        total = (
+            session.scalar(
+                select(func.count())
+                .select_from(GasTransaction)
+                .where(GasTransaction.gas_wallet_id == gas_wallet.id)
+            )
+            or 0
+        )
+        rows = session.scalars(
+            base.order_by(
+                GasTransaction.created_at.desc(), GasTransaction.id.desc()
+            )
+            .offset(safe_offset)
+            .limit(safe_limit)
+        ).all()
+        return {
+            "transactions": [_serialize_gas_transaction(tx) for tx in rows],
+            "total": total,
+            "limit": safe_limit,
+            "offset": safe_offset,
+        }
