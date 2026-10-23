@@ -362,6 +362,7 @@ def list_admin_players(
                 GamePlayer.telegram_username.ilike(pattern),
                 GamePlayer.display_name.ilike(pattern),
                 GamePlayer.telegram_first_name.ilike(pattern),
+                GamePlayer.nickname_lower.ilike(pattern),
             )
         )
     if status:

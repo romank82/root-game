@@ -11,7 +11,17 @@ import unittest
 from datetime import datetime
 from types import SimpleNamespace
 
+import os
+import subprocess
+import sys
+import tempfile
+import uuid
+from pathlib import Path
+from unittest.mock import patch
+
 from fastapi import HTTPException
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
 
 from app.admin_players import (
     AGE_MAX,
@@ -398,6 +408,141 @@ class AdminPlayerCardTests(unittest.TestCase):
         self.assertEqual(by_key["age"]["type"], "number")
         self.assertEqual(by_key["age"]["min"], AGE_MIN)
         self.assertEqual(by_key["age"]["max"], AGE_MAX)
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2] / "backend"
+
+
+class AdminPlayerListSearchTests(unittest.TestCase):
+    """Поиск по нику в списке игроков (10.0.1, часть 1).
+
+    Живая SQLite + alembic upgrade head (паттерн test_admin_economy.py):
+    FakeSession диспатчит только карточные запросы, а list_admin_players
+    исполняет select(func.count()) и outerjoin — нужна реальная схема.
+    Каждый тест получает свежую disposable БД.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from app import admin_players
+
+        cls.admin_players = admin_players
+        cls._session_local_patch = None
+
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory(
+            prefix="chimera-admin-players-search-"
+        )
+        self.database_path = Path(self._temporary_directory.name) / "players.sqlite3"
+        database_url = f"sqlite:///{self.database_path}"
+
+        environment = os.environ.copy()
+        environment["DATABASE_URL"] = database_url
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                str(BACKEND_ROOT / "alembic.ini"),
+                "upgrade",
+                "head",
+            ],
+            cwd=BACKEND_ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+        )
+
+        @event.listens_for(self.engine, "connect")
+        def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        self.SessionLocal = sessionmaker(
+            bind=self.engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+        self._session_local_patch = patch.object(
+            self.admin_players, "SessionLocal", self.SessionLocal
+        )
+        self._session_local_patch.start()
+
+    def tearDown(self) -> None:
+        self._session_local_patch.stop()
+        self.engine.dispose()
+        self._temporary_directory.cleanup()
+
+    # ---- Fixtures и хелперы ---------------------------------------------
+
+    def _make_admin(self):
+        from app.models import AdminUser
+
+        admin_id = f"admin-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                AdminUser(
+                    id=admin_id,
+                    username=f"admin-{admin_id[-6:]}",
+                    password_hash="test-hash",
+                    role="super_admin",
+                    is_super_admin=True,
+                    is_active=True,
+                    is_deleted=False,
+                )
+            )
+        with self.SessionLocal() as session:
+            return session.get(AdminUser, admin_id)
+
+    def _make_player(self, nickname: str) -> str:
+        """Игрок с заполненными nickname/nickname_lower (как после 10.0)."""
+        from app.models import GamePlayer
+
+        player_id = f"player-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GamePlayer(
+                    id=player_id,
+                    display_name=f"Игрок {nickname}",
+                    auth_provider="test",
+                    external_id=f"test-{uuid.uuid4().hex}",
+                    status="active",
+                    nickname=nickname,
+                    nickname_lower=nickname.lower(),
+                )
+            )
+        return player_id
+
+    def test_list_players_search_by_nickname(self) -> None:
+        admin = self._make_admin()
+        roman_id = self._make_player("roman#123-456-789")
+        other_id = self._make_player("other#999-888-777")
+
+        def hit_ids(search_value: str) -> list[str]:
+            result = self.admin_players.list_admin_players(
+                search=search_value,
+                _admin=admin,
+            )
+            return [player["id"] for player in result["players"]]
+
+        # По нику целиком (case-insensitive, латиница).
+        self.assertEqual(hit_ids("roman"), [roman_id])
+        # Подстрока ника — тоже находится.
+        self.assertEqual(hit_ids("123"), [roman_id])
+        # Другой игрок находится по своему нику.
+        self.assertEqual(hit_ids("other"), [other_id])
+        # Несуществующий ник — пусто.
+        self.assertEqual(hit_ids("nonexistent"), [])
 
 
 if __name__ == "__main__":
