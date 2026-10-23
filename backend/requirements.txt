@@ -7,3 +7,4 @@ psycopg[binary]==3.2.10
 slowapi==0.1.9
 
 argon2-cffi==23.1.0
+geo-intel-offline==1.5.0
