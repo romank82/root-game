@@ -53,6 +53,7 @@ from app.team_missions_service import (
     submit_answer_entrypoint,
     submit_location_entrypoint,
 )
+from app.transfer_service import transfer_root_entrypoint
 from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -151,6 +152,12 @@ class AcceptMissionPayload(BaseModel):
     latitude: float
     longitude: float
     accuracy: float | None = None
+
+class TransferPayload(BaseModel):
+    """POST /api/v1/players/transfer (10.1-b)."""
+    to_player_id: str = Field(..., min_length=1)
+    amount: int = Field(..., gt=0)
+    request_id: str = Field(..., min_length=1, max_length=64)
 
 class ScanQrPayload(BaseModel):
     payload_and_hmac: str = Field(min_length=10, max_length=1000)
@@ -584,6 +591,28 @@ def accept_engine_mission(
             latitude=payload.latitude,
             longitude=payload.longitude,
             accuracy=payload.accuracy,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/players/transfer")
+def transfer_root_route(
+    request: Request,
+    payload: TransferPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Перевод ROOT другому игроку (10.1+). Идемпотентность — request_id."""
+    try:
+        return transfer_root_entrypoint(
+            from_player_id=player_id,
+            to_player_id=payload.to_player_id,
+            amount=payload.amount,
+            request_id=payload.request_id,
         )
     except MissionEngineError as error:
         raise HTTPException(
