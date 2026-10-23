@@ -12,6 +12,7 @@ import { ArchiveScreen } from './components/screens/ArchiveScreen'
 import { InventoryScreen } from './components/screens/InventoryScreen'
 import { ScannerScreen } from './components/screens/ScannerScreen'
 import { ShopScreen } from './components/screens/ShopScreen'
+import { ProfileScreen } from './components/screens/ProfileScreen'
 import { MapScreen } from './components/screens/MapScreen'
 // TEMP: dev-only camera test screen — удалить в Sprint 8.6.g.
 import { CameraTestScreen } from './components/screens/CameraTestScreen'
@@ -179,6 +180,10 @@ function App() {
             }
           }}
         />
+      )}
+
+      {screen === 'profile' && (
+        <ProfileScreen onScreenChange={setScreen} />
       )}
 
       {accepted && screen !== 'briefing' && (
