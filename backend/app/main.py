@@ -469,6 +469,7 @@ def get_my_profile_route(
                 "id": player.id,
                 "nickname": player.nickname,
                 "country": player.country,
+                "country_source": player.country_source,
                 "gender": player.gender,
                 "age": player.age,
             }
@@ -496,6 +497,16 @@ def update_my_profile_route(
             raise HTTPException(status_code=404, detail="Игрок не найден.")
 
         if "country" in updates:
+            # 10.0.5-b: при 'auto' блокировка до валидации country —
+            # 422 про автоблокировку независимо от payload.
+            if player.country_source == "auto":
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Страна определена автоматически по координатам и не "
+                        "может быть изменена в анкете."
+                    ),
+                )
             value = updates["country"]
             if value is not None:
                 value = value.strip().upper()
@@ -505,6 +516,7 @@ def update_my_profile_route(
                         detail="country должен быть ISO-2 (2 буквы).",
                     )
             player.country = value
+            player.country_source = "manual"
 
         if "gender" in updates:
             value = updates["gender"]
@@ -528,6 +540,7 @@ def update_my_profile_route(
                 "id": player.id,
                 "nickname": player.nickname,
                 "country": player.country,
+                "country_source": player.country_source,
                 "gender": player.gender,
                 "age": player.age,
             }

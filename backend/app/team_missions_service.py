@@ -545,6 +545,7 @@ def _submit_location(
     resolved = resolve_country_or_none(latitude, longitude)
     if resolved is not None:
         player.country = resolved
+        player.country_source = "auto"
 
 
     return {

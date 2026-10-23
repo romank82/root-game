@@ -1368,6 +1368,7 @@ def _accept_mission_once(
         resolved = resolve_country_or_none(latitude, longitude)
         if resolved is not None:
             player.country = resolved
+            player.country_source = "auto"
 
         # Сгенерировать spawn
         spawn = generate_spawn_point(

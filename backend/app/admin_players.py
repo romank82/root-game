@@ -481,6 +481,9 @@ def update_admin_player_profile(
                         detail="country должен быть ISO-2 (2 буквы).",
                     )
             player.country = value
+            # 10.0.5-b: админская правка country = ручная (source='manual');
+            # админский PATCH не блокируется (может исправить даже 'auto').
+            player.country_source = "manual"
             changed_fields.append("country")
 
         if "gender" in updates:

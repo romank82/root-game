@@ -803,6 +803,15 @@ class GamePlayer(TimestampMixin, Base):
         Integer,
         nullable=True,
     )
+    # 10.0.5-b: источник значения country — 'manual' | 'auto' | NULL.
+    # NULL = до фичи/неизвестно (редактируемо); 'auto' = определено по
+    # координатам (10.0.5, блокирует ручной ввод в анкете); 'manual' =
+    # ручная правка (анкета игрока или админ). Backfill не делаем —
+    # старые записи остаются NULL.
+    country_source: Mapped[str | None] = mapped_column(
+        String(8),
+        nullable=True,
+    )
 
     status: Mapped[str] = mapped_column(
         String(32),
