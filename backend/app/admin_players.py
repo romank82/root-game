@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,6 +29,7 @@ from app.models import (
     AdminUser,
     GamePlayer,
     GasWallet,
+    GasTransaction,
     Item,
     Mission,
     PlayerItem,
@@ -93,6 +95,15 @@ class PlayerProfileUpdatePayload(BaseModel):
     age: int | None = Field(default=None, ge=AGE_MIN, le=AGE_MAX)
 
 
+class GasAdjustmentPayload(BaseModel):
+    """PATCH газа (10.4-c): начислить (+) / списать (-)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount: Decimal
+    reason: str = Field(..., min_length=1, max_length=255)
+
+
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 200
 RECENT_TRANSACTIONS_LIMIT = 20
@@ -117,6 +128,11 @@ def _lock_player(session: Session, player_id: str) -> GamePlayer:
     if player is None:
         raise HTTPException(status_code=404, detail="Игрок не найден.")
     return player
+
+
+def _new_id(prefix: str) -> str:
+    """Уникальный id с префиксом (паттерн остальных admin-модулей)."""
+    return f"{prefix}-{uuid4().hex}"
 
 
 def _serialize_player_summary(
@@ -540,4 +556,79 @@ def update_admin_player_profile(
             metadata={"changedFields": changed_fields},
         )
 
+        return {"player": _serialize_player_card(session, player)}
+
+
+@router.patch("/{player_id}/gas")
+def update_admin_player_gas(
+    player_id: str,
+    payload: GasAdjustmentPayload,
+    request: Request,
+    admin: AdminUser = Depends(require_permission(PLAYERS_MANAGE_PERMISSION)),
+):
+    """PATCH газа (10.4-c): начислить (+) / списать (-) газ игроку.
+
+    Row-lock GasWallet (создаётся при отсутствии), immutable-проводка
+    GasTransaction и аудит — в одной транзакции (SessionLocal.begin()).
+    """
+    if payload.amount == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Сумма газа должна быть ненулевой.",
+        )
+
+    with SessionLocal.begin() as session:
+        player = _get_player_or_404(session, player_id)
+        gas_wallet = session.scalar(
+            select(GasWallet)
+            .where(GasWallet.player_id == player_id)
+            .with_for_update()
+        )
+        if gas_wallet is None:
+            gas_wallet = GasWallet(
+                id=_new_id("gas-wallet"),
+                player_id=player_id,
+                balance=Decimal("0"),
+            )
+            session.add(gas_wallet)
+            session.flush()
+
+        old_balance = gas_wallet.balance
+        new_balance = old_balance + payload.amount
+        if new_balance < 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Недостаточно газа для списания.",
+            )
+        gas_wallet.balance = new_balance
+
+        transaction_type = "credit" if payload.amount > 0 else "debit"
+        session.add(
+            GasTransaction(
+                id=_new_id("gas-transaction"),
+                gas_wallet_id=gas_wallet.id,
+                amount=abs(payload.amount),
+                balance_after=new_balance,
+                transaction_type=transaction_type,
+                reason=payload.reason,
+                reference_type="admin_gas_adjustment",
+                reference_id=_new_id("admin-gas-adjustment"),
+                metadata_json={"adminId": admin.id},
+            )
+        )
+
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="player.gas_adjusted",
+            entity_type="player",
+            entity_id=player_id,
+            request=request,
+            permission_code=PLAYERS_MANAGE_PERMISSION,
+            before={"gasBalance": str(old_balance)},
+            after={"gasBalance": str(new_balance)},
+            metadata={"amount": str(payload.amount), "reason": payload.reason},
+        )
+
+        session.flush()
         return {"player": _serialize_player_card(session, player)}
