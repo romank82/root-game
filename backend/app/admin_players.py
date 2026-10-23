@@ -1,11 +1,15 @@
-"""Read-only admin endpoints for player data (шаг 5.3).
+"""Admin endpoints for player data (шаг 5.3, 10.0.4).
 
 GET /api/v1/admin/players            — list with filters + pagination.
 GET /api/v1/admin/players/profile-fields — конфиг полей профиля (10.0.2).
 GET /api/v1/admin/players/{player_id} — full player card.
+PATCH /api/v1/admin/players/{player_id} — корректировка country/gender/age
+(10.0.4, update_admin_player_profile).
 
-Оба эндпоинта требуют прямого права ``players.read``. Эндпоинты read-only:
-используем ``SessionLocal()`` без ``begin()``, никаких записей в БД.
+GET-эндпоинты требуют прямого права ``players.read`` и read-only (без записей
+в БД). PATCH требует ``players.manage``: валидация (gender ∈ VALID_GENDERS,
+age 0..120, country ISO-2), row-lock игрока (_lock_player) и аудит
+(before/after, changedFields).
 """
 from __future__ import annotations
 
@@ -41,8 +45,8 @@ PLAYERS_BLOCK_PERMISSION = "players.block"  # reserved for 5.7
 # Конфиг полей профиля игрока для фронта (10.0.2). Отдаётся через
 # GET /api/v1/admin/players/profile-fields и задаёт форму карточки:
 # key — имя колонки GamePlayer, label — заголовок для UI, type — вид
-# контрола, options/readOnly/min/max — атрибуты контрола. PATCH (запись)
-# появится позже (34-C); константы VALID_GENDERS/AGE_MIN/AGE_MAX —
+# контрола, options/readOnly/min/max — атрибуты контрола. PATCH (запись) —
+# 10.0.4 (update_admin_player_profile); константы VALID_GENDERS/AGE_MIN/AGE_MAX —
 # источник для бэк-валидации.
 PROFILE_FIELDS = [
     {
