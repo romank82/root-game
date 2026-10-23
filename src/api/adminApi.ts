@@ -1560,7 +1560,6 @@ export type AdminPlayerCard = {
     country: string | null
     gender: string | null
     age: number | null
-    gasBalance: string
     externalId: string | null
     telegram: {
       username: string | null
@@ -1577,6 +1576,7 @@ export type AdminPlayerCard = {
     availableBalance: number
     lockedBalance: number
   }
+  gasBalance: string
   inventory: Array<{
     id: string
     itemId: string

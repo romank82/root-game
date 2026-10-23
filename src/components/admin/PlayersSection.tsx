@@ -622,7 +622,7 @@ export function PlayersSection({
                   margin: '4px 0',
                 }}
               >
-                {selectedPlayer.player.gasBalance} GAS
+                {selectedPlayer.gasBalance} GAS
               </p>
             </div>
 
