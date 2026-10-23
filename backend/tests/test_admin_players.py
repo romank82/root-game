@@ -14,10 +14,15 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 
 from app.admin_players import (
+    AGE_MAX,
+    AGE_MIN,
     MISSION_HISTORY_LIMIT,
+    PROFILE_FIELDS,
+    VALID_GENDERS,
     _get_player_or_404,
     _serialize_player_card,
     _serialize_player_summary,
+    get_profile_fields,
 )
 
 
@@ -36,6 +41,10 @@ def _player(**overrides) -> SimpleNamespace:
         "auth_provider": "telegram",
         "external_id": "987654321",
         "status": "active",
+        "nickname": None,
+        "country": None,
+        "gender": None,
+        "age": None,
         "telegram_username": "@ivan",
         "telegram_username_normalized": "ivan",
         "telegram_first_name": "Иван",
@@ -353,6 +362,42 @@ class AdminPlayerCardTests(unittest.TestCase):
         ]
         self.assertTrue(history_sql, "запрос истории миссий должен исполняться")
         self.assertIn(f"LIMIT {MISSION_HISTORY_LIMIT}", history_sql[0])
+
+    def test_card_player_block_includes_profile_fields(self):
+        player = _player(
+            nickname="roman#123-456-789",
+            country="RU",
+            gender="male",
+            age=30,
+        )
+        fake = FakeSession(player=player, wallet=_wallet())
+        card = _serialize_player_card(fake, fake._player)
+        self.assertEqual(card["player"]["nickname"], "roman#123-456-789")
+        self.assertEqual(card["player"]["country"], "RU")
+        self.assertEqual(card["player"]["gender"], "male")
+        self.assertEqual(card["player"]["age"], 30)
+
+        summary = _serialize_player_summary(player, _wallet())
+        self.assertEqual(summary["nickname"], "roman#123-456-789")
+        self.assertEqual(summary["country"], "RU")
+        self.assertEqual(summary["gender"], "male")
+        self.assertEqual(summary["age"], 30)
+
+    def test_profile_fields_endpoint(self):
+        result = get_profile_fields(_admin=SimpleNamespace())
+        fields = result["fields"]
+        self.assertEqual(
+            {field["key"] for field in fields},
+            {"nickname", "country", "gender", "age"},
+        )
+        by_key = {field["key"]: field for field in fields}
+        self.assertEqual(by_key["nickname"]["readOnly"], True)
+        self.assertEqual(by_key["country"]["maxLength"], 2)
+        self.assertEqual(by_key["gender"]["type"], "select")
+        self.assertEqual(set(by_key["gender"]["options"]), VALID_GENDERS)
+        self.assertEqual(by_key["age"]["type"], "number")
+        self.assertEqual(by_key["age"]["min"], AGE_MIN)
+        self.assertEqual(by_key["age"]["max"], AGE_MAX)
 
 
 if __name__ == "__main__":

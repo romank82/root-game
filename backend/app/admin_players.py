@@ -1,6 +1,7 @@
 """Read-only admin endpoints for player data (шаг 5.3).
 
 GET /api/v1/admin/players            — list with filters + pagination.
+GET /api/v1/admin/players/profile-fields — конфиг полей профиля (10.0.2).
 GET /api/v1/admin/players/{player_id} — full player card.
 
 Оба эндпоинта требуют прямого права ``players.read``. Эндпоинты read-only:
@@ -36,6 +37,43 @@ PLAYERS_MANAGE_PERMISSION = "players.manage"  # reserved for 5.4+
 PLAYERS_RESTRICT_PERMISSION = "players.restrict"  # reserved for 5.7
 PLAYERS_BLOCK_PERMISSION = "players.block"  # reserved for 5.7
 
+# Конфиг полей профиля игрока для фронта (10.0.2). Отдаётся через
+# GET /api/v1/admin/players/profile-fields и задаёт форму карточки:
+# key — имя колонки GamePlayer, label — заголовок для UI, type — вид
+# контрола, options/readOnly/min/max — атрибуты контрола. PATCH (запись)
+# появится позже (34-C); константы VALID_GENDERS/AGE_MIN/AGE_MAX —
+# источник для бэк-валидации.
+PROFILE_FIELDS = [
+    {
+        "key": "nickname",
+        "label": "Ник",
+        "type": "text",
+        "readOnly": True,
+    },
+    {
+        "key": "country",
+        "label": "Страна",
+        "type": "text",
+        "maxLength": 2,
+    },
+    {
+        "key": "gender",
+        "label": "Пол",
+        "type": "select",
+        "options": ["male", "female", "other", "unspecified"],
+    },
+    {
+        "key": "age",
+        "label": "Возраст",
+        "type": "number",
+        "min": 0,
+        "max": 120,
+    },
+]
+VALID_GENDERS = {"male", "female", "other", "unspecified"}
+AGE_MIN = 0
+AGE_MAX = 120
+
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 200
 RECENT_TRANSACTIONS_LIMIT = 20
@@ -59,6 +97,10 @@ def _serialize_player_summary(
         "displayName": player.display_name,
         "authProvider": player.auth_provider,
         "status": player.status,
+        "nickname": player.nickname,
+        "country": player.country,
+        "gender": player.gender,
+        "age": player.age,
         "telegramUsername": player.telegram_username,
         "telegramFirstName": player.telegram_first_name,
         "telegramLastName": player.telegram_last_name,
@@ -256,6 +298,10 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
             "displayName": player.display_name,
             "authProvider": player.auth_provider,
             "status": player.status,
+            "nickname": player.nickname,
+            "country": player.country,
+            "gender": player.gender,
+            "age": player.age,
             "externalId": player.external_id,
             "telegram": {
                 "username": player.telegram_username,
@@ -348,6 +394,14 @@ def list_admin_players(
         "limit": limit,
         "offset": offset,
     }
+
+
+@router.get("/profile-fields")
+def get_profile_fields(
+    _admin: AdminUser = Depends(require_permission(PLAYERS_READ_PERMISSION)),
+) -> dict:
+    """Конфиг полей профиля игрока (для фронта, 10.0.2)."""
+    return {"fields": PROFILE_FIELDS}
 
 
 @router.get("/{player_id}")
