@@ -1560,6 +1560,7 @@ export type AdminPlayerCard = {
     country: string | null
     gender: string | null
     age: number | null
+    gasBalance: string
     externalId: string | null
     telegram: {
       username: string | null
@@ -1702,6 +1703,63 @@ export async function updatePlayerProfile(
   if (!response.ok) throw new Error(await readError(response))
   const body = (await response.json()) as { player: AdminPlayerCard }
   return body.player
+}
+
+export type GasAdjustmentPayload = {
+  amount: string // Decimal строкой — точность Numeric(18,4); бэк парсит в Decimal
+  reason: string
+}
+
+export async function updatePlayerGas(
+  playerId: string,
+  payload: GasAdjustmentPayload,
+): Promise<AdminPlayerCard> {
+  const response = await adminFetch(
+    `/api/v1/admin/players/${encodeURIComponent(playerId)}/gas`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { player: AdminPlayerCard }
+  return body.player
+}
+
+export type GasTransaction = {
+  id: string
+  amount: string
+  balanceAfter: string
+  transactionType: string
+  reason: string
+  referenceType: string | null
+  referenceId: string | null
+  metadata: Record<string, unknown>
+  createdAt: string | null
+}
+
+export type GasTransactionsResponse = {
+  transactions: GasTransaction[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export async function getPlayerGasTransactions(
+  playerId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<GasTransactionsResponse> {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.offset !== undefined) params.set('offset', String(options.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(
+    `/api/v1/admin/players/${encodeURIComponent(playerId)}/gas-transactions${query}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as GasTransactionsResponse
+  return body
 }
 
 export async function getProfileFields(): Promise<{
