@@ -25,6 +25,7 @@ import { AdminsSection } from './components/admin/AdminsSection'
 import { KeysSection } from './components/admin/KeysSection'
 import { ContentSection } from './components/admin/ContentSection'
 import { EconomySection } from './components/admin/EconomySection'
+import { PlayersSection } from './components/admin/PlayersSection'
 import { MissionsSection } from './components/admin/MissionsSection'
 import { SeasonsSection } from './components/admin/SeasonsSection'
 import { ChaptersSection } from './components/admin/ChaptersSection'
@@ -51,6 +52,7 @@ function AdminApp() {
     | 'minigame-profiles'
     | 'cascade'
     | 'economy'
+    | 'players'
   >(
     () =>
       (localStorage.getItem('chimera-admin-section') as
@@ -64,7 +66,8 @@ function AdminApp() {
         | 'story-nodes'
         | 'minigame-profiles'
         | 'cascade'
-        | 'economy') ?? 'missions',
+        | 'economy'
+        | 'players') ?? 'missions',
   )
   const [geoZones, setGeoZones] = useState<AdminGeoZone[]>([])
   // setGeoZonesError и setARObjectsError всё ещё используются эффектом загрузки миссий;
@@ -472,6 +475,7 @@ function AdminApp() {
             {section === 'minigame-profiles' && 'Мини-игры'}
             {section === 'cascade' && 'Конструктор'}
             {section === 'economy' && 'Экономика'}
+            {section === 'players' && 'Игроки'}
           </h1>
 
           <nav className="admin-nav">
@@ -513,6 +517,13 @@ function AdminApp() {
               onClick={() => setSection('economy')}
             >
               Экономика
+            </button>
+
+            <button
+              className={section === 'players' ? 'is-active' : ''}
+              onClick={() => setSection('players')}
+            >
+              Игроки
             </button>
 
             <button
@@ -609,6 +620,15 @@ function AdminApp() {
 
       {section === 'economy' && (
         <EconomySection
+          admin={admin}
+          canWrite={canWrite}
+          onError={setError}
+          onNotice={setNotice}
+        />
+      )}
+
+      {section === 'players' && (
+        <PlayersSection
           admin={admin}
           canWrite={canWrite}
           onError={setError}
