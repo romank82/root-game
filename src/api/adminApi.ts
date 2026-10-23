@@ -1681,6 +1681,29 @@ export async function getPlayer(playerId: string): Promise<AdminPlayerCard> {
   return body.player
 }
 
+export type PlayerProfileUpdatePayload = {
+  country?: string | null
+  gender?: string | null
+  age?: number | null
+}
+
+export async function updatePlayerProfile(
+  playerId: string,
+  payload: PlayerProfileUpdatePayload,
+): Promise<AdminPlayerCard> {
+  const response = await adminFetch(
+    `/api/v1/admin/players/${encodeURIComponent(playerId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { player: AdminPlayerCard }
+  return body.player
+}
+
 export async function getProfileFields(): Promise<{
   fields: AdminProfileField[]
 }> {

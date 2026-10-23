@@ -3,6 +3,7 @@ import {
   getPlayer,
   getProfileFields,
   listPlayers,
+  updatePlayerProfile,
   type AdminPlayerCard,
   type AdminPlayerSummary,
   type AdminProfileField,
@@ -58,9 +59,19 @@ function fieldValue(card: AdminPlayerCard, key: string): string {
   return value ?? ''
 }
 
+// Снимок редактируемых полей карточки (значения строк — как в форме).
+function snapshotProfile(card: AdminPlayerCard): Record<string, string> {
+  return {
+    nickname: fieldValue(card, 'nickname'),
+    country: fieldValue(card, 'country'),
+    gender: fieldValue(card, 'gender'),
+    age: fieldValue(card, 'age'),
+  }
+}
+
 export function PlayersSection({
   admin: _admin,
-  canWrite: _canWrite,
+  canWrite,
   onError,
   onNotice: _onNotice,
 }: PlayersSectionProps) {
@@ -85,6 +96,16 @@ export function PlayersSection({
   )
   const [loadingCard, setLoadingCard] = useState(false)
   const [cardError, setCardError] = useState<string | null>(null)
+
+  // Драфт редактируемых полей профиля — применяется кнопкой «Сохранить».
+  const [draftProfile, setDraftProfile] = useState<Record<string, string>>({})
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [savingProfileError, setSavingProfileError] = useState<string | null>(
+    null,
+  )
+  const [savingProfileNotice, setSavingProfileNotice] = useState<string | null>(
+    null,
+  )
 
   // Поля форм профиля — один раз на mount.
   useEffect(() => {
@@ -157,7 +178,12 @@ export function PlayersSection({
 
     getPlayer(selectedPlayerId)
       .then((card) => {
-        if (!cancelled) setSelectedPlayer(card)
+        if (!cancelled) {
+          setSelectedPlayer(card)
+          setDraftProfile(snapshotProfile(card))
+          setSavingProfileNotice(null)
+          setSavingProfileError(null)
+        }
       })
       .catch((requestError) => {
         if (!cancelled) {
@@ -182,6 +208,73 @@ export function PlayersSection({
     setSearch(draftSearch)
     setStatus(draftStatus)
     setOffset(0)
+  }
+
+  function handleResetProfile() {
+    if (!selectedPlayer) return
+    setDraftProfile(snapshotProfile(selectedPlayer))
+    setSavingProfileError(null)
+    setSavingProfileNotice(null)
+  }
+
+  async function handleSaveProfile() {
+    if (!selectedPlayer) return
+
+    const rawCountry = (draftProfile.country ?? '').trim()
+    const rawGender = (draftProfile.gender ?? '').trim()
+    const rawAge = (draftProfile.age ?? '').trim()
+    const ageField = profileFields.find((field) => field.key === 'age')
+    const genderField = profileFields.find((field) => field.key === 'gender')
+    const countryField = profileFields.find((field) => field.key === 'country')
+
+    // Возраст: целое число в диапазоне из конфига полей (10.0.4).
+    if (rawAge !== '') {
+      const age = Number(rawAge)
+      const minAge = ageField?.min ?? 0
+      const maxAge = ageField?.max ?? 120
+      if (!Number.isInteger(age) || age < minAge || age > maxAge) {
+        setSavingProfileError(
+          `Возраст должен быть целым числом от ${minAge} до ${maxAge}.`,
+        )
+        return
+      }
+    }
+
+    // Пол: только из набора options конфига.
+    if (rawGender !== '' && genderField && !genderField.options?.includes(rawGender)) {
+      setSavingProfileError(`Недопустимое значение пола: ${rawGender}.`)
+      return
+    }
+
+    // Страна: ISO-2 (2 буквы), ограничение из конфига.
+    if (
+      rawCountry !== '' &&
+      countryField?.maxLength !== undefined &&
+      rawCountry.length > countryField.maxLength
+    ) {
+      setSavingProfileError(
+        `Страна — ISO-2: максимум ${countryField.maxLength} буквы.`,
+      )
+      return
+    }
+
+    setSavingProfile(true)
+    setSavingProfileError(null)
+    setSavingProfileNotice(null)
+    try {
+      const updated = await updatePlayerProfile(selectedPlayer.player.id, {
+        country: rawCountry === '' ? null : rawCountry,
+        gender: rawGender === '' ? null : rawGender,
+        age: rawAge === '' ? null : Number(rawAge),
+      })
+      setSelectedPlayer(updated)
+      setDraftProfile(snapshotProfile(updated))
+      setSavingProfileNotice('Профиль сохранён.')
+    } catch (err) {
+      setSavingProfileError((err as Error).message)
+    } finally {
+      setSavingProfile(false)
+    }
   }
 
   const shownFrom = total === 0 ? 0 : offset + 1
@@ -349,10 +442,19 @@ export function PlayersSection({
                   {field.label}
                   {field.type === 'select' ? (
                     <select
-                      value={fieldValue(selectedPlayer, field.key)}
-                      disabled
+                      value={
+                        draftProfile[field.key] ?? fieldValue(selectedPlayer, field.key)
+                      }
+                      disabled={!canWrite || savingProfile}
+                      onChange={(e) =>
+                        setDraftProfile((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
                     >
-                      {fieldValue(selectedPlayer, field.key) === '' && (
+                      {(draftProfile[field.key] ??
+                        fieldValue(selectedPlayer, field.key)) === '' && (
                         <option value="">—</option>
                       )}
                       {(field.options ?? []).map((option) => (
@@ -364,17 +466,49 @@ export function PlayersSection({
                   ) : (
                     <input
                       type={field.type}
-                      value={fieldValue(selectedPlayer, field.key)}
+                      value={
+                        draftProfile[field.key] ?? fieldValue(selectedPlayer, field.key)
+                      }
                       readOnly={field.readOnly}
-                      disabled
+                      disabled={!canWrite || savingProfile}
                       maxLength={field.maxLength}
                       min={field.min}
                       max={field.max}
+                      onChange={(e) =>
+                        setDraftProfile((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
                     />
                   )}
                 </label>
               ))}
             </div>
+
+            <div className="admin-actions">
+              <button
+                className="admin-primary"
+                onClick={handleSaveProfile}
+                disabled={!canWrite || savingProfile}
+              >
+                {savingProfile ? 'Сохранение…' : 'Сохранить'}
+              </button>
+              <button
+                className="admin-secondary"
+                onClick={handleResetProfile}
+                disabled={savingProfile}
+              >
+                Отмена
+              </button>
+            </div>
+
+            {savingProfileError && (
+              <p className="admin-alert admin-error">{savingProfileError}</p>
+            )}
+            {savingProfileNotice && (
+              <p className="admin-alert admin-notice">{savingProfileNotice}</p>
+            )}
 
             <div style={{ marginTop: '18px' }}>
               <p className="admin-kicker">BALANCE</p>
