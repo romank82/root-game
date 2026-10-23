@@ -20,7 +20,7 @@ from app.mission_engine import (
     process_qr_scan,
     submit_mission,
 )
-from app.models import GamePlayer
+from app.models import GamePlayer, GasWallet
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
 from app.shop_service import list_catalog_items, purchase_catalog_item
 from app.slug_utils import generate_nickname
@@ -56,6 +56,7 @@ from app.team_missions_service import (
 )
 from app.transfer_service import transfer_root_entrypoint
 from app.stars_service import (
+    create_invoice_link,
     handle_pre_checkout_query,
     handle_successful_payment,
 )
@@ -165,6 +166,10 @@ class TransferPayload(BaseModel):
     to_player_id: str = Field(..., min_length=1)
     amount: int = Field(..., gt=0)
     request_id: str = Field(..., min_length=1, max_length=64)
+
+class GasInvoicePayload(BaseModel):
+    """POST /api/v1/engine/gas/invoice (10.4-j-0)."""
+    gas_amount: int = Field(..., gt=0)
 
 class ScanQrPayload(BaseModel):
     payload_and_hmac: str = Field(min_length=10, max_length=1000)
@@ -460,12 +465,22 @@ def get_engine_bootstrap_route(
     player_id: str = Depends(get_current_player_id),
 ):
     try:
-        return get_engine_bootstrap(player_id)
+        bootstrap = get_engine_bootstrap(player_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,
             detail=error.detail,
         ) from error
+    # 10.4-j-0: баланс газа для фронта. GasWallet может отсутствовать
+    # (игрок ещё не покупал газ) -> "0". Строка: дробный Numeric(18,4).
+    with SessionLocal() as session:
+        gas_wallet = session.scalar(
+            select(GasWallet).where(GasWallet.player_id == player_id)
+        )
+    bootstrap["gasBalance"] = (
+        str(gas_wallet.balance) if gas_wallet is not None else "0"
+    )
+    return bootstrap
 
 
 @app.get("/api/v1/engine/me/profile")
@@ -621,6 +636,23 @@ def transfer_root_route(
             amount=payload.amount,
             request_id=payload.request_id,
         )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/gas/invoice")
+def create_gas_invoice_route(
+    request: Request,
+    payload: GasInvoicePayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Создать инвойс Stars на покупку газа (10.4-j-0)."""
+    try:
+        return create_invoice_link(player_id, payload.gas_amount)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,
