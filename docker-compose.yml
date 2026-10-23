@@ -18,6 +18,28 @@ services:
       timeout: 5s
       retries: 12
 
+  db-test:
+    # Sprint 9.3.1: отдельная disposable-БД для параллельных финансовых
+    # тестов на PostgreSQL. Порт 5433 — вне конфликта с dev db на 5432.
+    # Пароль захардкожен специально для тестовой БД (не секрет dev/prod);
+    # переопределяется со стороны теста через PG_TEST_DATABASE_URL.
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: chimera_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U postgres -d chimera_test",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: ./backend
