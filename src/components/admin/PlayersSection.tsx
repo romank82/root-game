@@ -1,13 +1,16 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import {
   getPlayer,
+  getPlayerGasTransactions,
   getProfileFields,
   listPlayers,
+  updatePlayerGas,
   updatePlayerProfile,
   type AdminPlayerCard,
   type AdminPlayerSummary,
   type AdminProfileField,
   type AdminUser,
+  type GasTransaction,
 } from '../../api/adminApi'
 
 type PlayersSectionProps = {
@@ -107,6 +110,16 @@ export function PlayersSection({
     null,
   )
 
+  // Газ (10.4-e-2): драфт формы, статусы и история (последние 50).
+  const [gasDraft, setGasDraft] = useState<{ amount: string; reason: string }>({
+    amount: '',
+    reason: '',
+  })
+  const [savingGas, setSavingGas] = useState(false)
+  const [savingGasError, setSavingGasError] = useState<string | null>(null)
+  const [savingGasNotice, setSavingGasNotice] = useState<string | null>(null)
+  const [gasTransactions, setGasTransactions] = useState<GasTransaction[]>([])
+
   // Поля форм профиля — один раз на mount.
   useEffect(() => {
     let cancelled = false
@@ -204,6 +217,34 @@ export function PlayersSection({
     }
   }, [selectedPlayerId])
 
+  // История газа — последние 50 транзакций выбранного игрока (10.4-e-2).
+  useEffect(() => {
+    if (selectedPlayerId === null) {
+      setGasTransactions([])
+      setSavingGasError(null)
+      setSavingGasNotice(null)
+      return
+    }
+    let cancelled = false
+    getPlayerGasTransactions(selectedPlayerId, { limit: 50 })
+      .then((data) => {
+        if (!cancelled) setGasTransactions(data.transactions)
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setSavingGasError(
+            requestError instanceof Error
+              ? requestError.message
+              : 'Не удалось загрузить транзакции газа.',
+          )
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlayerId])
+
   function applyFilters() {
     setSearch(draftSearch)
     setStatus(draftStatus)
@@ -274,6 +315,48 @@ export function PlayersSection({
       setSavingProfileError((err as Error).message)
     } finally {
       setSavingProfile(false)
+    }
+  }
+
+  async function handleSaveGas() {
+    if (!selectedPlayer) return
+
+    const rawAmount = gasDraft.amount.trim()
+    const rawReason = gasDraft.reason.trim()
+    const amount = Number(rawAmount)
+
+    // Газ — дробный Numeric(18,4): валидируем число, но в запрос уходит
+    // исходная строка (Decimal на бэке парсит её точно).
+    if (rawAmount === '' || !Number.isFinite(amount) || amount === 0) {
+      setSavingGasError('Сумма газа должна быть числом и не равна 0.')
+      return
+    }
+    if (rawReason === '') {
+      setSavingGasError('Укажите причину изменения (она попадёт в аудит).')
+      return
+    }
+
+    setSavingGas(true)
+    setSavingGasError(null)
+    setSavingGasNotice(null)
+    try {
+      const updated = await updatePlayerGas(selectedPlayer.player.id, {
+        amount: rawAmount,
+        reason: rawReason,
+      })
+      setSelectedPlayer(updated)
+      // Обновляем историю газа (последние 50) и сбрасываем драфт.
+      const history = await getPlayerGasTransactions(
+        selectedPlayer.player.id,
+        { limit: 50 },
+      )
+      setGasTransactions(history.transactions)
+      setGasDraft({ amount: '', reason: '' })
+      setSavingGasNotice('Газ обновлён.')
+    } catch (err) {
+      setSavingGasError((err as Error).message)
+    } finally {
+      setSavingGas(false)
     }
   }
 
@@ -527,6 +610,127 @@ export function PlayersSection({
                 Закрыто: {formatAmount(selectedPlayer.wallet.lockedBalance)}{' '}
                 {selectedPlayer.wallet.currency}
               </p>
+            </div>
+
+            <div style={{ marginTop: '30px' }}>
+              <p className="admin-kicker">GAS</p>
+              <p
+                style={{
+                  fontSize: '24px',
+                  color: '#87fac0',
+                  fontFamily: '"IBM Plex Mono", monospace',
+                  margin: '4px 0',
+                }}
+              >
+                {selectedPlayer.player.gasBalance} GAS
+              </p>
+            </div>
+
+            <div style={{ marginTop: '18px' }}>
+              <div className="admin-grid">
+                <label>
+                  Сумма
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={gasDraft.amount}
+                    disabled={!canWrite || savingGas}
+                    placeholder="например 5.5 или -3"
+                    onChange={(e) =>
+                      setGasDraft((prev) => ({
+                        ...prev,
+                        amount: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Причина (аудит)
+                  <input
+                    type="text"
+                    value={gasDraft.reason}
+                    disabled={!canWrite || savingGas}
+                    placeholder="например bonus или refill"
+                    onChange={(e) =>
+                      setGasDraft((prev) => ({
+                        ...prev,
+                        reason: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+
+              <div className="admin-actions">
+                <button
+                  className="admin-primary"
+                  onClick={handleSaveGas}
+                  disabled={!canWrite || savingGas}
+                >
+                  {savingGas ? 'Сохранение…' : 'Сохранить газ'}
+                </button>
+                <button
+                  className="admin-secondary"
+                  onClick={() => {
+                    setGasDraft({ amount: '', reason: '' })
+                    setSavingGasError(null)
+                    setSavingGasNotice(null)
+                  }}
+                  disabled={savingGas}
+                >
+                  Очистить
+                </button>
+              </div>
+
+              {savingGasError && (
+                <p className="admin-alert admin-error">{savingGasError}</p>
+              )}
+              {savingGasNotice && (
+                <p className="admin-alert admin-notice">{savingGasNotice}</p>
+              )}
+            </div>
+
+            <div style={{ marginTop: '18px' }}>
+              <p className="admin-kicker">GAS TRANSACTIONS</p>
+              {gasTransactions.length === 0 ? (
+                <p className="admin-muted">Транзакций газа нет.</p>
+              ) : (
+                <table
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    fontSize: '12px',
+                    fontFamily: '"IBM Plex Mono", monospace',
+                  }}
+                >
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Дата</th>
+                      <th style={thStyle}>Тип</th>
+                      <th style={thStyle}>Сумма</th>
+                      <th style={thStyle}>Баланс</th>
+                      <th style={thStyle}>Причина</th>
+                      <th style={thStyle}>Ссылка</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gasTransactions.map((tx) => (
+                      <tr key={tx.id}>
+                        <td style={tdStyle}>
+                          {tx.createdAt
+                            ? new Date(tx.createdAt).toLocaleString('ru-RU')
+                            : '—'}
+                        </td>
+                        <td style={tdStyle}>{tx.transactionType}</td>
+                        <td style={tdStyle}>{tx.amount}</td>
+                        <td style={tdStyle}>{tx.balanceAfter}</td>
+                        <td style={tdStyle}>{tx.reason}</td>
+                        <td style={tdStyle}>{tx.referenceType ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </>
         ) : null}
