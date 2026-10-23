@@ -20,7 +20,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
 from app.admin_players import (
@@ -543,6 +543,235 @@ class AdminPlayerListSearchTests(unittest.TestCase):
         self.assertEqual(hit_ids("other"), [other_id])
         # Несуществующий ник — пусто.
         self.assertEqual(hit_ids("nonexistent"), [])
+
+
+class AdminPlayerProfilePatchTests(unittest.TestCase):
+    """PATCH профиля (10.0.4, часть 1): country/gender/age + аудит.
+
+    Живая SQLite + alembic upgrade head: PATCH пишет в БД (row lock),
+    поэтому FakeSession не подходит. Прямой вызов
+    update_admin_player_profile с request=None (fallback audit "cli:").
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from app import admin_players
+
+        cls.admin_players = admin_players
+        cls._session_local_patch = None
+
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory(
+            prefix="chimera-admin-players-patch-"
+        )
+        self.database_path = Path(self._temporary_directory.name) / "players.sqlite3"
+        database_url = f"sqlite:///{self.database_path}"
+
+        environment = os.environ.copy()
+        environment["DATABASE_URL"] = database_url
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                str(BACKEND_ROOT / "alembic.ini"),
+                "upgrade",
+                "head",
+            ],
+            cwd=BACKEND_ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+        )
+
+        @event.listens_for(self.engine, "connect")
+        def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        self.SessionLocal = sessionmaker(
+            bind=self.engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+        self._session_local_patch = patch.object(
+            self.admin_players, "SessionLocal", self.SessionLocal
+        )
+        self._session_local_patch.start()
+
+    def tearDown(self) -> None:
+        self._session_local_patch.stop()
+        self.engine.dispose()
+        self._temporary_directory.cleanup()
+
+    # ---- Fixtures и хелперы ---------------------------------------------
+
+    def _make_admin(self):
+        from app.models import AdminUser
+
+        admin_id = f"admin-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                AdminUser(
+                    id=admin_id,
+                    username=f"admin-{admin_id[-6:]}",
+                    password_hash="test-hash",
+                    role="super_admin",
+                    is_super_admin=True,
+                    is_active=True,
+                    is_deleted=False,
+                )
+            )
+        with self.SessionLocal() as session:
+            return session.get(AdminUser, admin_id)
+
+
+    def _make_player(self) -> str:
+        """Игрок без профиля (country/gender/age = None)."""
+        from app.models import GamePlayer
+
+        player_id = f"player-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GamePlayer(
+                    id=player_id,
+                    display_name="PATCH-игрок",
+                    auth_provider="test",
+                    external_id=f"test-{uuid.uuid4().hex}",
+                    status="active",
+                )
+            )
+        return player_id
+
+    def _get_player(self, player_id: str):
+        from app.models import GamePlayer
+
+        with self.SessionLocal() as session:
+            return session.get(GamePlayer, player_id)
+
+    def _call_patch(self, player_id, payload, admin):
+        return self.admin_players.update_admin_player_profile(
+            player_id, payload, request=None, admin=admin
+        )
+
+    def _find_profile_audits(self):
+        from app.models import AdminAuditLog
+
+        with self.SessionLocal() as session:
+            return session.scalars(
+                select(AdminAuditLog).where(
+                    AdminAuditLog.action == "player.profile_updated"
+                )
+            ).all()
+
+    def test_patch_player_profile(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        result = self._call_patch(
+            player_id,
+            self.admin_players.PlayerProfileUpdatePayload(
+                country="ru", gender="male", age=30
+            ),
+            admin,
+        )
+
+        # Ответ — тот же формат, что у GET-карточки: {"player": card},
+        # где card["player"] — блок игрока.
+        card_player = result["player"]["player"]
+
+        # Нормализация country: strip + upper.
+        self.assertEqual(card_player["country"], "RU")
+        self.assertEqual(card_player["gender"], "male")
+        self.assertEqual(card_player["age"], 30)
+
+        # Значения записались в БД.
+        player = self._get_player(player_id)
+        self.assertEqual(player.country, "RU")
+        self.assertEqual(player.gender, "male")
+        self.assertEqual(player.age, 30)
+
+        # Audit: одна запись, before/after, changedFields.
+        audits = self._find_profile_audits()
+        self.assertEqual(len(audits), 1)
+        audit = audits[0]
+        self.assertEqual(audit.entity_id, player_id)
+        self.assertEqual(audit.permission_code, "players.manage")
+        self.assertEqual(
+            audit.before_json, {"country": None, "gender": None, "age": None}
+        )
+        self.assertEqual(
+            audit.after_json, {"country": "RU", "gender": "male", "age": 30}
+        )
+        self.assertEqual(
+            audit.metadata_json,
+            {"changedFields": ["country", "gender", "age"]},
+        )
+
+
+    def test_patch_player_profile_invalid_gender(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_patch(
+                player_id,
+                self.admin_players.PlayerProfileUpdatePayload(gender="unknown"),
+                admin,
+            )
+        self.assertEqual(ctx.exception.status_code, 422)
+
+        # Проверка не записана, аудит отсутствует.
+        player = self._get_player(player_id)
+        self.assertIsNone(player.gender)
+        self.assertEqual(self._find_profile_audits(), [])
+
+    def test_patch_player_profile_invalid_country(self) -> None:
+        # "RUS" (3 буквы) не проходит Pydantic max_length=2 → 422 на маршруте.
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            self.admin_players.PlayerProfileUpdatePayload(country="RUS")
+
+        # "A1" (ISO-2-форма, но не буквы) — 422 уже в эндпоинте.
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_patch(
+                player_id,
+                self.admin_players.PlayerProfileUpdatePayload(country="a1"),
+                admin,
+            )
+        self.assertEqual(ctx.exception.status_code, 422)
+
+        player = self._get_player(player_id)
+        self.assertIsNone(player.country)
+        self.assertEqual(self._find_profile_audits(), [])
+
+    def test_patch_player_profile_extra_field(self) -> None:
+        # nickname (нередактируемое поле) запрещено extra=forbid → 422.
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            self.admin_players.PlayerProfileUpdatePayload(nickname="newnick")
+
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        player = self._get_player(player_id)
+        self.assertIsNone(player.nickname)
+        self.assertEqual(self._find_profile_audits(), [])
 
 
 if __name__ == "__main__":

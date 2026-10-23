@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.admin_access import require_permission
-from app.admin_audit import sanitize_audit_data
+from app.admin_audit import sanitize_audit_data, write_admin_audit
 from app.db import SessionLocal
 from app.models import (
     AdminUser,
@@ -74,6 +75,18 @@ VALID_GENDERS = {"male", "female", "other", "unspecified"}
 AGE_MIN = 0
 AGE_MAX = 120
 
+
+class PlayerProfileUpdatePayload(BaseModel):
+    """PATCH профиля (10.0.4): только country/gender/age.
+    nickname/лишние поля — 422 (extra=forbid)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    country: str | None = Field(default=None, max_length=2)
+    gender: str | None = Field(default=None)
+    age: int | None = Field(default=None, ge=AGE_MIN, le=AGE_MAX)
+
+
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 200
 RECENT_TRANSACTIONS_LIMIT = 20
@@ -83,6 +96,18 @@ RESTRICTIONS_LIMIT = 20
 
 def _get_player_or_404(session: Session, player_id: str) -> GamePlayer:
     player = session.get(GamePlayer, player_id)
+    if player is None:
+        raise HTTPException(status_code=404, detail="Игрок не найден.")
+    return player
+
+
+def _lock_player(session: Session, player_id: str) -> GamePlayer:
+    """Игрок с FOR UPDATE (PostgreSQL; SQLite — не блокирует)."""
+    player = session.scalar(
+        select(GamePlayer)
+        .where(GamePlayer.id == player_id)
+        .with_for_update()
+    )
     if player is None:
         raise HTTPException(status_code=404, detail="Игрок не найден.")
     return player
@@ -413,4 +438,81 @@ def get_admin_player(
     """Полная карточка игрока."""
     with SessionLocal() as session:  # read-only, не begin()
         player = _get_player_or_404(session, player_id)
+        return {"player": _serialize_player_card(session, player)}
+
+
+@router.patch("/{player_id}")
+def update_admin_player_profile(
+    player_id: str,
+    payload: PlayerProfileUpdatePayload,
+    request: Request,
+    admin: AdminUser = Depends(require_permission(PLAYERS_MANAGE_PERMISSION)),
+):
+    """PATCH профиля (10.0.4): country/gender/age (direct, без approval)."""
+    updates = payload.model_dump(exclude_unset=True)
+
+    if not updates:
+        raise HTTPException(
+            status_code=422,
+            detail="Передайте хотя бы одно поле для изменения.",
+        )
+
+    with SessionLocal.begin() as session:
+        player = _lock_player(session, player_id)
+
+        before = {
+            "country": player.country,
+            "gender": player.gender,
+            "age": player.age,
+        }
+        changed_fields: list[str] = []
+
+        if "country" in updates:
+            value = updates["country"]
+            if value is not None:
+                value = value.strip().upper()
+                if len(value) != 2 or not value.isalpha():
+                    raise HTTPException(
+                        status_code=422,
+                        detail="country должен быть ISO-2 (2 буквы).",
+                    )
+            player.country = value
+            changed_fields.append("country")
+
+        if "gender" in updates:
+            value = updates["gender"]
+            if value is not None and value not in VALID_GENDERS:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "gender должен быть одним из: "
+                        f"{', '.join(sorted(VALID_GENDERS))}."
+                    ),
+                )
+            player.gender = value
+            changed_fields.append("gender")
+
+        if "age" in updates:
+            player.age = updates["age"]
+            changed_fields.append("age")
+
+        session.flush()
+
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="player.profile_updated",
+            entity_type="player",
+            entity_id=player_id,
+            request=request,
+            permission_code=PLAYERS_MANAGE_PERMISSION,
+            before=before,
+            after={
+                "country": player.country,
+                "gender": player.gender,
+                "age": player.age,
+            },
+            metadata={"changedFields": changed_fields},
+        )
+
         return {"player": _serialize_player_card(session, player)}
