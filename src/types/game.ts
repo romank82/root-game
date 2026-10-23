@@ -4,6 +4,7 @@ export type Screen =
   | 'archive'
   | 'inventory'
   | 'profile'
+  | 'transfer'
   | 'scanner'
   | 'shop'
   | 'map'

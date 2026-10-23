@@ -68,6 +68,14 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
       </button>
 
       <button
+        className={screen === 'transfer' ? 'active' : ''}
+        onClick={() => onScreenChange('transfer')}
+      >
+        <span>⇄</span>
+        Перевод
+      </button>
+
+      <button
         className={screen === 'profile' ? 'active' : ''}
         onClick={() => onScreenChange('profile')}
       >

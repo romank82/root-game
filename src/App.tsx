@@ -13,6 +13,7 @@ import { InventoryScreen } from './components/screens/InventoryScreen'
 import { ScannerScreen } from './components/screens/ScannerScreen'
 import { ShopScreen } from './components/screens/ShopScreen'
 import { ProfileScreen } from './components/screens/ProfileScreen'
+import { TransferScreen } from './components/screens/TransferScreen'
 import { MapScreen } from './components/screens/MapScreen'
 // TEMP: dev-only camera test screen — удалить в Sprint 8.6.g.
 import { CameraTestScreen } from './components/screens/CameraTestScreen'
@@ -184,6 +185,22 @@ function App() {
 
       {screen === 'profile' && (
         <ProfileScreen onScreenChange={setScreen} />
+      )}
+
+      {screen === 'transfer' && (
+        <TransferScreen
+          rootBalance={echo}
+          onScreenChange={setScreen}
+          onBalanceChange={async () => {
+            // Refetch bootstrap: rootBalance после перевода.
+            try {
+              const fresh = await getEngineBootstrap()
+              applyEngineBootstrap(fresh)
+            } catch {
+              // Перевод прошёл, но bootstrap не обновился — не критично.
+            }
+          }}
+        />
       )}
 
       {accepted && screen !== 'briefing' && (
