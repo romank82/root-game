@@ -787,6 +787,23 @@ class GamePlayer(TimestampMixin, Base):
         index=False,
     )
 
+    # Поля профиля игрока (10.0.2/34-C): country (ISO-2), gender (enum),
+    # age. Nullable: существующие игроки без профиля; заполняются через
+    # PATCH (34-C). Валидация значений — на бэке, в PATCH (не в модели).
+    # Индексы/unique не нужны: фильтров по ним пока нет.
+    country: Mapped[str | None] = mapped_column(
+        String(2),
+        nullable=True,
+    )
+    gender: Mapped[str | None] = mapped_column(
+        String(16),
+        nullable=True,
+    )
+    age: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
