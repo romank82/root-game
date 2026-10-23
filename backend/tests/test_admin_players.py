@@ -245,6 +245,7 @@ class AdminPlayerCardTests(unittest.TestCase):
             {
                 "player",
                 "wallet",
+                "gasBalance",
                 "inventory",
                 "activeMissions",
                 "missionHistory",

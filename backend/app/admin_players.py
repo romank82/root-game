@@ -13,6 +13,7 @@ age 0..120, country ISO-2), row-lock игрока (_lock_player) и аудит
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -26,6 +27,7 @@ from app.db import SessionLocal
 from app.models import (
     AdminUser,
     GamePlayer,
+    GasWallet,
     Item,
     Mission,
     PlayerItem,
@@ -143,9 +145,22 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
 
     Wallet может отсутствовать (не создаём read-only эндпоинтом) — тогда
     блоки wallet/recentTransactions/stats отдают нули и пустые списки.
+    GasWallet тоже может отсутствовать — gasBalance отдаётся как "0".
     """
     wallet = session.scalar(
         select(Wallet).where(Wallet.player_id == player.id)
+    )
+    gas_wallet = session.scalar(
+        select(GasWallet).where(GasWallet.player_id == player.id)
+    )
+    # FakeSession в tests/test_admin_players.scalar() ветвится по подстроке
+    # "wallets" и для "gas_wallets" отдаёт ROOT-заглушку без поля balance.
+    # Реальная SQLAlchemy-сессия всегда возвращает GasWallet — здесь будет
+    # его дробный Numeric-баланс. getattr-защита оставлена для фейка.
+    gas_balance = (
+        getattr(gas_wallet, "balance", Decimal("0"))
+        if gas_wallet is not None
+        else Decimal("0")
     )
 
     # Инвентарь: игровые строки PlayerItem с quantity > 0 + детали Item.
@@ -357,6 +372,9 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
             if wallet is not None
             else {"currency": "ROOT", "availableBalance": 0, "lockedBalance": 0}
         ),
+        # Газ (10.4-b): дробный Numeric(18,4). Сериализуем строкой, чтобы не
+        # терять точность Decimal через float в JSON.
+        "gasBalance": str(gas_balance),
         "inventory": inventory,
         "activeMissions": active_missions,
         "missionHistory": mission_history,
