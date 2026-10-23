@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
 import os
@@ -773,6 +774,269 @@ class AdminPlayerProfilePatchTests(unittest.TestCase):
         player = self._get_player(player_id)
         self.assertIsNone(player.nickname)
         self.assertEqual(self._find_profile_audits(), [])
+
+
+class AdminPlayerGasPatchTests(unittest.TestCase):
+    """PATCH газа (10.4-c-2): начислить/списать + аудит + проводки.
+
+    Живая SQLite + alembic upgrade head (как AdminPlayerProfilePatchTests):
+    update_admin_player_gas пишет в БД (row-lock GasWallet, создание
+    проводки, аудит), поэтому FakeSession не подходит.
+
+    Баланс газа — Numeric(18,4): в SQLite хранится как float и читается
+    как Decimal("10.0"), в PostgreSQL — со scale 4 ("10.0000"). Строковая
+    форма зависит от диалекта, поэтому балансы сравниваем через Decimal()
+    от строки, а не точным строковым равенством.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from app import admin_players
+
+        cls.admin_players = admin_players
+        cls._session_local_patch = None
+
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory(
+            prefix="chimera-admin-players-gas-"
+        )
+        self.database_path = Path(self._temporary_directory.name) / "gas.sqlite3"
+        database_url = f"sqlite:///{self.database_path}"
+
+        environment = os.environ.copy()
+        environment["DATABASE_URL"] = database_url
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                str(BACKEND_ROOT / "alembic.ini"),
+                "upgrade",
+                "head",
+            ],
+            cwd=BACKEND_ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+        )
+
+        @event.listens_for(self.engine, "connect")
+        def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        self.SessionLocal = sessionmaker(
+            bind=self.engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+        self._session_local_patch = patch.object(
+            self.admin_players, "SessionLocal", self.SessionLocal
+        )
+        self._session_local_patch.start()
+
+    def tearDown(self) -> None:
+        self._session_local_patch.stop()
+        self.engine.dispose()
+        self._temporary_directory.cleanup()
+
+    # ---- Fixtures и хелперы ---------------------------------------------
+
+    def _make_admin(self):
+        from app.models import AdminUser
+
+        admin_id = f"admin-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                AdminUser(
+                    id=admin_id,
+                    username=f"admin-{admin_id[-6:]}",
+                    password_hash="test-hash",
+                    role="super_admin",
+                    is_super_admin=True,
+                    is_active=True,
+                    is_deleted=False,
+                )
+            )
+        with self.SessionLocal() as session:
+            return session.get(AdminUser, admin_id)
+
+    def _make_player(self) -> str:
+        from app.models import GamePlayer
+
+        player_id = f"player-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GamePlayer(
+                    id=player_id,
+                    display_name="Gas-игрок",
+                    auth_provider="test",
+                    external_id=f"test-{uuid.uuid4().hex}",
+                    status="active",
+                )
+            )
+        return player_id
+
+    def _make_gas_wallet(self, player_id: str, balance: Decimal) -> str:
+        from app.models import GasWallet
+
+        wallet_id = f"gas-wallet-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GasWallet(id=wallet_id, player_id=player_id, balance=balance)
+            )
+        return wallet_id
+
+    def _get_gas_wallet(self, player_id: str):
+        from app.models import GasWallet
+
+        with self.SessionLocal() as session:
+            return session.scalar(
+                select(GasWallet).where(GasWallet.player_id == player_id)
+            )
+
+    def _get_gas_transactions(self, gas_wallet_id: str):
+        from app.models import GasTransaction
+
+        with self.SessionLocal() as session:
+            return session.scalars(
+                select(GasTransaction).where(
+                    GasTransaction.gas_wallet_id == gas_wallet_id
+                )
+            ).all()
+
+    def _find_gas_audits(self):
+        from app.models import AdminAuditLog
+
+        with self.SessionLocal() as session:
+            return session.scalars(
+                select(AdminAuditLog).where(
+                    AdminAuditLog.action == "player.gas_adjusted"
+                )
+            ).all()
+
+    def _call_gas_patch(
+        self, player_id: str, amount: Decimal, reason: str, admin
+    ) -> dict:
+        return self.admin_players.update_admin_player_gas(
+            player_id,
+            self.admin_players.GasAdjustmentPayload(amount=amount, reason=reason),
+            request=None,
+            admin=admin,
+        )
+
+    # ---- Сценарии --------------------------------------------------------
+
+    def test_patch_gas_credit(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_gas_wallet(player_id, Decimal("10"))
+
+        result = self._call_gas_patch(player_id, Decimal("5"), "bonus", admin)
+
+        # Баланс в карточке: 10 + 5 = 15.
+        self.assertEqual(Decimal(result["player"]["gasBalance"]), Decimal("15"))
+
+        # Проводка: credit, amount, balance_after.
+        txs = self._get_gas_transactions(wallet_id)
+        self.assertEqual(len(txs), 1)
+        tx = txs[0]
+        self.assertEqual(tx.transaction_type, "credit")
+        self.assertEqual(Decimal(tx.amount), Decimal("5"))
+        self.assertEqual(Decimal(tx.balance_after), Decimal("15"))
+        self.assertEqual(tx.reason, "bonus")
+        self.assertEqual(tx.reference_type, "admin_gas_adjustment")
+        self.assertIsNotNone(tx.reference_id)
+        self.assertEqual(tx.metadata_json, {"adminId": admin.id})
+
+        # Аудит: action зафиксирован фильтром, before/after в строках,
+        # metadata-amount = str(Decimal).
+        audits = self._find_gas_audits()
+        self.assertEqual(len(audits), 1)
+        audit = audits[0]
+        self.assertEqual(audit.entity_id, player_id)
+        self.assertEqual(audit.permission_code, "players.manage")
+        self.assertEqual(
+            Decimal(audit.before_json["gasBalance"]), Decimal("10")
+        )
+        self.assertEqual(
+            Decimal(audit.after_json["gasBalance"]), Decimal("15")
+        )
+        self.assertEqual(
+            audit.metadata_json, {"amount": "5", "reason": "bonus"}
+        )
+
+    def test_patch_gas_debit(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_gas_wallet(player_id, Decimal("10"))
+
+        result = self._call_gas_patch(player_id, Decimal("-3"), "spend", admin)
+
+        # Баланс в карточке: 10 - 3 = 7.
+        self.assertEqual(Decimal(result["player"]["gasBalance"]), Decimal("7"))
+
+        txs = self._get_gas_transactions(wallet_id)
+        self.assertEqual(len(txs), 1)
+        tx = txs[0]
+        self.assertEqual(tx.transaction_type, "debit")
+        self.assertEqual(Decimal(tx.amount), Decimal("3"))
+        self.assertEqual(Decimal(tx.balance_after), Decimal("7"))
+        self.assertEqual(tx.reason, "spend")
+
+    def test_patch_gas_insufficient(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_gas_wallet(player_id, Decimal("10"))
+
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_gas_patch(player_id, Decimal("-100"), "spend", admin)
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertEqual(ctx.exception.detail, "Недостаточно газа для списания.")
+
+        # Транзакция откатилась: баланс не изменился, проводок и аудита нет.
+        wallet = self._get_gas_wallet(player_id)
+        self.assertEqual(Decimal(wallet.balance), Decimal("10"))
+        self.assertEqual(self._get_gas_transactions(wallet_id), [])
+        self.assertEqual(self._find_gas_audits(), [])
+
+    def test_patch_gas_zero_amount(self) -> None:
+        admin = self._make_admin()
+
+        # Проверка amount != 0 идёт до обращения к БД, игрок не нужен.
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_gas_patch("player-unknown", Decimal("0"), "noop", admin)
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertEqual(ctx.exception.detail, "Сумма газа должна быть ненулевой.")
+
+    def test_patch_gas_creates_wallet(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        result = self._call_gas_patch(player_id, Decimal("5"), "first bonus", admin)
+
+        self.assertEqual(Decimal(result["player"]["gasBalance"]), Decimal("5"))
+
+        # Кошелёк создан (у игрока его не было) + проводка credit.
+        gas_wallet = self._get_gas_wallet(player_id)
+        self.assertIsNotNone(gas_wallet)
+        self.assertEqual(Decimal(gas_wallet.balance), Decimal("5"))
+
+        txs = self._get_gas_transactions(gas_wallet.id)
+        self.assertEqual(len(txs), 1)
+        self.assertEqual(txs[0].transaction_type, "credit")
+        self.assertEqual(Decimal(txs[0].amount), Decimal("5"))
+        self.assertEqual(Decimal(txs[0].balance_after), Decimal("5"))
 
 
 if __name__ == "__main__":
