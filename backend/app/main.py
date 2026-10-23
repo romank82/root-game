@@ -87,7 +87,11 @@ from app.admin_mission_runtime_policies import (
     router_missions as admin_mission_runtime_policies_missions_router,
 )
 from app.admin_system_settings import router as admin_system_settings_router
-from app.admin_players import router as admin_players_router
+from app.admin_players import (
+    PlayerProfileUpdatePayload,
+    VALID_GENDERS,
+    router as admin_players_router,
+)
 from app.admin_player_wallet import router as admin_player_wallet_router
 from app.admin_economy import router as admin_economy_router
 from app.admin_player_inventory import router as admin_player_inventory_router
@@ -448,6 +452,87 @@ def get_engine_bootstrap_route(
             status_code=error.status_code,
             detail=error.detail,
         ) from error
+
+
+@app.get("/api/v1/engine/me/profile")
+def get_my_profile_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Мой профиль (10.0.6-a): чтение country/gender/age."""
+    with SessionLocal() as session:
+        player = session.get(GamePlayer, player_id)
+        if player is None:
+            raise HTTPException(status_code=404, detail="Игрок не найден.")
+        return {
+            "player": {
+                "id": player.id,
+                "nickname": player.nickname,
+                "country": player.country,
+                "gender": player.gender,
+                "age": player.age,
+            }
+        }
+
+
+@app.patch("/api/v1/engine/me/profile")
+def update_my_profile_route(
+    request: Request,
+    payload: PlayerProfileUpdatePayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Моя анкета (10.0.6-a): корректировка country/gender/age (без админ-аудита)."""
+    updates = payload.model_dump(exclude_unset=True)
+
+    if not updates:
+        raise HTTPException(
+            status_code=422,
+            detail="Передайте хотя бы одно поле для изменения.",
+        )
+
+    with SessionLocal.begin() as session:
+        player = session.get(GamePlayer, player_id)
+        if player is None:
+            raise HTTPException(status_code=404, detail="Игрок не найден.")
+
+        if "country" in updates:
+            value = updates["country"]
+            if value is not None:
+                value = value.strip().upper()
+                if len(value) != 2 or not value.isalpha():
+                    raise HTTPException(
+                        status_code=422,
+                        detail="country должен быть ISO-2 (2 буквы).",
+                    )
+            player.country = value
+
+        if "gender" in updates:
+            value = updates["gender"]
+            if value is not None and value not in VALID_GENDERS:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "gender должен быть одним из: "
+                        f"{', '.join(sorted(VALID_GENDERS))}."
+                    ),
+                )
+            player.gender = value
+
+        if "age" in updates:
+            player.age = updates["age"]
+
+        session.commit()
+
+        return {
+            "player": {
+                "id": player.id,
+                "nickname": player.nickname,
+                "country": player.country,
+                "gender": player.gender,
+                "age": player.age,
+            }
+        }
+
 
 @limiter.limit("10/minute")
 @app.post("/api/v1/engine/missions/{mission_id}/submit")
