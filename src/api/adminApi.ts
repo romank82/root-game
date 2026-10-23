@@ -1516,3 +1516,177 @@ export async function listEconomyTransactions(
   return body
 }
 
+
+// ---- Игроки (10.0.3, часть 1) -------------------------------------------
+// Read-only типы и функции для вкладки «Игроки». Контракты — из
+// admin_players.py: _serialize_player_summary, _serialize_player_card,
+// GET /profile-fields (PROFILE_FIELDS).
+
+export type AdminPlayerSummary = {
+  id: string
+  displayName: string | null
+  authProvider: string
+  status: string
+  nickname: string | null
+  country: string | null
+  gender: string | null
+  age: number | null
+  telegramUsername: string | null
+  telegramFirstName: string | null
+  telegramLastName: string | null
+  telegramPhotoUrl: string | null
+  createdAt: string | null
+  rootBalance: number
+}
+
+export type AdminProfileField = {
+  key: string
+  label: string
+  type: 'text' | 'select' | 'number'
+  options?: string[]
+  readOnly?: boolean
+  maxLength?: number
+  min?: number
+  max?: number
+}
+
+export type AdminPlayerCard = {
+  player: {
+    id: string
+    displayName: string | null
+    authProvider: string
+    status: string
+    nickname: string | null
+    country: string | null
+    gender: string | null
+    age: number | null
+    externalId: string | null
+    telegram: {
+      username: string | null
+      firstName: string | null
+      lastName: string | null
+      photoUrl: string | null
+      normalizedUsername: string | null
+    }
+    registeredAt: string | null
+    lastActivityAt: string | null
+  }
+  wallet: {
+    currency: string
+    availableBalance: number
+    lockedBalance: number
+  }
+  inventory: Array<{
+    id: string
+    itemId: string
+    slug: string
+    code: string
+    title: string
+    symbol: string
+    category: string
+    rarity: string
+    quantity: number
+    obtainedFromType: string | null
+    obtainedFromId: string | null
+  }>
+  activeMissions: Array<{
+    missionId: string
+    slug: string
+    title: string
+    missionType: string
+    status: string
+    attemptCount: number
+    startedAt: string | null
+  }>
+  missionHistory: Array<{
+    missionId: string
+    slug: string
+    title: string
+    status: string
+    attemptCount: number
+    startedAt: string | null
+    completedAt: string | null
+  }>
+  restrictions: Array<{
+    id: string
+    restrictionType: string
+    status: string
+    reason: string
+    evidence: string | null
+    adminId: string
+    startsAt: string | null
+    expiresAt: string | null
+    approvedByApprovalId: string | null
+    revokedAt: string | null
+    revocationReason: string | null
+  }>
+  recentTransactions: Array<{
+    id: string
+    amount: number
+    balanceAfter: number
+    transactionType: 'credit' | 'debit'
+    reason: string
+    referenceType: string | null
+    referenceId: string | null
+    metadata: Record<string, unknown>
+    createdAt: string | null
+  }>
+  stats: {
+    totalMissionsCompleted: number
+    totalRootEarned: number
+    totalRootSpent: number
+  }
+}
+
+export type PlayersFilters = {
+  search?: string
+  status?: string
+  authProvider?: string
+  limit?: number
+  offset?: number
+}
+
+export async function listPlayers(
+  filters: PlayersFilters = {},
+): Promise<{
+  players: AdminPlayerSummary[]
+  total: number
+  limit: number
+  offset: number
+}> {
+  const params = new URLSearchParams()
+  if (filters.search) params.set('search', filters.search)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.authProvider) params.set('auth_provider', filters.authProvider)
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) params.set('offset', String(filters.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(`/api/v1/admin/players${query}`)
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as {
+    players: AdminPlayerSummary[]
+    total: number
+    limit: number
+    offset: number
+  }
+  return body
+}
+
+export async function getPlayer(playerId: string): Promise<AdminPlayerCard> {
+  const response = await adminFetch(
+    `/api/v1/admin/players/${encodeURIComponent(playerId)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { player: AdminPlayerCard }
+  return body.player
+}
+
+export async function getProfileFields(): Promise<{
+  fields: AdminProfileField[]
+}> {
+  const response = await adminFetch('/api/v1/admin/players/profile-fields')
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { fields: AdminProfileField[] }
+  return body
+}
+
