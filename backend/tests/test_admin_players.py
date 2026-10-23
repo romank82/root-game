@@ -1038,6 +1038,176 @@ class AdminPlayerGasPatchTests(unittest.TestCase):
         self.assertEqual(Decimal(txs[0].amount), Decimal("5"))
         self.assertEqual(Decimal(txs[0].balance_after), Decimal("5"))
 
+    # ---- GET история транзакций газа (10.4-d) ---------------------------
+
+    def _make_gas_transaction(
+        self,
+        wallet_id: str,
+        *,
+        amount: Decimal,
+        balance_after: Decimal,
+        transaction_type: str,
+        reason: str,
+        created_at: datetime,
+        reference_type: str = "admin_gas_adjustment",
+        metadata: dict | None = None,
+    ) -> str:
+        from app.models import GasTransaction
+
+        tx_id = f"gas-tx-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GasTransaction(
+                    id=tx_id,
+                    gas_wallet_id=wallet_id,
+                    amount=amount,
+                    balance_after=balance_after,
+                    transaction_type=transaction_type,
+                    reason=reason,
+                    reference_type=reference_type,
+                    reference_id=f"ref-{uuid.uuid4().hex}",
+                    metadata_json=metadata or {"adminId": "admin-1"},
+                    created_at=created_at,
+                )
+            )
+        return tx_id
+
+    def _call_gas_history(
+        self, player_id: str, *, limit: int, offset: int, admin
+    ) -> dict:
+        return self.admin_players.list_admin_player_gas_transactions(
+            player_id, limit=limit, offset=offset, _admin=admin
+        )
+
+    def test_gas_transactions_list_and_order(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_gas_wallet(player_id, Decimal("8"))
+
+        tx_old = self._make_gas_transaction(
+            wallet_id,
+            amount=Decimal("1"),
+            balance_after=Decimal("1"),
+            transaction_type="credit",
+            reason="first bonus",
+            created_at=datetime(2026, 10, 1, 10, 0, 0),
+            metadata={"password": "secret", "adminId": "admin-1"},
+        )
+        tx_mid = self._make_gas_transaction(
+            wallet_id,
+            amount=Decimal("2"),
+            balance_after=Decimal("3"),
+            transaction_type="credit",
+            reason="second bonus",
+            created_at=datetime(2026, 10, 2, 10, 0, 0),
+        )
+        tx_new = self._make_gas_transaction(
+            wallet_id,
+            amount=Decimal("5"),
+            balance_after=Decimal("8"),
+            transaction_type="debit",
+            reason="spend transfer",
+            created_at=datetime(2026, 10, 3, 10, 0, 0),
+        )
+
+        result = self._call_gas_history(player_id, limit=50, offset=0, admin=admin)
+
+        # Новые сверху: tx_new, tx_mid, tx_old.
+        self.assertEqual(
+            [tx["id"] for tx in result["transactions"]],
+            [tx_new, tx_mid, tx_old],
+        )
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["limit"], 50)
+        self.assertEqual(result["offset"], 0)
+
+        newest = result["transactions"][0]
+        self.assertEqual(newest["transactionType"], "debit")
+        self.assertEqual(newest["reason"], "spend transfer")
+        self.assertEqual(newest["referenceType"], "admin_gas_adjustment")
+        self.assertIsNotNone(newest["referenceId"])
+        # Numeric(18,4) сериализуется строкой: сравниваем Decimal от строки.
+        self.assertEqual(Decimal(newest["amount"]), Decimal("5"))
+        self.assertEqual(Decimal(newest["balanceAfter"]), Decimal("8"))
+        self.assertEqual(newest["createdAt"], "2026-10-03T10:00:00")
+        # metadata прошёл через sanitize_audit_data — sensitive-ключ redacted.
+        self.assertEqual(
+            result["transactions"][2]["metadata"]["password"], "[REDACTED]"
+        )
+        self.assertEqual(result["transactions"][2]["transactionType"], "credit")
+
+    def test_gas_transactions_pagination(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_gas_wallet(player_id, Decimal("5"))
+
+        # 5 проводок, created_at по дням (пятая — самая свежая).
+        tx_ids: list[str] = []
+        for day in range(1, 6):
+            tx_ids.append(
+                self._make_gas_transaction(
+                    wallet_id,
+                    amount=Decimal(str(day)),
+                    balance_after=Decimal(str(day)),
+                    transaction_type="credit",
+                    reason=f"bonus-{day}",
+                    created_at=datetime(2026, 10, day, 10, 0, 0),
+                )
+            )
+
+        page1 = self._call_gas_history(player_id, limit=2, offset=0, admin=admin)
+        self.assertEqual(
+            [tx["id"] for tx in page1["transactions"]], [tx_ids[4], tx_ids[3]]
+        )
+        self.assertEqual(page1["total"], 5)
+        self.assertEqual(page1["limit"], 2)
+        self.assertEqual(page1["offset"], 0)
+
+        page2 = self._call_gas_history(player_id, limit=2, offset=2, admin=admin)
+        self.assertEqual(
+            [tx["id"] for tx in page2["transactions"]], [tx_ids[2], tx_ids[1]]
+        )
+        # total не зависит от limit/offset.
+        self.assertEqual(page2["total"], 5)
+        self.assertEqual(page2["limit"], 2)
+        self.assertEqual(page2["offset"], 2)
+
+    def test_gas_transactions_empty_wallet(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        result = self._call_gas_history(player_id, limit=50, offset=0, admin=admin)
+
+        self.assertEqual(
+            result, {"transactions": [], "total": 0, "limit": 50, "offset": 0}
+        )
+        # Read-only ручка кошелёк не создаёт.
+        self.assertIsNone(self._get_gas_wallet(player_id))
+
+    def test_gas_transactions_player_not_found(self) -> None:
+        admin = self._make_admin()
+
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_gas_history(
+                "player-does-not-exist", limit=10, offset=0, admin=admin
+            )
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertEqual(ctx.exception.detail, "Игрок не найден.")
+
+    def test_gas_transactions_limit_clamp(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        self._make_gas_wallet(player_id, Decimal("0"))
+
+        over_limit = self._call_gas_history(
+            player_id, limit=1000, offset=0, admin=admin
+        )
+        self.assertEqual(over_limit["limit"], 200)  # MAX_GAS_TX_LIMIT
+        self.assertEqual(over_limit["total"], 0)
+
+        zero_limit = self._call_gas_history(player_id, limit=0, offset=0, admin=admin)
+        self.assertEqual(zero_limit["limit"], 1)  # min limit
+
 
 if __name__ == "__main__":
     unittest.main()
