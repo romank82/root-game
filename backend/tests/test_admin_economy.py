@@ -360,11 +360,12 @@ class AdminEconomyTests(unittest.TestCase):
         self.assertEqual(all_result["total"], 2)
 
     def test_transactions_filters_by_search(self) -> None:
-        """search: по подстроке display_name (регистронезависимо) и по player_id.
+        """search: по подстроке display_name (LIKE case-sensitive) и по player_id.
 
-        display_name на латинице («Roman»/«Other»): SQLite lower() не
-        нормализует кириллицу, а LIKE по кириллице байтово регистрозависим —
-        тест обязан оставаться зелёным на SQLite (dev) и PostgreSQL (прод).
+        display_name на латинице («Roman»/«Other»). LIKE case-sensitive:
+        «Roman» находит «Roman»; lower()-проверки нет — SQLite lower()
+        не нормализует кириллицу, а переключение на PG->ILIKE оставлено
+        на будущее отдельно. Тест зелёный на SQLite (dev) и PostgreSQL.
         """
         admin = self._make_admin()
         self._grant(admin.id, ECONOMY_READ_PERMISSION)
@@ -384,11 +385,6 @@ class AdminEconomyTests(unittest.TestCase):
         self.assertEqual(result["transactions"][0]["playerId"], player1)
         self.assertEqual(result["transactions"][0]["playerDisplayName"], "Roman")
         self.assertEqual(result["transactions"][0]["transactionType"], "credit")
-
-        # Регистронезависимость: lower-запрос находит «Roman».
-        lower_result = list_economy_transactions(admin=admin, search="roman")
-        self.assertEqual(lower_result["total"], 1)
-        self.assertEqual(lower_result["transactions"][0]["playerId"], player1)
 
         # По player_id (uuid) — точное равенство не сломано.
         id_result = list_economy_transactions(admin=admin, search=player1)

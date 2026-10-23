@@ -125,9 +125,9 @@ def list_economy_transactions(
 
     Фильтры:
       - player_id — транзакции конкретного игрока (join через Wallet);
-      - search — поиск по display_name (регистронезависимая подстрока,
-        func.lower + like, работает на PostgreSQL и SQLite) ИЛИ точный
-        player_id; display_name не уникален — вернутся все совпавшие;
+      - search — поиск по подстроке display_name (LIKE case-sensitive:
+        «Роман» найдёт «Роман», но не «роман») ИЛИ по точному player_id;
+        display_name не уникален — вернутся все совпавшие;
       - type — только "credit" или "debit" (иначе 422);
       - from/to — диапазон created_at, ISO 8601 (иначе 422);
       - limit (1..200) / offset — пагинация.
@@ -146,14 +146,11 @@ def list_economy_transactions(
 
         if search:
             search_value = search.strip()
-            search_lower = search_value.lower()
-            if search_lower:
+            if search_value:
                 query = query.where(
                     or_(
                         Wallet.player_id == search_value,
-                        func.lower(GamePlayer.display_name).like(
-                            f"%{search_lower}%"
-                        ),
+                        GamePlayer.display_name.like(f"%{search_value}%"),
                     )
                 )
 
