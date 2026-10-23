@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
@@ -669,6 +669,66 @@ def get_engine_fallback_offers_route(
             status_code=error.status_code,
             detail=error.detail,
         ) from error
+
+
+def _serialize_player_for_search(player: GamePlayer) -> dict[str, str | None]:
+    """Минимальная публичная карточка для поиска игроков (10.0.1).
+
+    Намеренно НЕ отдаём display_name/telegram_*/auth_provider/external_id/
+    balance/status/age/gender/country_source — лишние private data.
+    """
+    return {
+        "id": player.id,
+        "nickname": player.nickname,
+        "country": player.country,
+    }
+
+
+# 10.0.1: игровой поиск игроков по нику (для переводов 10.1+).
+# Минимум полей в выдаче, q >= 3 символа, только status='active',
+# сам игрок в выдачу не попадает. rate limit — как у соседних ручек.
+@limiter.limit("10/minute")
+@app.get("/api/v1/players/search")
+def search_players_route(
+    request: Request,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=50),
+    player_id: str = Depends(get_current_player_id),
+):
+    """Поиск игроков по нику (ilike по nickname_lower), публичная выдача."""
+    query = (q or "").strip()
+    if len(query) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Введите минимум 3 символа для поиска.",
+        )
+
+    pattern = f"%{query.lower()}%"
+    conditions = [
+        GamePlayer.nickname_lower.ilike(pattern),
+        GamePlayer.status == "active",
+        GamePlayer.id != player_id,
+    ]
+
+    with SessionLocal() as session:  # read-only, не begin()
+        total = session.scalar(
+            select(func.count())
+            .select_from(GamePlayer)
+            .where(*conditions)
+        ) or 0
+        rows = session.execute(
+            select(GamePlayer)
+            .where(*conditions)
+            .order_by(GamePlayer.nickname_lower)
+            .limit(limit)
+        ).scalars()
+        players = [_serialize_player_for_search(player) for player in rows]
+
+    return {
+        "players": players,
+        "total": total,
+        "limit": limit,
+    }
 
 
 # 4.4: покупка fallback-ключа. Путевой параметр {offer_id} намеренно назван
