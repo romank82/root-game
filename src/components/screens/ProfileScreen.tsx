@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { Screen } from '../../types/game'
 import {
+  createGasInvoice,
+  getEngineBootstrap,
   getMyProfile,
   saveMyProfile,
   type MyProfile,
@@ -282,6 +284,14 @@ const COUNTRY_OPTIONS: { value: string; label: string }[] = [
   { value: 'JP', label: 'Япония' },
 ]
 
+// 10.4-j-1: пакеты газа. Цены соответствуют CMS-каталогу gas packs
+// (economy.*); подпись кнопки — «объём (цена в Stars)».
+const GAS_PACKS: { amount: number; label: string }[] = [
+  { amount: 10, label: '10 газа (10 ⭐)' },
+  { amount: 100, label: '100 газа (80 ⭐)' },
+  { amount: 1000, label: '1000 газа (700 ⭐)' },
+]
+
 function draftFromPlayer(player: MyProfile): DraftState {
   return {
     country: player.country ?? '',
@@ -319,6 +329,11 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 10.4-j-1: газ — баланс (из bootstrap), состояние покупки и уведомления.
+  const [gasBalance, setGasBalance] = useState<string | null>(null)
+  const [buyingGas, setBuyingGas] = useState(false)
+  const [gasError, setGasError] = useState<string | null>(null)
+  const [gasNotice, setGasNotice] = useState<string | null>(null)
   // 10.0.5-b-2: страна определена автоматически по координатам ('auto') —
   // select disabled, hint под ним, country не попадает в payload.
   const countryLocked = profile?.country_source === 'auto'
@@ -338,6 +353,23 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // 10.4-j-1: свежий баланс газа на момент открытия профиля.
+  useEffect(() => {
+    let cancelled = false
+    getEngineBootstrap()
+      .then((data) => {
+        if (cancelled) return
+        setGasBalance(data.gasBalance)
+      })
+      .catch(() => {
+        // Газ — доп. информация: при сбое bootstrap блок остаётся «—»,
+        // анкета (основной контент экрана) не ломается.
       })
     return () => {
       cancelled = true
@@ -378,10 +410,80 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     }
   }
 
+  // 10.4-j-1: покупка газа через Stars-инвойс. Ссылку создаёт бэк
+  // (createGasInvoice); оплата открывается штатным Telegram WebApp
+  // (openInvoice). Реальный зачёт газа делает backend по статусу платежа —
+  // фронт после 'paid' перечитывает bootstrap, чтобы показать новый баланс.
+  async function handleBuyGas(gasAmount: number) {
+    if (buyingGas) return
+    setBuyingGas(true)
+    setGasError(null)
+    setGasNotice(null)
+    try {
+      const invoice = await createGasInvoice(gasAmount)
+      // telegram.d.ts не описывает openInvoice (WebApp типизирован частично),
+      // поэтому сужаем тип локально; метод опционален.
+      const webAppWithInvoice = window.Telegram?.WebApp as
+        | {
+            openInvoice?: (
+              url: string,
+              callback: (status: string) => void,
+            ) => void
+          }
+        | undefined
+      if (webAppWithInvoice?.openInvoice) {
+        webAppWithInvoice.openInvoice(invoice.invoiceLink, (status) => {
+          if (status === 'paid') {
+            getEngineBootstrap()
+              .then((data) => {
+                setGasBalance(data.gasBalance)
+                setGasNotice('Газ зачислен (после подтверждения).')
+              })
+              .catch((err: Error) => {
+                setGasError(err.message)
+              })
+          } else {
+            setGasError(`Оплата не завершена: ${status}.`)
+          }
+        })
+      } else {
+        // Fallback вне Telegram WebApp: открыть ссылку инвойса в новой
+        // вкладке (в WebView openInvoice обычно присутствует).
+        window.open(invoice.invoiceLink, '_blank')
+        setGasNotice('Инвойс открыт в новой вкладке (вне Telegram WebApp).')
+      }
+    } catch (err) {
+      setGasError((err as Error).message)
+    } finally {
+      setBuyingGas(false)
+    }
+  }
+
   return (
     <section className="inventory">
       <p className="eyebrow">ПРОФИЛЬ / АНКЕТА ИГРОКА</p>
       <h2>Профиль</h2>
+
+      <div className="gas-block">
+        <h3>Газ</h3>
+        <p>
+          Баланс: <b>{gasBalance ?? '—'}</b>
+        </p>
+        {gasError && <p className="repair-error">{gasError}</p>}
+        {gasNotice && <p className="mission-success-card">{gasNotice}</p>}
+        {GAS_PACKS.map((pack) => (
+          <button
+            key={pack.amount}
+            type="button"
+            className="primary-button"
+            disabled={buyingGas}
+            onClick={() => handleBuyGas(pack.amount)}
+          >
+            {pack.label}
+          </button>
+        ))}
+        {buyingGas && <p>Создаём инвойс…</p>}
+      </div>
 
       {loading && <p>Загрузка…</p>}
       {error && <p className="repair-error">{error}</p>}

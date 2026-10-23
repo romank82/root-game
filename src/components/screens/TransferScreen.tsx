@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Screen } from '../../types/game'
 import {
+  getEngineBootstrap,
   searchPlayers,
   transferRoot,
   type SearchPlayerHit,
@@ -10,6 +11,9 @@ interface TransferScreenProps {
   onScreenChange: (screen: Screen) => void
   // Баланс для отображения: App знает его из bootstrap (echo).
   rootBalance?: number
+  // 10.4-j-1: баланс газа из bootstrap (строка). App его пока не хранит —
+  // при отсутствии пропса экран сам подтягивает газ при открытии.
+  gasBalance?: string
   // После успешного перевода App обновляет bootstrap (как ShopScreen).
   onBalanceChange?: () => void
 }
@@ -30,6 +34,7 @@ function makeRequestId(): string {
 export function TransferScreen({
   onScreenChange,
   rootBalance,
+  gasBalance,
   onBalanceChange,
 }: TransferScreenProps) {
   const [query, setQuery] = useState('')
@@ -41,6 +46,29 @@ export function TransferScreen({
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [requestId, setRequestId] = useState<string>(() => makeRequestId())
+  // 10.4-j-1: газ на момент открытия экрана (бootstrap). Пропс из App может
+  // отсутствовать — тогда тянем сами, чтобы блок «Газ: N» был виден всегда.
+  const [gas, setGas] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (typeof gasBalance === 'string') {
+      setGas(gasBalance)
+      return () => {
+        cancelled = true
+      }
+    }
+    getEngineBootstrap()
+      .then((data) => {
+        if (!cancelled) setGas(data.gasBalance)
+      })
+      .catch(() => {
+        // Газ — не критичен: без него блок «Газ» просто не показывается.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [gasBalance])
 
   async function handleSearch() {
     const q = query.trim()
@@ -109,6 +137,12 @@ export function TransferScreen({
       {typeof rootBalance === 'number' && (
         <p>
           Доступно: <b>{rootBalance} ROOT</b>
+        </p>
+      )}
+
+      {gas !== null && (
+        <p>
+          Газ: <b>{gas}</b>
         </p>
       )}
 

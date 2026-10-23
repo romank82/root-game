@@ -127,6 +127,8 @@ export type EngineBootstrap = {
     availableBalance: number
     lockedBalance: number
   }
+  // 10.4-j-0: баланс газа — строка (дробный Numeric(18,4) с бэка).
+  gasBalance: string
   missions: EngineMission[]
   segments: EngineSegment[]
   inventory: EngineInventoryItem[]
@@ -550,5 +552,31 @@ export async function transferRoot(
     throw new Error(await readError(response))
   }
   return response.json() as Promise<TransferResponse>
+}
+
+// 10.4-j-0/j-1: инвойс Stars на покупку газа (POST /api/v1/engine/gas/invoice).
+export type GasInvoiceResponse = {
+  invoiceLink: string
+  referenceId: string
+  gasAmount: number
+  amountStars: number
+}
+
+export async function createGasInvoice(
+  gasAmount: number,
+): Promise<GasInvoiceResponse> {
+  const response = await apiFetch('/api/v1/engine/gas/invoice', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ gas_amount: gasAmount }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<GasInvoiceResponse>
 }
 
