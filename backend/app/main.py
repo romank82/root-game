@@ -22,6 +22,7 @@ from app.mission_engine import (
 from app.models import GamePlayer
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
 from app.shop_service import list_catalog_items, purchase_catalog_item
+from app.slug_utils import generate_nickname
 from app.teams_service import (
     accept_invitation_entrypoint,
     approve_join_request_entrypoint,
@@ -211,6 +212,17 @@ def _upsert_telegram_player(
     normalized_username = normalize_telegram_username(username)
 
     with SessionLocal.begin() as session:
+        def _nickname_is_taken(candidate_lower: str) -> bool:
+            """Занят ли ник (по nickname_lower) в текущей транзакции."""
+            return (
+                session.scalar(
+                    select(GamePlayer.id).where(
+                        GamePlayer.nickname_lower == candidate_lower.lower()
+                    )
+                )
+                is not None
+            )
+
         player = session.scalar(
             select(GamePlayer).where(
                 GamePlayer.auth_provider == "telegram",
@@ -230,6 +242,9 @@ def _upsert_telegram_player(
                     username_owner.telegram_username = None
                     username_owner.telegram_username_normalized = None
 
+            nickname = generate_nickname(
+                first_name or "player", _nickname_is_taken
+            )
             player = GamePlayer(
                 id=_new_player_id(),
                 display_name=first_name,
@@ -240,6 +255,8 @@ def _upsert_telegram_player(
                 telegram_first_name=first_name,
                 telegram_last_name=last_name,
                 telegram_photo_url=photo_url,
+                nickname=nickname,
+                nickname_lower=nickname.lower(),
                 status="active",
             )
             session.add(player)
@@ -259,6 +276,18 @@ def _upsert_telegram_player(
                 if username_owner is not None:
                     username_owner.telegram_username = None
                     username_owner.telegram_username_normalized = None
+
+            if player.nickname is None:
+                # Генерация ника для старых записей без ника (пред-34-B2;
+                # backfill-миграция 884a02f1a72d уже покрыла существующие на
+                # момент миграции записи, это страховка для созданных после).
+                # Уже присвоенный ник НЕ перезаписываем: игроки получают его
+                # один раз и больше не меняют (10.0, ник immutable).
+                nickname = generate_nickname(
+                    first_name or "player", _nickname_is_taken
+                )
+                player.nickname = nickname
+                player.nickname_lower = nickname.lower()
 
             player.display_name = first_name
             player.telegram_username = normalized_username
