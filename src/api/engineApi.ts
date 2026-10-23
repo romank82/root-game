@@ -450,6 +450,7 @@ export type MyProfile = {
   id: string
   nickname: string | null
   country: string | null
+  country_source: string | null
   gender: string | null
   age: number | null
 }

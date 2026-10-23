@@ -292,13 +292,21 @@ function draftFromPlayer(player: MyProfile): DraftState {
 
 // Нормализация по PATCH-контракту: пустая строка → null,
 // страна — trim().toUpperCase().
-function buildPayload(draft: DraftState): MyProfilePayload {
-  const country = draft.country.trim().toUpperCase()
-  return {
-    country: country === '' ? null : country,
+// При countryLocked (source='auto') country в payload НЕ попадает вовсе:
+// бэк на ручную смену страны отвечает 422 — шлём только gender/age.
+function buildPayload(
+  draft: DraftState,
+  countryLocked: boolean,
+): MyProfilePayload {
+  const payload: MyProfilePayload = {
     gender: draft.gender === '' ? null : draft.gender,
     age: draft.age === '' ? null : Number(draft.age),
   }
+  if (!countryLocked) {
+    const country = draft.country.trim().toUpperCase()
+    payload.country = country === '' ? null : country
+  }
+  return payload
 }
 
 export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
@@ -311,6 +319,9 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 10.0.5-b-2: страна определена автоматически по координатам ('auto') —
+  // select disabled, hint под ним, country не попадает в payload.
+  const countryLocked = profile?.country_source === 'auto'
 
   useEffect(() => {
     let cancelled = false
@@ -337,9 +348,10 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
   // сохранённого профиля (для age пустая строка и null эквивалентны).
   function isDirty(): boolean {
     if (profile === null) return false
-    const next = buildPayload(draft)
+    const next = buildPayload(draft, countryLocked)
     return (
-      (next.country ?? '') !== (profile.country ?? '') ||
+      // При countryLocked select disabled — страна изменением не считается.
+      (!countryLocked && (next.country ?? '') !== (profile.country ?? '')) ||
       (next.gender ?? '') !== (profile.gender ?? '') ||
       (next.age ?? null) !== (profile.age ?? null)
     )
@@ -356,7 +368,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     setSaving(true)
     setError(null)
     try {
-      const result = await saveMyProfile(buildPayload(draft))
+      const result = await saveMyProfile(buildPayload(draft, countryLocked))
       setProfile(result.player)
       setDraft(draftFromPlayer(result.player))
     } catch (err) {
@@ -384,6 +396,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
             Страна
             <select
               value={draft.country}
+              disabled={countryLocked}
               onChange={(e) => setDraft({ ...draft, country: e.target.value })}
             >
               <option value="">Не указана</option>
@@ -393,6 +406,12 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
                 </option>
               ))}
             </select>
+            {countryLocked && (
+              <small>
+                Страна определена автоматически по координатам и не может
+                быть изменена в анкете.
+              </small>
+            )}
           </label>
 
           <label>
