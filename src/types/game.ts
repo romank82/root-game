@@ -3,6 +3,7 @@ export type Screen =
   | 'terminal'
   | 'archive'
   | 'inventory'
+  | 'profile'
   | 'scanner'
   | 'shop'
   | 'map'

@@ -445,3 +445,43 @@ export async function purchaseShopItem(
 
   return response.json() as Promise<ShopPurchaseResult>
 }
+
+export type MyProfile = {
+  id: string
+  nickname: string | null
+  country: string | null
+  gender: string | null
+  age: number | null
+}
+
+export type MyProfilePayload = {
+  country?: string | null
+  gender?: string | null
+  age?: number | null
+}
+
+export async function getMyProfile(): Promise<{ player: MyProfile }> {
+  const response = await apiFetch('/api/v1/engine/me/profile')
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<{ player: MyProfile }>
+}
+
+export async function saveMyProfile(
+  payload: MyProfilePayload,
+): Promise<{ player: MyProfile }> {
+  const response = await apiFetch('/api/v1/engine/me/profile', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<{ player: MyProfile }>
+}
