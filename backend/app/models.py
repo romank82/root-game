@@ -1343,6 +1343,52 @@ class WalletTransaction(TimestampMixin, Base):
         ),
     )
 
+class PlayerTransfer(TimestampMixin, Base):
+    """Перевод ROOT между игроками (10.1+). Одна запись = один перевод.
+
+    Идемпотентность — (from_player_id, reference_id) (клиентский request_id).
+    Логики перевода (проводки, комиссия Stars) здесь нет — только модель.
+    Физическое удаление записи запрещено; статус: completed / rejected.
+    """
+
+    __tablename__ = "player_transfers"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    from_player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    to_player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="completed",
+    )
+    reference_id: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "from_player_id",
+            "reference_id",
+            name="uq_player_transfers_from_reference",
+        ),
+        CheckConstraint(
+            "amount > 0",
+            name="ck_player_transfers_amount_positive",
+        ),
+        CheckConstraint(
+            "status IN ('completed','rejected')",
+            name="ck_player_transfers_status",
+        ),
+    )
+
+
 class AdminUser(TimestampMixin, Base):
     __tablename__ = "admin_users"
 
