@@ -1454,6 +1454,50 @@ class GasTransaction(TimestampMixin, Base):
     )
 
 
+class StarsPayment(TimestampMixin, Base):
+    """Покупка газа за Telegram Stars (10.4-g-1). Одна запись = один
+    инвойс. telegram_payment_charge_id заполняется после
+    successful_payment (нужен для refund)."""
+
+    __tablename__ = "stars_payments"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    gas_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    amount_stars: Mapped[int] = mapped_column(Integer, nullable=False)
+    telegram_payment_charge_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending"
+    )
+    reference_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "reference_id",
+            name="uq_stars_payments_reference_id",
+        ),
+        CheckConstraint(
+            "amount_stars > 0",
+            name="ck_stars_payments_amount_stars_positive",
+        ),
+        CheckConstraint(
+            "gas_amount > 0",
+            name="ck_stars_payments_gas_amount_positive",
+        ),
+        CheckConstraint(
+            "status IN ('pending','completed','refunded')",
+            name="ck_stars_payments_status",
+        ),
+    )
+
+
 class AdminUser(TimestampMixin, Base):
     __tablename__ = "admin_users"
 
