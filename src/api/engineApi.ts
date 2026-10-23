@@ -486,3 +486,31 @@ export async function saveMyProfile(
 
   return response.json() as Promise<{ player: MyProfile }>
 }
+export type SearchPlayerHit = {
+  id: string
+  nickname: string | null
+  country: string | null
+}
+
+export type SearchPlayersResponse = {
+  players: SearchPlayerHit[]
+  total: number
+  limit: number
+}
+
+// 10.0.1: игровой поиск игроков по нику (для переводов 10.1+).
+// q >= 3 символа (иначе 422), rate limit 10/min, кука уходит сама.
+export async function searchPlayers(
+  query: string,
+  limit = 20,
+): Promise<SearchPlayersResponse> {
+  const params = new URLSearchParams()
+  params.set('q', query)
+  params.set('limit', String(limit))
+  const response = await apiFetch(
+    `/api/v1/players/search?${params.toString()}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<SearchPlayersResponse>
+}
+
