@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
+    Numeric,
     String,
     Index,
     Text,
@@ -1385,6 +1387,69 @@ class PlayerTransfer(TimestampMixin, Base):
         CheckConstraint(
             "status IN ('completed','rejected')",
             name="ck_player_transfers_status",
+        ),
+    )
+
+
+class GasWallet(TimestampMixin, Base):
+    """Баланс газа игрока (10.4): премиальная валюта, покупается
+    за Stars, списывается за перевод ROOT. Дробный: Numeric(18,4)."""
+
+    __tablename__ = "gas_wallets"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    balance: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), nullable=False, default=Decimal("0")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("player_id", name="uq_gas_wallets_player_id"),
+        CheckConstraint(
+            "balance >= 0",
+            name="ck_gas_wallets_balance_nonnegative",
+        ),
+    )
+
+
+class GasTransaction(TimestampMixin, Base):
+    """Проводка газа (10.4): immutable, идемпотентность по
+    (gas_wallet_id, reference_type, reference_id)."""
+
+    __tablename__ = "gas_transactions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    gas_wallet_id: Mapped[str] = mapped_column(
+        ForeignKey("gas_wallets.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    balance_after: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    transaction_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    reference_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reference_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "gas_wallet_id",
+            "reference_type",
+            "reference_id",
+            name="uq_gas_transactions_wallet_reference",
+        ),
+        CheckConstraint(
+            "amount > 0",
+            name="ck_gas_transactions_amount_positive",
+        ),
+        CheckConstraint(
+            "balance_after >= 0",
+            name="ck_gas_transactions_balance_after_nonnegative",
         ),
     )
 
