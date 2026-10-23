@@ -771,6 +771,22 @@ class GamePlayer(TimestampMixin, Base):
         nullable=True,
     )
 
+    # Ник игрока (10.0, часть 1): уникальный читаемый латинский адрес для
+    # переводов (формат основа#123-456-789). nickname_lower — lowercase-копия
+    # для case-insensitive uniqueness/search по латинице (partial unique index
+    # uq_game_players_nickname_lower ниже). Nullable: сгенерируется при
+    # регистрации (main.py, 34-B2) и backfill'ом для существующих записей.
+    nickname: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=False,
+    )
+    nickname_lower: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=False,
+    )
+
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -790,6 +806,16 @@ class GamePlayer(TimestampMixin, Base):
             "telegram_username_normalized",
             unique=True,
             postgresql_where=text("telegram_username_normalized IS NOT NULL"),
+        ),
+        # Ник: unique по lowercase-копии (латиница — lower() идентичен на
+        # SQLite и PostgreSQL). Partial-предикат на обоих диалектах: NULL-ы
+        # (игроки без ника до генерации) не конфликтуют.
+        Index(
+            "uq_game_players_nickname_lower",
+            "nickname_lower",
+            unique=True,
+            postgresql_where=text("nickname_lower IS NOT NULL"),
+            sqlite_where=text("nickname_lower IS NOT NULL"),
         ),
     )
 

@@ -11,13 +11,16 @@ admin_geo_zones.py, admin_reward_pools.py). Здесь — единый исто
 - _normalize_slug — нормализация (strip/lower) + валидация по паттерну;
 - _slugify_title — генерация валидного slug из русскоязычного title;
 - unique_slug — авто-суффикс (-2, -3, ...) при коллизиях уникальности
-  (используется далее в автогенерации для Segment/Mission).
+  (используется далее в автогенерации для Segment/Mission);
+- generate_nickname — генерация уникального ника игрока (10.0):
+  транслит основы + суффикс #123-456-789 (латиница, для переводов).
 
 Модуль зависит только от re и fastapi (HTTPException) — не импортирует
 app.models/app.db и admin-роутеров, циклических импортов не образует.
 """
 from __future__ import annotations
 
+import random
 import re
 from typing import Callable, TypeVar
 
@@ -105,3 +108,40 @@ def unique_slug(
                 ),
             )
     return candidate
+
+
+def generate_nickname(
+    base: str,
+    is_taken: Callable[[str], bool],
+    *,
+    max_attempts: int = 1000,
+) -> str:
+    """Генерирует уникальный ник игрока в формате основа#123-456-789.
+
+    Основа — транслит base (display_name, латиница lowercase, до 20
+    символов; непустая — иначе fallback "player"); суффикс — три группы
+    по три цифры почти-случайные (random). is_taken проверяет занятость
+    кандидата в текущей транзакции (по nickname_lower). При коллизии
+    суффикс перегенерируется; если за max_attempts попыток свободный ник
+    не найден — HTTPException 422.
+    """
+    transliterated = base.lower().translate(_CYRILLIC_TO_LATIN)
+    transliterated = re.sub(r"[^a-z0-9]+", "-", transliterated).strip("-")
+    if not transliterated:
+        transliterated = "player"
+    transliterated = transliterated[:20]
+
+    for _ in range(max_attempts):
+        suffix = (
+            f"{random.randint(100, 999)}-"
+            f"{random.randint(100, 999)}-"
+            f"{random.randint(100, 999)}"
+        )
+        candidate = f"{transliterated}#{suffix}"
+        if not is_taken(candidate.lower()):
+            return candidate
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="Не удалось сгенерировать уникальный ник.",
+    )
