@@ -24,6 +24,7 @@ class Settings:
     telegram_bot_token: str
     telegram_bot_username: str
     telegram_initdata_max_age_seconds: int
+    telegram_webhook_secret: str
     game_session_secret: str
     game_session_lifetime_seconds: int
     admin_session_lifetime_seconds: int
@@ -48,6 +49,7 @@ settings = Settings(
     telegram_initdata_max_age_seconds=int(
         os.getenv("TELEGRAM_INITDATA_MAX_AGE_SECONDS", "3600")
     ),
+    telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", ""),
     game_session_secret=os.getenv("GAME_SESSION_SECRET", ""),
     game_session_lifetime_seconds=int(
         os.getenv("GAME_SESSION_LIFETIME_SECONDS", "86400")

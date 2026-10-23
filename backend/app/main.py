@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -54,6 +55,10 @@ from app.team_missions_service import (
     submit_location_entrypoint,
 )
 from app.transfer_service import transfer_root_entrypoint
+from app.stars_service import (
+    handle_pre_checkout_query,
+    handle_successful_payment,
+)
 from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -101,6 +106,8 @@ from app.admin_player_restrictions import router as admin_player_restrictions_ro
 from app.admin_teams import router as admin_teams_router
 
 SESSION_COOKIE_NAME = "chimera_session"
+
+logger = logging.getLogger(__name__)
 
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
@@ -1412,3 +1419,38 @@ app.include_router(admin_player_inventory_router)
 app.include_router(admin_player_mission_router)
 app.include_router(admin_player_restrictions_router)
 app.include_router(admin_teams_router)
+
+
+# ============================================================================
+# 10.4-h: Telegram webhook — покупка газа за Stars.
+# Без Depends(get_current_player_id) и без @limiter.limit: Telegram не шлёт
+# нашу сессионную куку и не является игроком. Защита — секрет в заголовке
+# X-Telegram-Bot-Api-Secret-Token (пустой TELEGRAM_WEBHOOK_SECRET — dev-режим
+# без проверки, см. config.py).
+# ============================================================================
+@app.post("/webhook/telegram")
+def telegram_webhook(request: Request, update: dict):
+    """Обработка Telegram-обновлений: pre_checkout_query / successful_payment.
+
+    Сервис вызывается вне сессии игрока; успех подтверждается в stars_service
+    (StarsPayment). Иные типы update намеренно игнорируются (200).
+    """
+    expected_secret = settings.telegram_webhook_secret
+    if expected_secret:
+        provided_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if provided_secret != expected_secret:
+            raise HTTPException(status_code=403, detail="Forbidden.")
+
+    try:
+        if update.get("pre_checkout_query"):
+            handle_pre_checkout_query(update)
+        elif (update.get("message") or {}).get("successful_payment"):
+            handle_successful_payment(update)
+        # Прочие типы update (text, callback_query, my_chat_member, ...) — игнор.
+    except Exception as error:  # noqa: BLE001 — webhook не должен падать
+        logger.exception("Telegram webhook error: %s", error)
+        # Всегда 200: Telegram ретраит не-2xx бесконечно, а successful_payment
+        # идемпотентен (status=completed + unique GasTransaction) — повторная
+        # доставка безопасна, бесконечный ретрай-цикл не нужен. 500/4xx дали бы
+        # именно ретрай-цикл из push-очереди Telegram.
+    return {"ok": True}
