@@ -8,10 +8,12 @@
   - тест мягкий к отсутствию PG: если localhost:5433 недоступен — skip
     (unittest.skipTest в setUp), локальный SQLite-прогон не ломается.
 
-Сам параллельный тест покупок (purchase_catalog_item, FOR UPDATE) —
-СЛЕДУЮЩИМ шагом; здесь test_pg_infrastructure_ready только доказывает,
-что на PostgreSQL миграции применяются и схема готова к конкурентным
-проверкам.
+Покрывает два теста:
+  1. test_pg_infrastructure_ready — схема на PostgreSQL мигрирует
+     (alembic_version + ключевые таблицы);
+  2. test_concurrent_shop_purchase_no_overspend — параллельная покупка
+     ключа одной позиции: N потоков на общий кошелёк, FOR UPDATE
+     сериализует, без ухода в минус, ledger сходится.
 """
 
 from __future__ import annotations
@@ -19,11 +21,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import sessionmaker
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -164,4 +168,225 @@ class EconomyPg931InfrastructureTests(unittest.TestCase):
                 session.execute(text("SELECT 1")).scalar(),
                 1,
             )
+
+    def test_concurrent_shop_purchase_no_overspend(self) -> None:
+        """N=5 потоков покупают одну позицию на кошельке с 100 ROOT, цена 40.
+
+        Цель: FOR UPDATE на кошельке (shop_service._get_root_wallet_for_update,
+        берется до расчёта reference_id) сериализует конкурентные покупки
+        одного игрока. Ожидаемо ровно floor(100/40)=2 успеха, остальные —
+        отказ; без ухода в минус, ledger сходится, reference_id не дублируются.
+
+        Синхронизация старта — threading.Barrier(N) (максимальная гонка),
+        без sleep-костылей. Ожидаемые классы ошибок проигравших потоков:
+        MissionEngineError (409 «Недостаточно ROOT») или IntegrityError —
+        любой из них допустим и фиксируется в отчёте; любой ДРУГОЙ класс
+        роняет тест с понятным сообщением.
+        """
+        from app.models import (
+            GamePlayer,
+            Item,
+            SystemSetting,
+            Wallet,
+            WalletTransaction,
+        )
+        from app.shop_service import SHOP_ENABLED_KEY, SHOP_PRICE_ROOT_KEY
+
+        player_id = "pg-test-player"
+        wallet_id = f"wallet-{uuid.uuid4().hex}"
+        item_id = f"item-{uuid.uuid4().hex}"
+        initial_balance = 100
+        price = 40
+        purchases = 5
+
+        # ---- Подготовка (за одну транзакцию): игрок + кошелёк с seed-кредитом
+        # (ledger — source of truth, чтобы SUM(credit)-SUM(debit) сходился) +
+        # published KEY-item + системные настройки магазина (CMS-first).
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GamePlayer(
+                    id=player_id,
+                    display_name="PG 9.3.1 concurrency player",
+                    auth_provider="test",
+                    external_id=f"test-{uuid.uuid4().hex}",
+                    status="active",
+                )
+            )
+            session.add(
+                Wallet(
+                    id=wallet_id,
+                    player_id=player_id,
+                    currency="ROOT",
+                    available_balance=initial_balance,
+                    locked_balance=0,
+                )
+            )
+            session.add(
+                WalletTransaction(
+                    id=f"wallet-transaction-{uuid.uuid4().hex}",
+                    wallet_id=wallet_id,
+                    amount=initial_balance,
+                    balance_after=initial_balance,
+                    transaction_type="credit",
+                    reason="PG 9.3.1 test seed",
+                    reference_type="test_seed",
+                    reference_id=f"seed-{uuid.uuid4().hex}",
+                    metadata_json={},
+                )
+            )
+            session.add(
+                Item(
+                    id=item_id,
+                    slug=f"slug-{item_id}",
+                    code=f"CODE-{uuid.uuid4().hex[:12]}",
+                    title="PG 9.3.1 key",
+                    description="Purchasable catalog key",
+                    symbol="KEY",
+                    category="KEY",
+                    rarity="common",
+                    is_unique=False,
+                    content={"schemaVersion": 1},
+                    status="published",
+                )
+            )
+            for key, value in (
+                (SHOP_ENABLED_KEY, True),
+                (SHOP_PRICE_ROOT_KEY, price),
+            ):
+                existing = session.get(SystemSetting, key)
+                value_type = "boolean" if isinstance(value, bool) else "integer"
+                if existing is None:
+                    session.add(
+                        SystemSetting(
+                            key=key,
+                            value_json=value,
+                            value_type=value_type,
+                            category="shop",
+                            title=key,
+                            description="Seeded by PG 9.3.1 test",
+                            is_sensitive=False,
+                            status="active",
+                        )
+                    )
+                else:
+                    existing.value_json = value
+                    existing.status = "active"
+
+        # ---- Параллельный запуск покупок с общего барьера.
+        barrier = threading.Barrier(purchases)
+        outcomes: list[tuple[int, tuple[str, str | None]]] = []
+        outcomes_lock = threading.Lock()
+
+        def buyer(thread_index: int) -> None:
+            barrier.wait()
+            try:
+                with self.SessionLocal.begin() as session:
+                    self.shop_service.purchase_catalog_item(
+                        session, player_id, item_id
+                    )
+                outcome = ("success", None)
+            except Exception as exc:  # noqa: BLE001 — классы собираем в отчёт
+                outcome = (type(exc).__name__, str(exc))
+            with outcomes_lock:
+                outcomes.append((thread_index, outcome))
+
+        threads = [
+            threading.Thread(target=buyer, args=(index,), name=f"buyer-{index}")
+            for index in range(purchases)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        successes = sum(
+            1 for _, outcome in outcomes if outcome[0] == "success"
+        )
+        errors = [
+            f"{name}: {detail}" for _, (name, detail) in outcomes if name != "success"
+        ]
+
+        # ---- Проверка инвариантов по факту (все данные — в одном сообщении,
+        # чтобы видно было реальные классы ошибок и итоговый баланс).
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(
+                    Wallet.player_id == player_id,
+                    Wallet.currency == "ROOT",
+                )
+            )
+            self.assertIsNotNone(wallet, "Кошелёк ROOT не найден")
+            final_balance = wallet.available_balance
+            debit_count = session.scalar(
+                select(func.count(WalletTransaction.id)).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.transaction_type == "debit",
+                )
+            )
+            distinct_ref_ids = session.scalars(
+                select(WalletTransaction.reference_id)
+                .where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.transaction_type == "debit",
+                )
+                .distinct()
+            ).all()
+            credit_sum = session.scalar(
+                select(func.coalesce(func.sum(WalletTransaction.amount), 0)).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.transaction_type == "credit",
+                )
+            )
+            debit_sum = session.scalar(
+                select(func.coalesce(func.sum(WalletTransaction.amount), 0)).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.transaction_type == "debit",
+                )
+            )
+
+        ledger_balance = credit_sum - debit_sum
+        expected_balance = initial_balance - price * (initial_balance // price)
+        expected_successes = initial_balance // price
+
+        problems: list[str] = []
+        if successes != expected_successes:
+            problems.append(
+                f"successes={successes}, ожидалось {expected_successes}"
+            )
+        if final_balance < 0:
+            problems.append(f"баланс ушёл в минус: {final_balance}")
+        if final_balance != expected_balance:
+            problems.append(
+                f"final_balance={final_balance}, ожидалось {expected_balance}"
+            )
+        if debit_count != expected_successes:
+            problems.append(
+                f"debit_count={debit_count}, ожидалось {expected_successes}"
+            )
+        if len(distinct_ref_ids) != expected_successes:
+            problems.append(
+                f"distinct_reference_ids={distinct_ref_ids}, "
+                f"ожидалось {expected_successes}"
+            )
+        if ledger_balance != final_balance:
+            problems.append(
+                f"ledger={credit_sum}-{debit_sum}={ledger_balance} "
+                f"!= balance={final_balance}"
+            )
+        unexpected = [
+            f"{name}: {detail}"
+            for _, (name, detail) in outcomes
+            if name not in ("success", "MissionEngineError", "IntegrityError")
+        ]
+        if unexpected:
+            problems.append(f"неожиданные классы исключений: {unexpected}")
+
+        if problems:
+            self.fail(
+                "Гонка покупок нарушила инвариант 9.3.1: "
+                + "; ".join(problems)
+                + f" | errors={errors}"
+            )
+
+
 

@@ -26,6 +26,7 @@ import logging
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.geo_team_runtime_models import InventoryEvent
@@ -198,16 +199,34 @@ def purchase_catalog_item(
         )
     )
     if player_item is None:
-        player_item = PlayerItem(
-            id=_new_id("player-item"),
-            player_id=player_id,
-            item_id=item.id,
-            quantity=0,
-            obtained_from_type="shop_purchase",
-            obtained_from_id=None,
-        )
-        session.add(player_item)
-        session.flush()  # нужен player_item.id для InventoryEvent
+        # Гонка «двойной клик / повтор запроса»: INSERT стака идёт до wallet-lock
+        # (S6), поэтому при одновременных первых покупках одного товара несколько
+        # потоков читают None и вставляют одинаковый (player_id, item_id).
+        # SAVEPOINT поглощает IntegrityError от uq_player_items_player_item, затем
+        # re-read находит строку победителя и покупка продолжается нормально.
+        try:
+            with session.begin_nested():  # SAVEPOINT (PG и SQLite)
+                player_item = PlayerItem(
+                    id=_new_id("player-item"),
+                    player_id=player_id,
+                    item_id=item.id,
+                    quantity=0,
+                    obtained_from_type="shop_purchase",
+                    obtained_from_id=None,
+                )
+                session.add(player_item)
+                session.flush()  # нужен player_item.id для InventoryEvent
+        except IntegrityError:
+            # Конкурирующая сессия вставила тот же (player_id, item_id): читаем
+            # её строку стака и продолжаем с ней (quantity >= 0, мутаций нет).
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == player_id,
+                    PlayerItem.item_id == item_id,
+                )
+            )
+            if player_item is None:
+                raise  # не uq_player_items_player_item — пробросить как есть
 
     # Блокировка кошелька берётся до расчёта номера покупки: в PostgreSQL
     # FOR UPDATE сериализует конкурентные покупки одного игрока, поэтому
