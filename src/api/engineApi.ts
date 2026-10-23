@@ -514,3 +514,41 @@ export async function searchPlayers(
   return response.json() as Promise<SearchPlayersResponse>
 }
 
+// 10.1+: перевод ROOT. Тело — snake_case (1:1 с бэком:
+// TransferPayload в main.py). Ответ — camelCase (как отдаёт
+// transfer_service.py).
+export type TransferPayload = {
+  to_player_id: string
+  amount: number
+  request_id: string
+}
+
+export type TransferResponse = {
+  transferId: string
+  fromPlayerId: string
+  toPlayerId: string
+  amount: number
+  status: string
+  fromBalance: number
+  toBalance: number
+}
+
+// 10.1+: перевод ROOT другому игроку. request_id — клиентский
+// (uuid) для идемпотентности: повторный запрос с тем же request_id
+// возвращает первый результат без второго перевода.
+export async function transferRoot(
+  payload: TransferPayload,
+): Promise<TransferResponse> {
+  const response = await apiFetch('/api/v1/players/transfer', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+  return response.json() as Promise<TransferResponse>
+}
+
