@@ -26,6 +26,8 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.geo_country import resolve_country_or_none
+
 # Активные командные сессии — в этих статусах игрок задействован в миссии.
 ACTIVE_SESSION_STATUSES = frozenset({"collecting", "ready_to_start", "active"})
 
@@ -536,6 +538,13 @@ def _submit_location(
         expires_at=expires_at,
     ))
     session.flush()
+
+    # 10.0.5: фактическая страна игрока по координатам (geo-intel-offline).
+    # Обновляем country, только если резолв дал iso2 с confidence >= 0.7;
+    # иначе оставляем как есть (прежнее значение не затираем).
+    resolved = resolve_country_or_none(latitude, longitude)
+    if resolved is not None:
+        player.country = resolved
 
 
     return {

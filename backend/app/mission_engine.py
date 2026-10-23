@@ -15,6 +15,7 @@ from app.fallback_shop import (
     create_first_failure_entitlements,
     is_key_reserved_for_player,
 )
+from app.geo_country import resolve_country_or_none
 from app.geo_spawn import generate_spawn_point
 from app.player_restrictions_engine import recompute_player_status
 from app.qr_service import generate_qr_payload, get_qr_ttl_seconds
@@ -1259,7 +1260,7 @@ def _accept_mission_once(
 
     with session.begin():
         mission = _load_mission_for_accept(session, mission_id)
-        _ensure_player(session, player_id)
+        player = _ensure_player(session, player_id)
         _synchronize_player_missions(session, player_id)
 
         player_mission = session.scalars(
@@ -1358,6 +1359,15 @@ def _accept_mission_once(
                 422,
                 "Шаблон геозоны не найден или не содержит search_radius_meters.",
             )
+
+        # 10.0.5: фактическая страна игрока по координатам (geo-intel-offline).
+        # Миссия уже валидна: load прошёл, статусы и конфликты проверены,
+        # шаблон зоны есть — резолвим страну только для успешного accept.
+        # Ручной ввод (анкета) не приоритет — country перезаписываем при
+        # резолве с confidence >= 0.7; иначе оставляем как есть (без мусора).
+        resolved = resolve_country_or_none(latitude, longitude)
+        if resolved is not None:
+            player.country = resolved
 
         # Сгенерировать spawn
         spawn = generate_spawn_point(
