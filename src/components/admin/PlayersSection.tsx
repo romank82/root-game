@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import {
   getPlayer,
   getPlayerGasTransactions,
+  getPlayerRootTransactions,
   getProfileFields,
   listPlayers,
   updatePlayerGas,
@@ -12,6 +13,7 @@ import {
   type AdminUser,
   type GasTransaction,
   type RootAdjustmentPayload,
+  type RootTransaction,
 } from '../../api/adminApi'
 
 type PlayersSectionProps = {
@@ -104,6 +106,13 @@ export function PlayersSection({
   const [savingGasError, setSavingGasError] = useState<string | null>(null)
   const [savingGasNotice, setSavingGasNotice] = useState<string | null>(null)
   const [gasTransactions, setGasTransactions] = useState<GasTransaction[]>([])
+
+  // История ROOT — последние 50 транзакций выбранного игрока (13.7-e-2),
+  // отдельный state от газа: истории живут в своих блоках карточки.
+  const [rootTransactions, setRootTransactions] = useState<RootTransaction[]>([])
+  const [rootTransactionsError, setRootTransactionsError] = useState<string | null>(
+    null,
+  )
 
   // Экономика игрока (13.7-d): модалка ROOT + ГАЗ. Отдельные драфты от
   // газ-формы в карточке (gasDraft), чтобы действия модалки не смешивались
@@ -250,6 +259,33 @@ export function PlayersSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlayerId])
 
+  // История ROOT — последние 50 транзакций выбранного игрока (13.7-e-2).
+  useEffect(() => {
+    if (selectedPlayerId === null) {
+      setRootTransactions([])
+      setRootTransactionsError(null)
+      return
+    }
+    let cancelled = false
+    getPlayerRootTransactions(selectedPlayerId, { limit: 50 })
+      .then((data) => {
+        if (!cancelled) setRootTransactions(data.transactions)
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setRootTransactionsError(
+            requestError instanceof Error
+              ? requestError.message
+              : 'Не удалось загрузить транзакции ROOT.',
+          )
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlayerId])
+
   function applyFilters() {
     setSearch(draftSearch)
     setStatus(draftStatus)
@@ -335,6 +371,13 @@ export function PlayersSection({
       const payload: RootAdjustmentPayload = { amount, reason: rawReason }
       const updated = await updatePlayerRoot(selectedPlayer.player.id, payload)
       setSelectedPlayer(updated)
+      // 13.7-e-2: перезагружаем историю ROOT в карточке после применения.
+      const history = await getPlayerRootTransactions(
+        selectedPlayer.player.id,
+        { limit: 50 },
+      )
+      setRootTransactions(history.transactions)
+      setRootTransactionsError(null)
       setRootDraft({ amount: '', reason: '' })
       setEconomyNotice('ROOT обновлён.')
     } catch (err) {
@@ -608,6 +651,55 @@ export function PlayersSection({
                   Экономика игрока
                 </button>
               </div>
+            </div>
+
+            {/* ROOT TRANSACTIONS (13.7-e-2): последние 50 проводок ROOT — над
+                газ-таблицей, т.к. ROOT первичная валюта; обновляется при
+                применении ROOT в модалке «Экономика игрока». */}
+            <div style={{ marginTop: '30px' }}>
+              <p className="admin-kicker">ROOT TRANSACTIONS</p>
+              {rootTransactionsError && (
+                <p className="admin-alert admin-error">{rootTransactionsError}</p>
+              )}
+              {rootTransactions.length === 0 ? (
+                <p className="admin-muted">Транзакций ROOT нет.</p>
+              ) : (
+                <table
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    fontSize: '12px',
+                    fontFamily: '"IBM Plex Mono", monospace',
+                  }}
+                >
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Дата</th>
+                      <th style={thStyle}>Тип</th>
+                      <th style={thStyle}>Сумма</th>
+                      <th style={thStyle}>Баланс</th>
+                      <th style={thStyle}>Причина</th>
+                      <th style={thStyle}>Ссылка</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rootTransactions.map((tx) => (
+                      <tr key={tx.id}>
+                        <td style={tdStyle}>
+                          {tx.createdAt
+                            ? new Date(tx.createdAt).toLocaleString('ru-RU')
+                            : '—'}
+                        </td>
+                        <td style={tdStyle}>{tx.transactionType}</td>
+                        <td style={tdStyle}>{formatAmount(tx.amount)}</td>
+                        <td style={tdStyle}>{formatAmount(tx.balanceAfter)}</td>
+                        <td style={tdStyle}>{tx.reason}</td>
+                        <td style={tdStyle}>{tx.referenceType ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
 
             <div style={{ marginTop: '30px' }}>

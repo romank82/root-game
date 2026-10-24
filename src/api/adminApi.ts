@@ -1784,6 +1784,40 @@ export async function getPlayerGasTransactions(
   return body
 }
 
+export type RootTransaction = {
+  id: string
+  amount: number // ROOT — int
+  balanceAfter: number
+  transactionType: string
+  reason: string
+  referenceType: string | null
+  referenceId: string | null
+  metadata: Record<string, unknown>
+  createdAt: string | null
+}
+
+export type RootTransactionsResponse = {
+  transactions: RootTransaction[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export async function getPlayerRootTransactions(
+  playerId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<RootTransactionsResponse> {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.offset !== undefined) params.set('offset', String(options.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(
+    `/api/v1/admin/players/${encodeURIComponent(playerId)}/root-transactions${query}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<RootTransactionsResponse>
+}
+
 export async function getProfileFields(): Promise<{
   fields: AdminProfileField[]
 }> {
