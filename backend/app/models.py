@@ -815,6 +815,16 @@ class GamePlayer(TimestampMixin, Base):
         nullable=True,
     )
 
+    # 13.7-b: последний визит игрока (онлайн/офлайн). Обновляется в
+    # get_current_player_id (main.py) при каждом запросе игрока. Nullable:
+    # игроки до фичи (backfill не делаем). Индекс — сортировка/фильтры
+    # «онлайн». Без throttle (пока): если станет медленно — отдельным шагом.
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

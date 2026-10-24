@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -350,6 +351,12 @@ def get_current_player_id(request: Request) -> str:
 
         if player is None:
             raise HTTPException(status_code=401, detail="Игрок не найден.")
+
+        # 13.7-b: последний визит — при каждом запросе игрока, включая
+        # неактивных (зашёл — значит, был онлайн). Без throttle (пока).
+        # Обычная (не begin) сессия: изменение фиксируем явно.
+        player.last_seen_at = datetime.now(timezone.utc)
+        session.commit()
 
         if player.status != "active":
             # Lazy-рикавери (шаг 5.7): устаревший кэш не должен запирать
