@@ -81,6 +81,38 @@ function buildActivityChartData(transactions: RootTransaction[]): {
     }))
 }
 
+// 13.7-g-2: онлайн/офлайн по lastSeenAt. Колонка обновляется при каждом
+// запросе (backend/app/main.py → datetime.now(timezone.utc)) и приходит
+// ISO-строкой с +00:00; naive-строки на всякий случай трактуем как UTC.
+function parseServerDate(value: string): Date {
+  const hasZone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(value)
+  return new Date(hasZone ? value : `${value}Z`)
+}
+
+function formatAgo(diffMs: number): string {
+  const minutes = Math.max(0, Math.floor(diffMs / 60_000))
+  if (minutes < 60) return `${minutes} мин назад`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} ч назад`
+  return `${Math.floor(hours / 24)} дн назад`
+}
+
+function formatOnlineStatus(lastSeenAt: string | null): {
+  label: string
+  online: boolean
+} {
+  if (lastSeenAt === null) {
+    return { label: 'Офлайн (давно)', online: false }
+  }
+  const parsed = parseServerDate(lastSeenAt)
+  if (Number.isNaN(parsed.getTime())) {
+    return { label: 'Офлайн (давно)', online: false }
+  }
+  const diffMs = Date.now() - parsed.getTime()
+  if (diffMs < 5 * 60 * 1000) return { label: 'Онлайн', online: true }
+  return { label: `Офлайн (${formatAgo(diffMs)})`, online: false }
+}
+
 // Значение поля карточки по ключу из PROFILE_FIELDS (nickname, country,
 // gender, age). Неизвестные в будущем ключи отдаём пустой строкой.
 function fieldValue(card: AdminPlayerCard, key: string): string {
@@ -472,6 +504,13 @@ export function PlayersSection({
     selectedPlayer?.player.displayName ??
     'Игрок'
 
+  // Статус онлайн/офлайн (13.7-g-2) по lastSeenAt (< 5 минут). Бейдж в шапке
+  // рендерится только при выбранном игроке (onlineStatus === null иначе).
+  const onlineStatus =
+    selectedPlayer !== null
+      ? formatOnlineStatus(selectedPlayer.player.lastSeenAt)
+      : null
+
   return (
     <div className="admin-layout">
       <aside className="admin-sidebar">
@@ -610,6 +649,23 @@ export function PlayersSection({
           <div>
             <p className="admin-kicker">ROOT / PLAYER CARD</p>
             <h2>{cardTitle}</h2>
+            {onlineStatus && (
+              <p
+                style={{
+                  marginTop: '4px',
+                  fontSize: '11px',
+                  letterSpacing: '0.04em',
+                  color: onlineStatus.online ? '#87fac0' : '#9fc9b6',
+                }}
+              >
+                <span
+                  style={{ color: onlineStatus.online ? '#87fac0' : '#8aac9d' }}
+                >
+                  ●
+                </span>{' '}
+                {onlineStatus.label}
+              </p>
+            )}
           </div>
         </div>
 

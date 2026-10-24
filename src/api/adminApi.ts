@@ -1570,6 +1570,7 @@ export type AdminPlayerCard = {
     }
     registeredAt: string | null
     lastActivityAt: string | null
+    lastSeenAt: string | null
   }
   wallet: {
     currency: string
