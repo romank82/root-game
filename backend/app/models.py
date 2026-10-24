@@ -946,6 +946,44 @@ class PlayerRestriction(TimestampMixin, Base):
     )
 
 
+class CountryPolicy(TimestampMixin, Base):
+    """Политика по стране (13.1): allowed/restricted/blocked.
+
+    Применяется при входе (blocked) и в функционале (restricted —
+    restricted_features). Одна политика на страну; отсутствие записи
+    = allowed. Уникальность country_code — UniqueConstraint
+    uq_country_policies_country_code (как в GasWallet/StarsPayment),
+    чтобы имя ограничения совпадало с миграцией в PG и SQLite.
+    ISO-2 валидация — на бэке (13.2), не в модели (по образцу
+    country в GamePlayer).
+    """
+
+    __tablename__ = "country_policies"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    country_code: Mapped[str] = mapped_column(
+        String(2), nullable=False, index=True
+    )
+    policy: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="allowed"
+    )
+    restricted_features: Mapped[list | None] = mapped_column(
+        JSON, nullable=True, default=None
+    )
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "country_code",
+            name="uq_country_policies_country_code",
+        ),
+        CheckConstraint(
+            "policy IN ('allowed','restricted','blocked')",
+            name="ck_country_policies_policy",
+        ),
+    )
+
+
 class Team(TimestampMixin, Base):
     """Команда игроков (шаг 6.1).
 
