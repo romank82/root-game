@@ -1674,6 +1674,25 @@ export async function listPlayers(
   return body
 }
 
+// 13.7-i-1/13.7-i-2: статистика всех игроков (total/online/active).
+export type PlayersStats = {
+  period: string // 'day' | 'week' | 'month'
+  total: number
+  online: number
+  active: number
+}
+
+export async function getPlayersStats(period: string): Promise<PlayersStats> {
+  const params = new URLSearchParams()
+  params.set('period', period)
+  const response = await adminFetch(
+    `/api/v1/admin/players/stats?${params.toString()}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as PlayersStats
+  return body
+}
+
 export async function getPlayer(playerId: string): Promise<AdminPlayerCard> {
   const response = await adminFetch(
     `/api/v1/admin/players/${encodeURIComponent(playerId)}`,

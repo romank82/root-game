@@ -13,6 +13,7 @@ import {
   getPlayer,
   getPlayerGasTransactions,
   getPlayerRootTransactions,
+  getPlayersStats,
   getProfileFields,
   listPlayers,
   unblockPlayer,
@@ -24,6 +25,7 @@ import {
   type AdminUser,
   type GasTransaction,
   type PlayerBlockPayload,
+  type PlayersStats,
   type RootAdjustmentPayload,
   type RootTransaction,
 } from '../../api/adminApi'
@@ -155,6 +157,12 @@ export function PlayersSection({
   const [limit] = useState(PLAYERS_PAGE_SIZE)
   const [offset, setOffset] = useState(0)
 
+  // 13.7-i-2: статистика всех игроков (total/online/active) — блок над
+  // списком; period (day/week/month) переключает окно активности.
+  const [statsPeriod, setStatsPeriod] = useState<'day' | 'week' | 'month'>('day')
+  const [stats, setStats] = useState<PlayersStats | null>(null)
+  const [statsError, setStatsError] = useState<string | null>(null)
+
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null)
   const [profileFields, setProfileFields] = useState<AdminProfileField[]>([])
   const [selectedPlayer, setSelectedPlayer] = useState<AdminPlayerCard | null>(
@@ -269,6 +277,31 @@ export function PlayersSection({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, status, offset])
+
+  // 13.7-i-2: статистика всех игроков — на mount и при смене period.
+  useEffect(() => {
+    let cancelled = false
+    getPlayersStats(statsPeriod)
+      .then((data) => {
+        if (!cancelled) {
+          setStats(data)
+          setStatsError(null)
+        }
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setStats(null)
+          setStatsError(
+            requestError instanceof Error
+              ? requestError.message
+              : 'Не удалось загрузить статистику.',
+          )
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [statsPeriod])
 
   // Карточка выбранного игрока.
   useEffect(() => {
@@ -603,6 +636,71 @@ export function PlayersSection({
             <h2>Игроки</h2>
           </div>
         </div>
+
+        {/* 13.7-i-2: статистика всех игроков (Всего/Онлайн/Активность) —
+            над поиском и фильтрами; period переключает окно активности. */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '10px',
+            marginBottom: '14px',
+          }}
+        >
+          <div>
+            <p className="admin-kicker">ВСЕГО</p>
+            <p
+              style={{
+                margin: '4px 0 0',
+                fontSize: '22px',
+                color: '#87fac0',
+                fontFamily: '"IBM Plex Mono", monospace',
+              }}
+            >
+              {stats ? String(stats.total) : '—'}
+            </p>
+          </div>
+          <div>
+            <p className="admin-kicker">ОНЛАЙН</p>
+            <p
+              style={{
+                margin: '4px 0 0',
+                fontSize: '22px',
+                color: '#87fac0',
+                fontFamily: '"IBM Plex Mono", monospace',
+              }}
+            >
+              {stats ? String(stats.online) : '—'}
+            </p>
+          </div>
+          <div>
+            <p className="admin-kicker">АКТИВНОСТЬ</p>
+            <p
+              style={{
+                margin: '4px 0 0',
+                fontSize: '22px',
+                color: '#87fac0',
+                fontFamily: '"IBM Plex Mono", monospace',
+              }}
+            >
+              {stats ? String(stats.active) : '—'}
+            </p>
+          </div>
+        </div>
+        <label style={{ display: 'block', marginBottom: '14px' }}>
+          Период активности
+          <select
+            value={statsPeriod}
+            onChange={(event) =>
+              setStatsPeriod(event.target.value as 'day' | 'week' | 'month')
+            }
+          >
+            <option value="day">day · 24 часа</option>
+            <option value="week">week · 7 дней</option>
+            <option value="month">month · 30 дней</option>
+          </select>
+        </label>
+        {statsError && <p className="admin-alert admin-error">{statsError}</p>}
 
         <div
           style={{
