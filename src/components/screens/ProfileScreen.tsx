@@ -5,6 +5,7 @@ import {
   getEngineBootstrap,
   getMyProfile,
   saveMyProfile,
+  sendGasInvoice,
   type MyProfile,
   type MyProfilePayload,
 } from '../../api/engineApi'
@@ -419,6 +420,28 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     setBuyingGas(true)
     setGasError(null)
     setGasNotice(null)
+    // 10.4-fix-b: на Android WebView openInvoice не доставляет
+    // pre_checkout_query (известный баг Telegram) — отправляем инвойс в чат
+    // с ботом (sendInvoice) и показываем подсказку. Имя бота фронту WebApp
+    // не отдаёт (telegram.d.ts его не типизирует), поэтому openTelegramLink
+    // не строим — только подсказка. На остальных платформах — как раньше.
+    const webApp = window.Telegram?.WebApp as
+      | { platform?: string }
+      | undefined
+    const platform = webApp?.platform
+    if (platform === 'android' || platform === 'android_x') {
+      try {
+        await sendGasInvoice(gasAmount)
+        setGasNotice(
+          'Инвойс отправлен в чат с ботом. Откройте чат с ботом и оплатите.',
+        )
+      } catch (err) {
+        setGasError((err as Error).message)
+      } finally {
+        setBuyingGas(false)
+      }
+      return
+    }
     try {
       const invoice = await createGasInvoice(gasAmount)
       // telegram.d.ts не описывает openInvoice (WebApp типизирован частично),

@@ -580,3 +580,30 @@ export async function createGasInvoice(
   return response.json() as Promise<GasInvoiceResponse>
 }
 
+// 10.4-fix-b: инвойс Stars в чат с ботом (POST /api/v1/engine/gas/invoice/send).
+// Обход бага Android (WebView openInvoice не доставляет pre_checkout_query).
+export type GasInvoiceSendResponse = {
+  referenceId: string
+  gasAmount: number
+  amountStars: number
+  chatId: string
+}
+
+export async function sendGasInvoice(
+  gasAmount: number,
+): Promise<GasInvoiceSendResponse> {
+  const response = await apiFetch('/api/v1/engine/gas/invoice/send', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ gas_amount: gasAmount }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<GasInvoiceSendResponse>
+}
+
