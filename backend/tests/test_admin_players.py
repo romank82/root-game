@@ -63,6 +63,7 @@ def _player(**overrides) -> SimpleNamespace:
         "telegram_photo_url": "https://example.com/photo.jpg",
         "created_at": _dt(1),
         "updated_at": _dt(2),
+        "last_seen_at": _dt(3),
     }
     base.update(overrides)
     return SimpleNamespace(**base)

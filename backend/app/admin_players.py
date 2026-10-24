@@ -392,6 +392,11 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
             "lastActivityAt": (
                 player.updated_at.isoformat() if player.updated_at else None
             ),
+            # Точное время последнего запроса (13.7-b): обновляется при каждом
+            # обращении к профилю/карточке — основа статуса онлайн/офлайн (13.7-g).
+            "lastSeenAt": (
+                player.last_seen_at.isoformat() if player.last_seen_at else None
+            ),
         },
         "wallet": (
             {
