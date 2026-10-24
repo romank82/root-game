@@ -1885,3 +1885,75 @@ export async function getProfileFields(): Promise<{
   return body
 }
 
+export type MonitoringError = {
+  id: string
+  correlationId: string
+  severity: string
+  errorType: string
+  message: string
+  safeContext: Record<string, unknown> | null
+  createdAt: string | null
+}
+
+export type MonitoringErrorsResponse = {
+  errors: MonitoringError[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type MonitoringEvent = {
+  id: string
+  playerId: string
+  eventType: string
+  payloadJson: Record<string, unknown> | null
+  correlationId: string | null
+  createdAt: string | null
+}
+
+export type MonitoringEventsResponse = {
+  events: MonitoringEvent[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export async function getMonitoringErrors(
+  options: {
+    severity?: string
+    period?: string
+    limit?: number
+    offset?: number
+  } = {},
+): Promise<MonitoringErrorsResponse> {
+  const params = new URLSearchParams()
+  if (options.severity) params.set('severity', options.severity)
+  if (options.period) params.set('period', options.period)
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.offset !== undefined) params.set('offset', String(options.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(`/api/v1/admin/monitoring/errors${query}`)
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<MonitoringErrorsResponse>
+}
+
+export async function getMonitoringEvents(
+  options: {
+    eventType?: string
+    playerId?: string
+    period?: string
+    limit?: number
+    offset?: number
+  } = {},
+): Promise<MonitoringEventsResponse> {
+  const params = new URLSearchParams()
+  if (options.eventType) params.set('event_type', options.eventType)
+  if (options.playerId) params.set('player_id', options.playerId)
+  if (options.period) params.set('period', options.period)
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.offset !== undefined) params.set('offset', String(options.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(`/api/v1/admin/monitoring/events${query}`)
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<MonitoringEventsResponse>
+}
