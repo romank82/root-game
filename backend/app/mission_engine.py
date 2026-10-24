@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 import time
 from typing import Any
@@ -43,6 +44,8 @@ from app.models import (
 from app.minigame_handlers import CIPHER_ALPHABET, get_handler
 
 ROOT_CURRENCY = "ROOT"
+
+logger = logging.getLogger(__name__)
 
 # Reference-типы входа в миссию (шаг 4.1). Значения — по контракту ledger:
 # уникальные ключи идемпотентности = (wallet_id, reference_type, reference_id)
@@ -1223,6 +1226,32 @@ def _submit_mission_once(
             attempt_count_before=attempt_count_before,
         )
 
+        # 13.3-b-2: лог mission.completed (PlayerEvent). Награда уже выдана
+        # (awarded = {"root": ..., "items": ..., "storyNodeIds": ...}).
+        # Запись — в SAVEPOINT (begin_nested): та же транзакция, собственный
+        # флаш; при сбое журнала откатится только savepoint, транзакция
+        # коммита миссии/награды не будет отравлена (иначе после упавшего
+        # flush следующий commit поднял бы PendingRollbackError — проверено
+        # эмпирически). Лог не важнее миссии — logger.warning.
+        try:
+            # Lazy импорт: player_events импортирует _new_id из этого модуля
+            # на уровне модуля — top-level импорт сюда дал бы цикл.
+            from app.player_events import record_player_event
+
+            with session.begin_nested():
+                record_player_event(
+                    session,
+                    player_id,
+                    "mission.completed",
+                    payload={
+                        "missionId": mission.id,
+                        "rewardRoot": awarded.get("root"),
+                    },
+                    correlation_id=None,
+                )
+        except Exception as error:  # noqa: BLE001 — лог не важнее миссии
+            logger.warning("player_event mission.completed failed: %s", error)
+
         return {
             "accepted": True,
             "alreadyCompleted": False,
@@ -1438,6 +1467,33 @@ def _accept_mission_once(
         player_mission.status = "in_progress"
 
         session.flush()
+
+        # 13.3-b-2: лог mission.accepted (PlayerEvent, модерация/антифрод/
+        # аналитика). Миссия принята: spawn, entry и статус зафиксированы.
+        # Запись — в SAVEPOINT (begin_nested), т.е. в той же транзакции, но
+        # с собственным флашем: если журнал упадёт, откатится только
+        # savepoint. Простой catch без savepoint не спас бы — после
+        # упавшего flush следующий commit поднял бы PendingRollbackError
+        # и сломал accept (проверено эмпирически). Лог не важнее миссии:
+        # любая ошибка журнала -> logger.warning, accept продолжается.
+        # Идемпотентный повторный accept (in_progress + spawn) не достигает
+        # этого блока (early-return выше), поэтому событие пишется один раз
+        # на взятие миссии.
+        try:
+            # Lazy импорт: player_events импортирует _new_id из этого модуля
+            # на уровне модуля — top-level импорт сюда дал бы цикл.
+            from app.player_events import record_player_event
+
+            with session.begin_nested():
+                record_player_event(
+                    session,
+                    player_id,
+                    "mission.accepted",
+                    payload={"missionId": mission.id},
+                    correlation_id=None,
+                )
+        except Exception as error:  # noqa: BLE001 — лог не важнее миссии
+            logger.warning("player_event mission.accepted failed: %s", error)
 
         return _serialize_accept_response(mission, player_mission, spawn_record)
 
