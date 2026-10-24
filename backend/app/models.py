@@ -984,6 +984,34 @@ class CountryPolicy(TimestampMixin, Base):
     )
 
 
+class PlayerEvent(TimestampMixin, Base):
+    """Лог действия игрока (13.3): модерация/антифрод/аналитика.
+
+    event_type: 'auth.login', 'mission.accepted',
+    'mission.completed', 'transfer.completed', 'gas.purchased'.
+    payload_json — безопасный контекст (redacted), correlation_id —
+    связь с ошибками. Retention 30 дней — позже.
+    """
+
+    __tablename__ = "player_events"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )
+    payload_json: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, default=None
+    )
+    correlation_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+
+
 class Team(TimestampMixin, Base):
     """Команда игроков (шаг 6.1).
 
