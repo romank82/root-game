@@ -63,6 +63,7 @@ from app.stars_service import (
     create_invoice_link,
     handle_pre_checkout_query,
     handle_successful_payment,
+    send_gas_invoice,
 )
 from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -738,6 +739,23 @@ def create_gas_invoice_route(
     """Создать инвойс Stars на покупку газа (10.4-j-0)."""
     try:
         return create_invoice_link(player_id, payload.gas_amount)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/gas/invoice/send")
+def send_gas_invoice_route(
+    request: Request,
+    payload: GasInvoicePayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Отправить инвойс Stars в чат с ботом (10.4-fix, sendInvoice)."""
+    try:
+        return send_gas_invoice(player_id, payload.gas_amount)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,
