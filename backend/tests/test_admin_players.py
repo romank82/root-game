@@ -1472,5 +1472,309 @@ class AdminPlayerRootPatchTests(unittest.TestCase):
         self.assertEqual(txs[0].balance_after, 5)
 
 
+class AdminPlayerRootTransactionsTests(unittest.TestCase):
+    """GET /root-transactions (13.7-e-1): история ROOT-проводок, пагинация,
+    redact metadata. Живая SQLite + alembic (по образцу газ-истории 10.4-d):
+    список пустого кошелька/пагинация требуют реального SELECT с count/order.
+
+    ROOT — Integer: amount/balanceAfter в ответе числа (int), не строки.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from app import admin_players
+
+        cls.admin_players = admin_players
+        cls._session_local_patch = None
+
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory(
+            prefix="chimera-admin-players-root-tx-"
+        )
+        self.database_path = Path(self._temporary_directory.name) / "root-tx.sqlite3"
+        database_url = f"sqlite:///{self.database_path}"
+
+        environment = os.environ.copy()
+        environment["DATABASE_URL"] = database_url
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                str(BACKEND_ROOT / "alembic.ini"),
+                "upgrade",
+                "head",
+            ],
+            cwd=BACKEND_ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+        )
+
+        @event.listens_for(self.engine, "connect")
+        def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        self.SessionLocal = sessionmaker(
+            bind=self.engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+        self._session_local_patch = patch.object(
+            self.admin_players, "SessionLocal", self.SessionLocal
+        )
+        self._session_local_patch.start()
+
+    def tearDown(self) -> None:
+        self._session_local_patch.stop()
+        self.engine.dispose()
+        self._temporary_directory.cleanup()
+
+    # ---- Fixtures и хелперы ---------------------------------------------
+
+    def _make_admin(self):
+        from app.models import AdminUser
+
+        admin_id = f"admin-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                AdminUser(
+                    id=admin_id,
+                    username=f"admin-{admin_id[-6:]}",
+                    password_hash="test-hash",
+                    role="super_admin",
+                    is_super_admin=True,
+                    is_active=True,
+                    is_deleted=False,
+                )
+            )
+        with self.SessionLocal() as session:
+            return session.get(AdminUser, admin_id)
+
+    def _make_player(self) -> str:
+        from app.models import GamePlayer
+
+        player_id = f"player-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GamePlayer(
+                    id=player_id,
+                    display_name="ROOT-TX-игрок",
+                    auth_provider="test",
+                    external_id=f"test-{uuid.uuid4().hex}",
+                    status="active",
+                )
+            )
+        return player_id
+
+    def _make_wallet(self, player_id: str, balance: int) -> str:
+        from app.models import Wallet
+
+        wallet_id = f"wallet-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                Wallet(
+                    id=wallet_id,
+                    player_id=player_id,
+                    currency="ROOT",
+                    available_balance=balance,
+                    locked_balance=0,
+                )
+            )
+        return wallet_id
+
+    def _get_wallet(self, player_id: str):
+        from app.models import Wallet
+
+        with self.SessionLocal() as session:
+            return session.scalar(
+                select(Wallet).where(Wallet.player_id == player_id)
+            )
+
+    def _make_root_transaction(
+        self,
+        wallet_id: str,
+        *,
+        amount: int,
+        balance_after: int,
+        transaction_type: str,
+        reason: str,
+        created_at: datetime,
+        reference_type: str = "admin_root_adjustment",
+        metadata: dict | None = None,
+    ) -> str:
+        from app.models import WalletTransaction
+
+        tx_id = f"root-tx-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                WalletTransaction(
+                    id=tx_id,
+                    wallet_id=wallet_id,
+                    amount=amount,
+                    balance_after=balance_after,
+                    transaction_type=transaction_type,
+                    reason=reason,
+                    reference_type=reference_type,
+                    reference_id=f"ref-{uuid.uuid4().hex}",
+                    metadata_json=metadata or {"adminId": "admin-1"},
+                    created_at=created_at,
+                )
+            )
+        return tx_id
+
+    def _call_root_history(
+        self, player_id: str, *, limit: int, offset: int, admin
+    ) -> dict:
+        return self.admin_players.list_admin_player_root_transactions(
+            player_id, limit=limit, offset=offset, _admin=admin
+        )
+
+    # ---- Сценарии --------------------------------------------------------
+
+    def test_root_transactions_list_and_order(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_wallet(player_id, 8)
+
+        tx_old = self._make_root_transaction(
+            wallet_id,
+            amount=1,
+            balance_after=1,
+            transaction_type="credit",
+            reason="first bonus",
+            created_at=datetime(2026, 10, 1, 10, 0, 0),
+            metadata={"password": "secret", "adminId": "admin-1"},
+        )
+        tx_mid = self._make_root_transaction(
+            wallet_id,
+            amount=2,
+            balance_after=3,
+            transaction_type="credit",
+            reason="second bonus",
+            created_at=datetime(2026, 10, 2, 10, 0, 0),
+        )
+        tx_new = self._make_root_transaction(
+            wallet_id,
+            amount=5,
+            balance_after=8,
+            transaction_type="debit",
+            reason="spend transfer",
+            created_at=datetime(2026, 10, 3, 10, 0, 0),
+        )
+
+        result = self._call_root_history(player_id, limit=50, offset=0, admin=admin)
+
+        # Новые сверху: tx_new, tx_mid, tx_old.
+        self.assertEqual(
+            [tx["id"] for tx in result["transactions"]],
+            [tx_new, tx_mid, tx_old],
+        )
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["limit"], 50)
+        self.assertEqual(result["offset"], 0)
+
+        newest = result["transactions"][0]
+        self.assertEqual(newest["transactionType"], "debit")
+        self.assertEqual(newest["reason"], "spend transfer")
+        self.assertEqual(newest["referenceType"], "admin_root_adjustment")
+        self.assertIsNotNone(newest["referenceId"])
+        # ROOT — Integer: amount/balanceAfter числа, не строки.
+        self.assertIsInstance(newest["amount"], int)
+        self.assertEqual(newest["amount"], 5)
+        self.assertIsInstance(newest["balanceAfter"], int)
+        self.assertEqual(newest["balanceAfter"], 8)
+        self.assertEqual(newest["createdAt"], "2026-10-03T10:00:00")
+
+        # metadata прошёл через sanitize_audit_data — sensitive-ключ redacted.
+        self.assertEqual(
+            result["transactions"][2]["metadata"]["password"], "[REDACTED]"
+        )
+        self.assertEqual(result["transactions"][2]["transactionType"], "credit")
+
+    def test_root_transactions_pagination(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_wallet(player_id, 15)
+
+        # 5 проводок, created_at по дням (пятая — самая свежая).
+        tx_ids: list[str] = []
+        for day in range(1, 6):
+            tx_ids.append(
+                self._make_root_transaction(
+                    wallet_id,
+                    amount=day,
+                    balance_after=day,
+                    transaction_type="credit",
+                    reason=f"bonus-{day}",
+                    created_at=datetime(2026, 10, day, 10, 0, 0),
+                )
+            )
+
+        page1 = self._call_root_history(player_id, limit=2, offset=0, admin=admin)
+        self.assertEqual(
+            [tx["id"] for tx in page1["transactions"]], [tx_ids[4], tx_ids[3]]
+        )
+        self.assertEqual(page1["total"], 5)
+        self.assertEqual(page1["limit"], 2)
+        self.assertEqual(page1["offset"], 0)
+
+        page2 = self._call_root_history(player_id, limit=2, offset=2, admin=admin)
+        self.assertEqual(
+            [tx["id"] for tx in page2["transactions"]], [tx_ids[2], tx_ids[1]]
+        )
+        # total не зависит от limit/offset.
+        self.assertEqual(page2["total"], 5)
+        self.assertEqual(page2["limit"], 2)
+        self.assertEqual(page2["offset"], 2)
+
+    def test_root_transactions_empty_wallet(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        result = self._call_root_history(player_id, limit=50, offset=0, admin=admin)
+
+        self.assertEqual(
+            result, {"transactions": [], "total": 0, "limit": 50, "offset": 0}
+        )
+        # Read-only ручка кошелёк не создаёт.
+        self.assertIsNone(self._get_wallet(player_id))
+
+    def test_root_transactions_player_not_found(self) -> None:
+        admin = self._make_admin()
+
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_root_history(
+                "player-does-not-exist", limit=10, offset=0, admin=admin
+            )
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertEqual(ctx.exception.detail, "Игрок не найден.")
+
+    def test_root_transactions_limit_clamp(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        self._make_wallet(player_id, 0)
+
+        over_limit = self._call_root_history(
+            player_id, limit=1000, offset=0, admin=admin
+        )
+        self.assertEqual(over_limit["limit"], 200)  # MAX_ROOT_TX_LIMIT
+        self.assertEqual(over_limit["total"], 0)
+
+        zero_limit = self._call_root_history(player_id, limit=0, offset=0, admin=admin)
+        self.assertEqual(zero_limit["limit"], 1)  # min limit
+
+
 if __name__ == "__main__":
     unittest.main()
