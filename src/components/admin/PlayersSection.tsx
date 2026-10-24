@@ -1,5 +1,14 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import {
   getPlayer,
   getPlayerGasTransactions,
   getPlayerRootTransactions,
@@ -44,6 +53,32 @@ const tdStyle: CSSProperties = {
 
 function formatAmount(value: number): string {
   return value.toLocaleString('ru-RU')
+}
+
+// 13.7-f: группируем ROOT-операции по дням (createdAt → 'YYYY-MM-DD'):
+// amount в модели WalletTransaction ВСЕГДА положительный (abs), направление
+// движения — в transactionType ('credit' — пришло, 'debit' — ушло).
+function buildActivityChartData(transactions: RootTransaction[]): {
+  date: string
+  credit: number
+  debit: number
+}[] {
+  const byDay = new Map<string, { credit: number; debit: number }>()
+  for (const tx of transactions) {
+    if (!tx.createdAt) continue
+    const day = tx.createdAt.slice(0, 10) // YYYY-MM-DD
+    const bucket = byDay.get(day) ?? { credit: 0, debit: 0 }
+    if (tx.transactionType === 'credit') bucket.credit += tx.amount
+    else if (tx.transactionType === 'debit') bucket.debit += tx.amount
+    byDay.set(day, bucket)
+  }
+  return Array.from(byDay.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({
+      date,
+      credit: value.credit,
+      debit: value.debit,
+    }))
 }
 
 // Значение поля карточки по ключу из PROFILE_FIELDS (nickname, country,
@@ -652,6 +687,35 @@ export function PlayersSection({
                 </button>
               </div>
             </div>
+
+            {/* ACTIVITY (13.7-f): ROOT-операции по дням — credit/debit суммы
+                из последних 50 проводок rootTransactions; показываем только
+                если есть данные (пусто — скрываем, ниже «Транзакций ROOT
+                нет» уже закрывает пустой случай). */}
+            {rootTransactions.length > 0 && (
+              <div style={{ marginTop: '30px' }}>
+                <p className="admin-kicker">ACTIVITY (ROOT)</p>
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={buildActivityChartData(rootTransactions)}>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="rgba(190, 255, 226, 0.12)"
+                    />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9fc9b6' }} />
+                    <YAxis tick={{ fontSize: 10, fill: '#9fc9b6' }} />
+                    <Tooltip
+                      contentStyle={{
+                        background: '#0d1c18',
+                        border: '1px solid rgba(190, 255, 226, 0.24)',
+                      }}
+                      labelStyle={{ color: '#dff8eb' }}
+                    />
+                    <Bar dataKey="credit" fill="#87fac0" name="Пришло" />
+                    <Bar dataKey="debit" fill="#f08a8a" name="Ушло" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
 
             {/* ROOT TRANSACTIONS (13.7-e-2): последние 50 проводок ROOT — над
                 газ-таблицей, т.к. ROOT первичная валюта; обновляется при
