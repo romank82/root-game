@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.country_policy import is_blocked
 from app.db import SessionLocal
+from app.player_events import record_player_event
 from app.mission_engine import (
     MissionEngineError,
     accept_mission,
@@ -438,6 +439,28 @@ def authenticate_telegram(
                 "Повторите попытку."
             ),
         ) from error
+
+    # 13.3-b-1: лог auth.login (PlayerEvent, модерация/антифрод/аналитика).
+    # Успешный вход уже зафиксирован: _upsert_telegram_player открывает и
+    # коммитит свою транзакцию самостоятельно, поэтому открытой сессии здесь
+    # нет и событие пишется в отдельной короткой транзакции (rollback при
+    # ошибке — за счёт контекстного менеджера, т.е. журнал не трогает уже
+    # закоммиченный апсерт игрока). Логин важнее лога: любая ошибка журнала
+    # НЕ должна ломать вход — только logger.warning.
+    try:
+        correlation_id = getattr(
+            getattr(request, "state", None), "audit_context", {}
+        ).get("correlation_id")
+        with SessionLocal.begin() as session:
+            record_player_event(
+                session,
+                player.id,
+                "auth.login",
+                payload={"authProvider": "telegram"},
+                correlation_id=correlation_id,
+            )
+    except Exception as error:  # noqa: BLE001 — лог не важнее входа
+        logger.warning("player_event auth.login failed: %s", error)
 
     session_token = create_session_token(
         player_id=player.id,
