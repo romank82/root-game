@@ -138,6 +138,55 @@ def create_invoice_link(player_id: str, gas_amount: int) -> dict:
     }
 
 
+def send_gas_invoice(player_id: str, gas_amount: int) -> dict:
+    """10.4-fix: отправить инвойс Stars в чат с ботом (sendInvoice).
+    Обход бага Android (WebView openInvoice). Возвращает
+    {referenceId, gasAmount, amountStars, chatId}."""
+    price = _gas_pack_price(gas_amount)
+    reference_id = _new_id("stars-invoice")
+    payload = reference_id
+
+    with SessionLocal.begin() as session:
+        player = session.get(GamePlayer, player_id)
+        if player is None:
+            raise MissionEngineError(404, "Игрок не найден.")
+        chat_id = player.external_id
+        if not chat_id:
+            raise MissionEngineError(400, "Нет Telegram chat_id.")
+        session.add(
+            StarsPayment(
+                id=_new_id("stars-payment"),
+                player_id=player_id,
+                gas_amount=Decimal(gas_amount),
+                amount_stars=price,
+                telegram_payment_charge_id=None,
+                status="pending",
+                reference_id=reference_id,
+                payload=payload,
+            )
+        )
+
+    # Вызов Bot API вне транзакции (чтобы не держать lock на время сети).
+    _bot_api(
+        "sendInvoice",
+        {
+            "chat_id": chat_id,
+            "title": f"Газ: {gas_amount}",
+            "description": f"Покупка {gas_amount} газа за {price} звёзд.",
+            "payload": payload,
+            "currency": "XTR",
+            "provider_token": "",
+            "prices": [{"label": f"{gas_amount} газа", "amount": price}],
+        },
+    )
+    return {
+        "referenceId": reference_id,
+        "gasAmount": gas_amount,
+        "amountStars": price,
+        "chatId": chat_id,
+    }
+
+
 def handle_pre_checkout_query(update: dict) -> None:
     """pre_checkout_query: ответить answerPreCheckoutQuery в течение 10 сек."""
     query = update.get("pre_checkout_query") or {}
