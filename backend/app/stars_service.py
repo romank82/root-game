@@ -12,6 +12,7 @@ economy.gas_pack_{gas_amount}: активная SystemSetting, иначе defaul
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 import httpx
@@ -30,6 +31,8 @@ from app.models import (
     SystemSetting,
 )
 from app.system_settings_catalog import get_definition
+
+logger = logging.getLogger(__name__)
 
 
 def _bot_api(method: str, payload: dict) -> dict:
@@ -224,3 +227,36 @@ def handle_successful_payment(update: dict) -> None:
             )
         )
         session.flush()
+
+        # 13.3-b-3: лог gas.purchased (PlayerEvent, аналитика/антифрод).
+        # Газ начислен: GasWallet + GasTransaction зафиксированы в
+        # транзакции. Запись — в SAVEPOINT (begin_nested): та же
+        # транзакция, собственный флаш; при сбое журнала откатится только
+        # savepoint, коммит начисления газа не будет отравлен (иначе
+        # PendingRollbackError на commit — проверено эмпирически). Лог не
+        # важнее начисления — logger.warning. Повтор successful_payment
+        # (status == "completed") ушёл в return выше — событие пишется
+        # один раз за покупку.
+        try:
+            # Lazy импорт: player_events импортирует _new_id из
+            # mission_engine, который транзитивно импортирует и этот
+            # модуль — top-level импорт сюда создал бы цикл.
+            from app.player_events import record_player_event
+
+            with session.begin_nested():
+                record_player_event(
+                    session,
+                    payment.player_id,
+                    "gas.purchased",
+                    payload={
+                        # gas_amount — Numeric(18,4)/Decimal: str()
+                        # сохраняет точность без float-конверсий.
+                        "gasAmount": str(payment.gas_amount),
+                        "amountStars": payment.amount_stars,
+                        "referenceId": payment.reference_id,
+                        "chargeId": charge_id,
+                    },
+                    correlation_id=None,
+                )
+        except Exception as error:  # noqa: BLE001 — лог не важнее газа
+            logger.warning("player_event gas.purchased failed: %s", error)

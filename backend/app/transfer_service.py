@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -26,6 +27,8 @@ from app.models import (
 )
 from app.player_restrictions_engine import get_active_restrictions
 from app.system_settings_catalog import get_definition
+
+logger = logging.getLogger(__name__)
 
 # Ключи лимитов из CMS (system_settings_catalog.py, категория economy).
 TRANSFER_MIN_KEY = "economy.transfer_min_amount"
@@ -308,6 +311,36 @@ def transfer_root(
     )
 
     session.flush()
+
+    # 13.3-b-3: лог transfer.completed (PlayerEvent, аналитика/модерация).
+    # Перевод уже проведён: debit/credit + PlayerTransfer зафиксированы в
+    # транзакции, transfer_id сгенерирован. Запись — в SAVEPOINT
+    # (begin_nested): та же транзакция, собственный флаш; при сбое журнала
+    # откатится только savepoint, транзакция перевода не будет отравлена
+    # (иначе PendingRollbackError на commit — проверено эмпирически).
+    # Лог не важнее перевода — logger.warning. Идемпотентный повтор (тот
+    # же request_id) ушёл в early-return выше, поэтому событие пишется
+    # один раз за перевод.
+    try:
+        # Lazy импорт: player_events импортирует _new_id из mission_engine,
+        # который транзитивно импортирует и этот модуль — top-level импорт
+        # сюда создал бы цикл.
+        from app.player_events import record_player_event
+
+        with session.begin_nested():
+            record_player_event(
+                session,
+                from_player_id,
+                "transfer.completed",
+                payload={
+                    "toPlayerId": to_player_id,
+                    "amount": amount,
+                    "transferId": transfer_id,
+                },
+                correlation_id=None,
+            )
+    except Exception as error:  # noqa: BLE001 — лог не важнее перевода
+        logger.warning("player_event transfer.completed failed: %s", error)
 
     return {
         "transferId": transfer_id,
