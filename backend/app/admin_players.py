@@ -104,6 +104,15 @@ class GasAdjustmentPayload(BaseModel):
     reason: str = Field(..., min_length=1, max_length=255)
 
 
+class RootAdjustmentPayload(BaseModel):
+    """PATCH ROOT (13.7-c): начислить (+) / списать (-)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount: int
+    reason: str = Field(..., min_length=1, max_length=255)
+
+
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 200
 DEFAULT_GAS_TX_LIMIT = 50
@@ -647,6 +656,83 @@ def update_admin_player_gas(
             before={"gasBalance": str(old_balance)},
             after={"gasBalance": str(new_balance)},
             metadata={"amount": str(payload.amount), "reason": payload.reason},
+        )
+
+        session.flush()
+        return {"player": _serialize_player_card(session, player)}
+
+
+@router.patch("/{player_id}/root")
+def update_admin_player_root(
+    player_id: str,
+    payload: RootAdjustmentPayload,
+    request: Request,
+    admin: AdminUser = Depends(require_permission(PLAYERS_MANAGE_PERMISSION)),
+):
+    """PATCH ROOT (13.7-c): начислить (+) / списать (-) ROOT игроку.
+
+    Row-lock Wallet (создаётся при отсутствии, balance=0), immutable-проводка
+    WalletTransaction и аудит — в одной транзакции (SessionLocal.begin()).
+    """
+    if payload.amount == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Сумма ROOT должна быть ненулевой.",
+        )
+
+    with SessionLocal.begin() as session:
+        player = _get_player_or_404(session, player_id)
+        wallet = session.scalar(
+            select(Wallet)
+            .where(Wallet.player_id == player_id)
+            .with_for_update()
+        )
+        if wallet is None:
+            wallet = Wallet(
+                id=_new_id("wallet"),
+                player_id=player_id,
+                currency="ROOT",
+                available_balance=0,
+                locked_balance=0,
+            )
+            session.add(wallet)
+            session.flush()
+
+        old_balance = wallet.available_balance
+        new_balance = old_balance + payload.amount
+        if new_balance < 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Недостаточно ROOT для списания.",
+            )
+        wallet.available_balance = new_balance
+
+        transaction_type = "credit" if payload.amount > 0 else "debit"
+        session.add(
+            WalletTransaction(
+                id=_new_id("wallet-transaction"),
+                wallet_id=wallet.id,
+                amount=abs(payload.amount),
+                balance_after=new_balance,
+                transaction_type=transaction_type,
+                reason=payload.reason,
+                reference_type="admin_root_adjustment",
+                reference_id=_new_id("admin-root-adjustment"),
+                metadata_json={"adminId": admin.id},
+            )
+        )
+
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="player.root_adjusted",
+            entity_type="player",
+            entity_id=player_id,
+            request=request,
+            permission_code=PLAYERS_MANAGE_PERMISSION,
+            before={"rootBalance": old_balance},
+            after={"rootBalance": new_balance},
+            metadata={"amount": payload.amount, "reason": payload.reason},
         )
 
         session.flush()
