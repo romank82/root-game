@@ -13,7 +13,7 @@ age 0..120, country ISO-2), row-lock игрока (_lock_player) и аудит
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -527,6 +527,52 @@ def list_admin_players(
         "total": total,
         "limit": limit,
         "offset": offset,
+    }
+
+
+# 13.7-i-1: статистика всех игроков (total/online/active). Активность по
+# GamePlayer.last_seen_at (13.7-b), без отдельной таблицы login_events.
+# Периоды в днях; онлайн — последние STATS_ONLINE_MINUTES минут.
+STATS_PERIOD_DAYS = {"day": 1, "week": 7, "month": 30}
+STATS_ONLINE_MINUTES = 5
+
+
+@router.get("/stats")
+def get_admin_players_stats(
+    period: str = "day",
+    _admin: AdminUser = Depends(require_permission(PLAYERS_READ_PERMISSION)),
+):
+    """Статистика всех игроков (13.7-i-1): total/online/active.
+
+    period: day (24ч) / week (7 дней) / month (30 дней); дефолт — day.
+    total — все GamePlayer, online — last_seen_at за последние 5 минут,
+    active — уникальные с последним визитом с начала периода.
+    """
+    days = STATS_PERIOD_DAYS.get(period)
+    if days is None:
+        raise HTTPException(422, "period должен быть day/week/month.")
+    now = datetime.now(timezone.utc)
+    online_since = now - timedelta(minutes=STATS_ONLINE_MINUTES)
+    active_since = now - timedelta(days=days)
+    with SessionLocal() as session:  # read-only, не begin()
+        total = session.scalar(
+            select(func.count()).select_from(GamePlayer)
+        ) or 0
+        online = session.scalar(
+            select(func.count())
+            .select_from(GamePlayer)
+            .where(GamePlayer.last_seen_at >= online_since)
+        ) or 0
+        active = session.scalar(
+            select(func.count())
+            .select_from(GamePlayer)
+            .where(GamePlayer.last_seen_at >= active_since)
+        ) or 0
+    return {
+        "period": period,
+        "total": total,
+        "online": online,
+        "active": active,
     }
 
 

@@ -8,7 +8,7 @@ Unit-style: fake-объекты (SimpleNamespace) вместо реальной 
 from __future__ import annotations
 
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -2031,6 +2031,167 @@ class AdminPlayerBlockTests(unittest.TestCase):
 
         # Повторный unblock ничего не пишет: аудит остался один.
         self.assertEqual(len(self._find_block_audits("player.unblocked")), 1)
+
+
+class AdminPlayerStatsTests(unittest.TestCase):
+    """GET /players/stats (13.7-i-1): total/online/active по last_seen_at.
+
+    Живая SQLite + alembic upgrade head (как AdminPlayerBlockTests):
+    эндпоинт агрегирует по таблице game_players, поэтому FakeSession
+    не подходит.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from app import admin_players
+
+        cls.admin_players = admin_players
+        cls._session_local_patch = None
+
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory(
+            prefix="chimera-admin-players-stats-"
+        )
+        self.database_path = Path(self._temporary_directory.name) / "stats.sqlite3"
+        database_url = f"sqlite:///{self.database_path}"
+
+        environment = os.environ.copy()
+        environment["DATABASE_URL"] = database_url
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                str(BACKEND_ROOT / "alembic.ini"),
+                "upgrade",
+                "head",
+            ],
+            cwd=BACKEND_ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+        )
+
+        @event.listens_for(self.engine, "connect")
+        def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        self.SessionLocal = sessionmaker(
+            bind=self.engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+        self._session_local_patch = patch.object(
+            self.admin_players, "SessionLocal", self.SessionLocal
+        )
+        self._session_local_patch.start()
+
+    def tearDown(self) -> None:
+        self._session_local_patch.stop()
+        self.engine.dispose()
+        self._temporary_directory.cleanup()
+
+    # ---- Fixtures и хелперы ---------------------------------------------
+
+    def _make_admin(self):
+        from app.models import AdminUser
+
+        admin_id = f"admin-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                AdminUser(
+                    id=admin_id,
+                    username=f"admin-{admin_id[-6:]}",
+                    password_hash="test-hash",
+                    role="super_admin",
+                    is_super_admin=True,
+                    is_active=True,
+                    is_deleted=False,
+                )
+            )
+        with self.SessionLocal() as session:
+            return session.get(AdminUser, admin_id)
+
+    def _make_player(self, last_seen_at) -> str:
+        from app.models import GamePlayer
+
+        player_id = f"player-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GamePlayer(
+                    id=player_id,
+                    display_name="Stats-игрок",
+                    auth_provider="test",
+                    external_id=f"test-{uuid.uuid4().hex}",
+                    status="active",
+                    last_seen_at=last_seen_at,
+                )
+            )
+        return player_id
+
+    def _call_stats(self, period: str = "day", admin=None) -> dict:
+        return self.admin_players.get_admin_players_stats(
+            period=period, _admin=admin
+        )
+
+    # ---- Сценарии --------------------------------------------------------
+
+    def test_total_counts_all_players(self) -> None:
+        admin = self._make_admin()
+        now = datetime.now(timezone.utc)
+        # Разные last_seen_at: total считает всех игроков таблицы.
+        self._make_player(last_seen_at=now - timedelta(minutes=1))
+        self._make_player(last_seen_at=now - timedelta(days=2))
+        self._make_player(last_seen_at=now - timedelta(days=40))
+
+        result = self._call_stats(admin=admin)
+
+        # Дефолтный period — day, эхо в ответе.
+        self.assertEqual(result["period"], "day")
+        self.assertEqual(result["total"], 3)
+
+    def test_online_counts_last_5_minutes_only(self) -> None:
+        admin = self._make_admin()
+        now = datetime.now(timezone.utc)
+        self._make_player(last_seen_at=now - timedelta(minutes=1))  # онлайн
+        self._make_player(last_seen_at=now - timedelta(minutes=10))  # не онлайн
+        self._make_player(last_seen_at=None)  # никогда не заходил — не онлайн
+
+        result = self._call_stats(admin=admin)
+
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["online"], 1)
+
+    def test_active_day_period_last_24_hours(self) -> None:
+        admin = self._make_admin()
+        now = datetime.now(timezone.utc)
+        self._make_player(last_seen_at=now - timedelta(hours=2))
+        self._make_player(last_seen_at=now - timedelta(hours=23))
+        self._make_player(last_seen_at=now - timedelta(days=2))  # вне 24ч
+
+        result = self._call_stats(period="day", admin=admin)
+
+        self.assertEqual(result["active"], 2)
+
+    def test_invalid_period_returns_422(self) -> None:
+        admin = self._make_admin()
+
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_stats(period="year", admin=admin)
+
+        self.assertEqual(ctx.exception.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()
