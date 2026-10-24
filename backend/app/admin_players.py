@@ -13,6 +13,7 @@ age 0..120, country ISO-2), row-lock игрока (_lock_player) и аудит
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -25,6 +26,12 @@ from sqlalchemy.orm import Session
 from app.admin_access import require_permission
 from app.admin_audit import sanitize_audit_data, write_admin_audit
 from app.db import SessionLocal
+from app.player_restrictions_engine import (
+    ACTIVE_RESTRICTION_STATUS,
+    REVOKED_RESTRICTION_STATUS,
+    get_active_restrictions,
+    recompute_player_status,
+)
 from app.models import (
     AdminUser,
     GamePlayer,
@@ -110,6 +117,18 @@ class RootAdjustmentPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     amount: int
+    reason: str = Field(..., min_length=1, max_length=255)
+
+
+class PlayerBlockPayload(BaseModel):
+    """POST block/unblock (13.7-h): обязательный reason (1..255).
+
+    Один payload на оба действия: причина блокировки (block) и причина
+    снятия (unblock → revocation_reason) — в одном формате, extra=forbid.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     reason: str = Field(..., min_length=1, max_length=255)
 
 
@@ -760,6 +779,116 @@ def update_admin_player_root(
 
         session.flush()
         return {"player": _serialize_player_card(session, player)}
+
+
+@router.post("/{player_id}/block")
+def block_admin_player(
+    player_id: str,
+    payload: PlayerBlockPayload,
+    request: Request,
+    admin: AdminUser = Depends(require_permission(PLAYERS_MANAGE_PERMISSION)),
+):
+    """Заблокировать игрока (13.7-h): активный PlayerRestriction blocked + аудит.
+
+    Идемпотентность: повторный block с уже активным blocked -> 409
+    «Игрок уже заблокирован» (ядро против активных дублей одного типа,
+    см. admin_player_restrictions: uq_player_restrictions_active_per_type).
+    Write-through: recompute_player_status синхронизирует кэш
+    GamePlayer.status (active -> blocked) — как в admin_player_restrictions.
+    """
+    with SessionLocal.begin() as session:
+        player = _get_player_or_404(session, player_id)
+
+        active = get_active_restrictions(session, player_id)
+        if any(r.restriction_type == "blocked" for r in active):
+            raise HTTPException(
+                status_code=409,
+                detail="Игрок уже заблокирован.",
+            )
+
+        restriction = PlayerRestriction(
+            id=_new_id("player-restriction"),
+            player_id=player_id,
+            restriction_type="blocked",
+            status=ACTIVE_RESTRICTION_STATUS,
+            reason=payload.reason,
+            admin_id=admin.id,
+            starts_at=datetime.now(timezone.utc),
+        )
+        session.add(restriction)
+        session.flush()
+
+        # Write-through: кэш статуса пересчитывается после создания.
+        recompute_player_status(session, player)
+
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="player.blocked",
+            entity_type="player",
+            entity_id=player_id,
+            request=request,
+            permission_code=PLAYERS_MANAGE_PERMISSION,
+            before={"blocked": False},
+            after={"blocked": True},
+            metadata={"reason": payload.reason, "restrictionId": restriction.id},
+        )
+        session.flush()
+        return {"player": _serialize_player_card(session, player), "blocked": True}
+
+
+@router.post("/{player_id}/unblock")
+def unblock_admin_player(
+    player_id: str,
+    payload: PlayerBlockPayload,
+    request: Request,
+    admin: AdminUser = Depends(require_permission(PLAYERS_MANAGE_PERMISSION)),
+):
+    """Разблокировать игрока (13.7-h): снять активный blocked + аудит.
+
+    Снятие по образцу _apply_restriction_revoke (admin_player_restrictions):
+    status='revoked' + revoked_at + revoked_by_admin_id +
+    revocation_reason, а не expires_at=now (revoke — админ-действие,
+    lifecycle остаётся в истории). Повторный unblock без активного
+    blocked -> 409 «Игрок не заблокирован».
+    """
+    with SessionLocal.begin() as session:
+        player = _get_player_or_404(session, player_id)
+
+        active = get_active_restrictions(session, player_id)
+        restriction = next(
+            (r for r in active if r.restriction_type == "blocked"), None
+        )
+        if restriction is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Игрок не заблокирован.",
+            )
+
+        restriction.status = REVOKED_RESTRICTION_STATUS
+        restriction.revoked_by_admin_id = admin.id
+        restriction.revoked_at = datetime.now(timezone.utc)
+        restriction.revocation_reason = payload.reason
+        session.flush()
+
+        # Write-through: кэш статуса пересчитывается после снятия
+        # (blocked -> active).
+        recompute_player_status(session, player)
+
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="player.unblocked",
+            entity_type="player",
+            entity_id=player_id,
+            request=request,
+            permission_code=PLAYERS_MANAGE_PERMISSION,
+            before={"blocked": True},
+            after={"blocked": False},
+            metadata={"reason": payload.reason, "restrictionId": restriction.id},
+        )
+        session.flush()
+        return {"player": _serialize_player_card(session, player), "blocked": False}
 
 
 @router.get("/{player_id}/gas-transactions")

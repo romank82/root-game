@@ -1777,5 +1777,260 @@ class AdminPlayerRootTransactionsTests(unittest.TestCase):
         self.assertEqual(zero_limit["limit"], 1)  # min limit
 
 
+class AdminPlayerBlockTests(unittest.TestCase):
+    """POST block/unblock игрока (13.7-h).
+
+    Живая SQLite + alembic upgrade head (как AdminPlayerRootPatchTests):
+    block_admin_player/unblock_admin_player пишут в БД (создание/revoke
+    PlayerRestriction, синхронизация GamePlayer.status, аудит), поэтому
+    FakeSession не подходит. У класса своя TemporaryDirectory/БД.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from app import admin_players
+
+        cls.admin_players = admin_players
+        cls._session_local_patch = None
+
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory(
+            prefix="chimera-admin-players-block-"
+        )
+        self.database_path = Path(self._temporary_directory.name) / "block.sqlite3"
+        database_url = f"sqlite:///{self.database_path}"
+
+        environment = os.environ.copy()
+        environment["DATABASE_URL"] = database_url
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                str(BACKEND_ROOT / "alembic.ini"),
+                "upgrade",
+                "head",
+            ],
+            cwd=BACKEND_ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+        )
+
+        @event.listens_for(self.engine, "connect")
+        def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        self.SessionLocal = sessionmaker(
+            bind=self.engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+        self._session_local_patch = patch.object(
+            self.admin_players, "SessionLocal", self.SessionLocal
+        )
+        self._session_local_patch.start()
+
+    def tearDown(self) -> None:
+        self._session_local_patch.stop()
+        self.engine.dispose()
+        self._temporary_directory.cleanup()
+
+    # ---- Fixtures и хелперы ---------------------------------------------
+
+    def _make_admin(self):
+        from app.models import AdminUser
+
+        admin_id = f"admin-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                AdminUser(
+                    id=admin_id,
+                    username=f"admin-{admin_id[-6:]}",
+                    password_hash="test-hash",
+                    role="super_admin",
+                    is_super_admin=True,
+                    is_active=True,
+                    is_deleted=False,
+                )
+            )
+        with self.SessionLocal() as session:
+            return session.get(AdminUser, admin_id)
+
+    def _make_player(self) -> str:
+        from app.models import GamePlayer
+
+        player_id = f"player-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GamePlayer(
+                    id=player_id,
+                    display_name="Block-игрок",
+                    auth_provider="test",
+                    external_id=f"test-{uuid.uuid4().hex}",
+                    status="active",
+                )
+            )
+        return player_id
+
+    def _call_block(self, player_id: str, reason: str, admin) -> dict:
+        return self.admin_players.block_admin_player(
+            player_id,
+            self.admin_players.PlayerBlockPayload(reason=reason),
+            request=None,
+            admin=admin,
+        )
+
+    def _call_unblock(self, player_id: str, reason: str, admin) -> dict:
+        return self.admin_players.unblock_admin_player(
+            player_id,
+            self.admin_players.PlayerBlockPayload(reason=reason),
+            request=None,
+            admin=admin,
+        )
+
+    def _get_restrictions(self, player_id: str):
+        from app.models import PlayerRestriction
+
+        with self.SessionLocal() as session:
+            return session.scalars(
+                select(PlayerRestriction).where(
+                    PlayerRestriction.player_id == player_id
+                )
+            ).all()
+
+    def _get_player_status(self, player_id: str) -> str:
+        from app.models import GamePlayer
+
+        with self.SessionLocal() as session:
+            return session.get(GamePlayer, player_id).status
+
+    def _find_block_audits(self, action: str):
+        from app.models import AdminAuditLog
+
+        with self.SessionLocal() as session:
+            return session.scalars(
+                select(AdminAuditLog).where(AdminAuditLog.action == action)
+            ).all()
+
+    # ---- Сценарии --------------------------------------------------------
+
+    def test_block_creates_active_restriction(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        result = self._call_block(player_id, "мошенничество", admin)
+
+        # Ответ: blocked=True и карточка показывает статус 'blocked'.
+        self.assertTrue(result["blocked"])
+        self.assertEqual(result["player"]["player"]["status"], "blocked")
+
+        # PlayerRestriction: blocked + active, revoke-поля пустые.
+        restrictions = self._get_restrictions(player_id)
+        self.assertEqual(len(restrictions), 1)
+        restriction = restrictions[0]
+        self.assertEqual(restriction.restriction_type, "blocked")
+        self.assertEqual(restriction.status, "active")
+        self.assertEqual(restriction.reason, "мошенничество")
+        self.assertEqual(restriction.admin_id, admin.id)
+        self.assertIsNotNone(restriction.starts_at)
+        self.assertIsNone(restriction.expires_at)
+        self.assertIsNone(restriction.revoked_by_admin_id)
+        self.assertIsNone(restriction.revoked_at)
+        self.assertIsNone(restriction.revocation_reason)
+
+        # Кэш GamePlayer.status синхронизирован (write-through).
+        self.assertEqual(self._get_player_status(player_id), "blocked")
+
+        # Аудит player.blocked: before/after и metadata с restrictionId.
+        audits = self._find_block_audits("player.blocked")
+        self.assertEqual(len(audits), 1)
+        audit = audits[0]
+        self.assertEqual(audit.entity_id, player_id)
+        self.assertEqual(audit.entity_type, "player")
+        self.assertEqual(audit.permission_code, "players.manage")
+        self.assertEqual(audit.before_json, {"blocked": False})
+        self.assertEqual(audit.after_json, {"blocked": True})
+        self.assertEqual(
+            audit.metadata_json,
+            {"reason": "мошенничество", "restrictionId": restriction.id},
+        )
+
+    def test_block_already_blocked_409(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        self._call_block(player_id, "первый", admin)
+
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_block(player_id, "второй", admin)
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.detail, "Игрок уже заблокирован.")
+
+        # Активный дубль не создан; аудит только один.
+        self.assertEqual(len(self._get_restrictions(player_id)), 1)
+        self.assertEqual(len(self._find_block_audits("player.blocked")), 1)
+
+    def test_unblock_revokes_active_restriction(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        self._call_block(player_id, "мошенничество", admin)
+
+        result = self._call_unblock(player_id, "апелляция принята", admin)
+
+        self.assertFalse(result["blocked"])
+        self.assertEqual(result["player"]["player"]["status"], "active")
+
+        # Снятие: status='revoked' + revoked_at + revoked_by_admin_id +
+        # revocation_reason (по образцу _apply_restriction_revoke).
+        restrictions = self._get_restrictions(player_id)
+        self.assertEqual(len(restrictions), 1)
+        restriction = restrictions[0]
+        self.assertEqual(restriction.status, "revoked")
+        self.assertIsNotNone(restriction.revoked_at)
+        self.assertEqual(restriction.revoked_by_admin_id, admin.id)
+        self.assertEqual(restriction.revocation_reason, "апелляция принята")
+
+        # Кэш GamePlayer.status вернулся в active.
+        self.assertEqual(self._get_player_status(player_id), "active")
+
+        audits = self._find_block_audits("player.unblocked")
+        self.assertEqual(len(audits), 1)
+        audit = audits[0]
+        self.assertEqual(audit.entity_id, player_id)
+        self.assertEqual(audit.permission_code, "players.manage")
+        self.assertEqual(audit.before_json, {"blocked": True})
+        self.assertEqual(audit.after_json, {"blocked": False})
+        self.assertEqual(
+            audit.metadata_json,
+            {"reason": "апелляция принята", "restrictionId": restriction.id},
+        )
+
+    def test_unblock_without_active_blocked_409(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        # Сначала забанили и разбанили -> активного blocked больше нет.
+        self._call_block(player_id, "мошенничество", admin)
+        self._call_unblock(player_id, "апелляция", admin)
+
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_unblock(player_id, "повторно", admin)
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.detail, "Игрок не заблокирован.")
+
+        # Повторный unblock ничего не пишет: аудит остался один.
+        self.assertEqual(len(self._find_block_audits("player.unblocked")), 1)
+
 if __name__ == "__main__":
     unittest.main()
