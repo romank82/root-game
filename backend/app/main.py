@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
+from app.country_policy import is_blocked
 from app.db import SessionLocal
 from app.mission_engine import (
     MissionEngineError,
@@ -370,6 +371,15 @@ def get_current_player_id(request: Request) -> str:
                     status_code=403,
                     detail="Игровой профиль неактивен.",
                 )
+
+        # 13.2-b-1: блокировка по стране (blocked → 403; NULL → пропуск).
+        # Проверка после last_seen_at и status-рикавери (та же сессия):
+        # визит зафиксирован, но доступ из blocked-страны запрещён.
+        if is_blocked(session, player.country):
+            raise HTTPException(
+                status_code=403,
+                detail="Доступ из вашей страны ограничен.",
+            )
 
     return player_id
 
