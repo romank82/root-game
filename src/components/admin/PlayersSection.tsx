@@ -5,7 +5,6 @@ import {
   getProfileFields,
   listPlayers,
   updatePlayerGas,
-  updatePlayerProfile,
   type AdminPlayerCard,
   type AdminPlayerSummary,
   type AdminProfileField,
@@ -62,16 +61,6 @@ function fieldValue(card: AdminPlayerCard, key: string): string {
   return value ?? ''
 }
 
-// Снимок редактируемых полей карточки (значения строк — как в форме).
-function snapshotProfile(card: AdminPlayerCard): Record<string, string> {
-  return {
-    nickname: fieldValue(card, 'nickname'),
-    country: fieldValue(card, 'country'),
-    gender: fieldValue(card, 'gender'),
-    age: fieldValue(card, 'age'),
-  }
-}
-
 export function PlayersSection({
   admin: _admin,
   canWrite,
@@ -100,15 +89,9 @@ export function PlayersSection({
   const [loadingCard, setLoadingCard] = useState(false)
   const [cardError, setCardError] = useState<string | null>(null)
 
-  // Драфт редактируемых полей профиля — применяется кнопкой «Сохранить».
-  const [draftProfile, setDraftProfile] = useState<Record<string, string>>({})
-  const [savingProfile, setSavingProfile] = useState(false)
-  const [savingProfileError, setSavingProfileError] = useState<string | null>(
-    null,
-  )
-  const [savingProfileNotice, setSavingProfileNotice] = useState<string | null>(
-    null,
-  )
+  // 13.7-a: профиль — только чтение (страна/пол/возраст не редактируются
+  // в админке; PATCH-эндпоинт на бэке остаётся для точечного API-вызова).
+  // Драфт/сохранение профиля (draftProfile/handleSaveProfile) удалены.
 
   // Газ (10.4-e-2): драфт формы, статусы и история (последние 50).
   const [gasDraft, setGasDraft] = useState<{ amount: string; reason: string }>({
@@ -120,7 +103,7 @@ export function PlayersSection({
   const [savingGasNotice, setSavingGasNotice] = useState<string | null>(null)
   const [gasTransactions, setGasTransactions] = useState<GasTransaction[]>([])
 
-  // Поля форм профиля — один раз на mount.
+  // Поля card-карточки (labels для read-only показа, 13.7-a) — один раз на mount.
   useEffect(() => {
     let cancelled = false
     getProfileFields()
@@ -193,9 +176,6 @@ export function PlayersSection({
       .then((card) => {
         if (!cancelled) {
           setSelectedPlayer(card)
-          setDraftProfile(snapshotProfile(card))
-          setSavingProfileNotice(null)
-          setSavingProfileError(null)
         }
       })
       .catch((requestError) => {
@@ -251,72 +231,9 @@ export function PlayersSection({
     setOffset(0)
   }
 
-  function handleResetProfile() {
-    if (!selectedPlayer) return
-    setDraftProfile(snapshotProfile(selectedPlayer))
-    setSavingProfileError(null)
-    setSavingProfileNotice(null)
-  }
-
-  async function handleSaveProfile() {
-    if (!selectedPlayer) return
-
-    const rawCountry = (draftProfile.country ?? '').trim()
-    const rawGender = (draftProfile.gender ?? '').trim()
-    const rawAge = (draftProfile.age ?? '').trim()
-    const ageField = profileFields.find((field) => field.key === 'age')
-    const genderField = profileFields.find((field) => field.key === 'gender')
-    const countryField = profileFields.find((field) => field.key === 'country')
-
-    // Возраст: целое число в диапазоне из конфига полей (10.0.4).
-    if (rawAge !== '') {
-      const age = Number(rawAge)
-      const minAge = ageField?.min ?? 0
-      const maxAge = ageField?.max ?? 120
-      if (!Number.isInteger(age) || age < minAge || age > maxAge) {
-        setSavingProfileError(
-          `Возраст должен быть целым числом от ${minAge} до ${maxAge}.`,
-        )
-        return
-      }
-    }
-
-    // Пол: только из набора options конфига.
-    if (rawGender !== '' && genderField && !genderField.options?.includes(rawGender)) {
-      setSavingProfileError(`Недопустимое значение пола: ${rawGender}.`)
-      return
-    }
-
-    // Страна: ISO-2 (2 буквы), ограничение из конфига.
-    if (
-      rawCountry !== '' &&
-      countryField?.maxLength !== undefined &&
-      rawCountry.length > countryField.maxLength
-    ) {
-      setSavingProfileError(
-        `Страна — ISO-2: максимум ${countryField.maxLength} буквы.`,
-      )
-      return
-    }
-
-    setSavingProfile(true)
-    setSavingProfileError(null)
-    setSavingProfileNotice(null)
-    try {
-      const updated = await updatePlayerProfile(selectedPlayer.player.id, {
-        country: rawCountry === '' ? null : rawCountry,
-        gender: rawGender === '' ? null : rawGender,
-        age: rawAge === '' ? null : Number(rawAge),
-      })
-      setSelectedPlayer(updated)
-      setDraftProfile(snapshotProfile(updated))
-      setSavingProfileNotice('Профиль сохранён.')
-    } catch (err) {
-      setSavingProfileError((err as Error).message)
-    } finally {
-      setSavingProfile(false)
-    }
-  }
+  // 13.7-a: PATCH профиля из админки убран — страна/пол/возраст отображаются
+  // только для чтения (read-only). Endpoint /admin/players/{id} на бэке
+  // не тронут (может пригодиться точечно через API).
 
   async function handleSaveGas() {
     if (!selectedPlayer) return
@@ -519,79 +436,42 @@ export function PlayersSection({
           <p className="admin-muted">Выберите игрока слева.</p>
         ) : !loadingCard && !cardError && selectedPlayer ? (
           <>
-            <div className="admin-grid">
+            <div style={{ marginTop: '4px' }}>
+              <p className="admin-kicker">PROFILE</p>
               {profileFields.map((field) => (
-                <label key={field.key} className="admin-span-2">
-                  {field.label}
-                  {field.type === 'select' ? (
-                    <select
-                      value={
-                        draftProfile[field.key] ?? fieldValue(selectedPlayer, field.key)
-                      }
-                      disabled={!canWrite || savingProfile}
-                      onChange={(e) =>
-                        setDraftProfile((prev) => ({
-                          ...prev,
-                          [field.key]: e.target.value,
-                        }))
-                      }
-                    >
-                      {(draftProfile[field.key] ??
-                        fieldValue(selectedPlayer, field.key)) === '' && (
-                        <option value="">—</option>
-                      )}
-                      {(field.options ?? []).map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type={field.type}
-                      value={
-                        draftProfile[field.key] ?? fieldValue(selectedPlayer, field.key)
-                      }
-                      readOnly={field.readOnly}
-                      disabled={!canWrite || savingProfile}
-                      maxLength={field.maxLength}
-                      min={field.min}
-                      max={field.max}
-                      onChange={(e) =>
-                        setDraftProfile((prev) => ({
-                          ...prev,
-                          [field.key]: e.target.value,
-                        }))
-                      }
-                    />
-                  )}
-                </label>
+                <p
+                  key={field.key}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: '16px',
+                    maxWidth: '400px',
+                    margin: '6px 0',
+                    fontSize: '13px',
+                  }}
+                >
+                  <span
+                    className="admin-muted"
+                    style={{
+                      textTransform: 'uppercase',
+                      fontSize: '10px',
+                      letterSpacing: '0.08em',
+                      margin: 'auto 0',
+                    }}
+                  >
+                    {field.label}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: '"IBM Plex Mono", monospace',
+                      color: '#dff8eb',
+                    }}
+                  >
+                    {fieldValue(selectedPlayer, field.key) || '—'}
+                  </span>
+                </p>
               ))}
             </div>
-
-            <div className="admin-actions">
-              <button
-                className="admin-primary"
-                onClick={handleSaveProfile}
-                disabled={!canWrite || savingProfile}
-              >
-                {savingProfile ? 'Сохранение…' : 'Сохранить'}
-              </button>
-              <button
-                className="admin-secondary"
-                onClick={handleResetProfile}
-                disabled={savingProfile}
-              >
-                Отмена
-              </button>
-            </div>
-
-            {savingProfileError && (
-              <p className="admin-alert admin-error">{savingProfileError}</p>
-            )}
-            {savingProfileNotice && (
-              <p className="admin-alert admin-notice">{savingProfileNotice}</p>
-            )}
 
             <div style={{ marginTop: '18px' }}>
               <p className="admin-kicker">BALANCE</p>
