@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.country_policy import is_blocked
 from app.db import SessionLocal
+from app.app_errors import record_app_error
 from app.player_events import record_player_event
 from app.mission_engine import (
     MissionEngineError,
@@ -132,6 +133,48 @@ app.add_middleware(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.middleware("http")
+async def app_errors_middleware(request: Request, call_next):
+    """13.4-b: необработанные 5xx пишем в app_errors и пробрасываем.
+
+    4xx (HTTPException) — не логируем (raise). Исключения миссий endpoint'ы
+    уже конвертируют в HTTPException — сюда такие не долетают. Запись — в
+    отдельной короткой транзакции: сбой журнала не должен маскировать
+    исходную ошибку (паттерн auth.login, 13.3). Зарегистрирован ДО
+    correlation_id_middleware: в стеке Starlette (LIFO add_middleware) он
+    остаётся ВНУТРЕННИМ слоем, поэтому audit_context (correlation_id) уже
+    установлен внешним correlation_id_middleware.
+    """
+    try:
+        return await call_next(request)
+    except HTTPException:
+        raise  # 4xx — не логируем
+    except Exception as exc:  # noqa: BLE001 — необработанный 5xx
+        correlation_id = (
+            getattr(getattr(request, "state", None), "audit_context", {}).get(
+                "correlation_id"
+            )
+            or uuid4().hex
+        )
+        try:
+            with SessionLocal.begin() as session:
+                record_app_error(
+                    session,
+                    correlation_id=correlation_id,
+                    severity="error",
+                    error_type=type(exc).__name__,
+                    message=str(exc)[:512],
+                    safe_context={
+                        "method": request.method,
+                        "path": request.url.path,
+                        "status": 500,
+                    },
+                )
+        except Exception as log_error:  # noqa: BLE001 — лог не важнее ответа
+            logger.warning("app_error record failed: %s", log_error)
+        raise
 
 
 @app.middleware("http")
