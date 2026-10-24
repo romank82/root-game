@@ -1012,6 +1012,32 @@ class PlayerEvent(TimestampMixin, Base):
     )
 
 
+class AppError(TimestampMixin, Base):
+    """Сбор ошибок приложения (13.4): 5xx с correlation_id/severity/
+    safe_context (без секретов). Retention 30 дней — позже."""
+
+    __tablename__ = "app_errors"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    correlation_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )
+    severity: Mapped[str] = mapped_column(
+        String(16), nullable=False, index=True
+    )
+    error_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    message: Mapped[str] = mapped_column(String(512), nullable=False)
+    safe_context: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, default=None
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('error','critical')",
+            name="ck_app_errors_severity",
+        ),
+    )
+
+
 class Team(TimestampMixin, Base):
     """Команда игроков (шаг 6.1).
 
