@@ -5,11 +5,13 @@ import {
   getProfileFields,
   listPlayers,
   updatePlayerGas,
+  updatePlayerRoot,
   type AdminPlayerCard,
   type AdminPlayerSummary,
   type AdminProfileField,
   type AdminUser,
   type GasTransaction,
+  type RootAdjustmentPayload,
 } from '../../api/adminApi'
 
 type PlayersSectionProps = {
@@ -103,6 +105,25 @@ export function PlayersSection({
   const [savingGasNotice, setSavingGasNotice] = useState<string | null>(null)
   const [gasTransactions, setGasTransactions] = useState<GasTransaction[]>([])
 
+  // Экономика игрока (13.7-d): модалка ROOT + ГАЗ. Отдельные драфты от
+  // газ-формы в карточке (gasDraft), чтобы действия модалки не смешивались
+  // с формой 10.4-e-2: обе остаются доступными.
+  const [economyOpen, setEconomyOpen] = useState(false)
+  const [rootDraft, setRootDraft] = useState<{ amount: string; reason: string }>({
+    amount: '',
+    reason: '',
+  })
+  const [gasDraftEconomy, setGasDraftEconomy] = useState<{
+    amount: string
+    reason: string
+  }>({
+    amount: '',
+    reason: '',
+  })
+  const [savingEconomy, setSavingEconomy] = useState(false)
+  const [economyError, setEconomyError] = useState<string | null>(null)
+  const [economyNotice, setEconomyNotice] = useState<string | null>(null)
+
   // Поля card-карточки (labels для read-only показа, 13.7-a) — один раз на mount.
   useEffect(() => {
     let cancelled = false
@@ -163,6 +184,10 @@ export function PlayersSection({
 
   // Карточка выбранного игрока.
   useEffect(() => {
+    // 13.7-d: смена выбранного игрока закрывает модалку «Экономика игрока».
+    setEconomyOpen(false)
+    setEconomyError(null)
+    setEconomyNotice(null)
     if (selectedPlayerId === null) {
       setSelectedPlayer(null)
       setCardError(null)
@@ -274,6 +299,90 @@ export function PlayersSection({
       setSavingGasError((err as Error).message)
     } finally {
       setSavingGas(false)
+    }
+  }
+
+  // 13.7-d: «Экономика игрока» — модалка ROOT + ГАЗ.
+  function openEconomyModal() {
+    setRootDraft({ amount: '', reason: '' })
+    setGasDraftEconomy({ amount: '', reason: '' })
+    setEconomyError(null)
+    setEconomyNotice(null)
+    setEconomyOpen(true)
+  }
+
+  async function handleApplyRoot() {
+    if (!selectedPlayer) return
+
+    const rawAmount = rootDraft.amount.trim()
+    const rawReason = rootDraft.reason.trim()
+    const amount = Number(rawAmount)
+
+    // ROOT — целочисленный баланс: начислить/списать можно только целое число.
+    if (rawAmount === '' || !Number.isInteger(amount) || amount === 0) {
+      setEconomyError('Сумма ROOT должна быть целым числом и не равна 0.')
+      return
+    }
+    if (rawReason === '') {
+      setEconomyError('Укажите причину изменения (она попадёт в аудит).')
+      return
+    }
+
+    setSavingEconomy(true)
+    setEconomyError(null)
+    setEconomyNotice(null)
+    try {
+      const payload: RootAdjustmentPayload = { amount, reason: rawReason }
+      const updated = await updatePlayerRoot(selectedPlayer.player.id, payload)
+      setSelectedPlayer(updated)
+      setRootDraft({ amount: '', reason: '' })
+      setEconomyNotice('ROOT обновлён.')
+    } catch (err) {
+      setEconomyError((err as Error).message)
+    } finally {
+      setSavingEconomy(false)
+    }
+  }
+
+  async function handleApplyGasEconomy() {
+    if (!selectedPlayer) return
+
+    const rawAmount = gasDraftEconomy.amount.trim()
+    const rawReason = gasDraftEconomy.reason.trim()
+    const amount = Number(rawAmount)
+
+    // Газ — дробный Numeric(18,4): валидируем число, в запрос уходит исходная
+    // строка (Decimal на бэке парсит её точно) — как в газ-форме карточки.
+    if (rawAmount === '' || !Number.isFinite(amount) || amount === 0) {
+      setEconomyError('Сумма газа должна быть числом и не равна 0.')
+      return
+    }
+    if (rawReason === '') {
+      setEconomyError('Укажите причину изменения (она попадёт в аудит).')
+      return
+    }
+
+    setSavingEconomy(true)
+    setEconomyError(null)
+    setEconomyNotice(null)
+    try {
+      const updated = await updatePlayerGas(selectedPlayer.player.id, {
+        amount: rawAmount,
+        reason: rawReason,
+      })
+      setSelectedPlayer(updated)
+      // Обновляем историю газа в карточке (10.4-e-2).
+      const history = await getPlayerGasTransactions(
+        selectedPlayer.player.id,
+        { limit: 50 },
+      )
+      setGasTransactions(history.transactions)
+      setGasDraftEconomy({ amount: '', reason: '' })
+      setEconomyNotice('Газ обновлён.')
+    } catch (err) {
+      setEconomyError((err as Error).message)
+    } finally {
+      setSavingEconomy(false)
     }
   }
 
@@ -490,6 +599,15 @@ export function PlayersSection({
                 Закрыто: {formatAmount(selectedPlayer.wallet.lockedBalance)}{' '}
                 {selectedPlayer.wallet.currency}
               </p>
+              <div style={{ marginTop: '12px' }}>
+                <button
+                  className="admin-secondary"
+                  onClick={openEconomyModal}
+                  disabled={!canWrite || savingEconomy}
+                >
+                  Экономика игрока
+                </button>
+              </div>
             </div>
 
             <div style={{ marginTop: '30px' }}>
@@ -613,6 +731,145 @@ export function PlayersSection({
               )}
             </div>
           </>
+        ) : null}
+        {/* 13.7-d: «Экономика игрока» — модалка ROOT + ГАЗ (начислить/списать). */}
+        {economyOpen && selectedPlayer ? (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 100,
+              background: 'rgba(2, 8, 6, 0.66)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'center',
+              overflowY: 'auto',
+              padding: '40px 16px',
+            }}
+          >
+            <div
+              style={{
+                background: '#0d1c18',
+                border: '1px solid rgba(190, 255, 226, 0.24)',
+                borderRadius: '12px',
+                padding: '20px',
+                width: 'min(560px, 100%)',
+                boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
+              }}
+            >
+              <p className="admin-kicker">PLAYER ECONOMY</p>
+              <h3 style={{ margin: '0 0 16px' }}>Экономика игрока</h3>
+
+              {economyError && (
+                <p className="admin-alert admin-error">{economyError}</p>
+              )}
+              {economyNotice && (
+                <p className="admin-alert admin-notice">{economyNotice}</p>
+              )}
+
+              {/* ROOT */}
+              <p className="admin-kicker">ROOT</p>
+              <div className="admin-grid">
+                <label>
+                  Сумма
+                  <input
+                    type="number"
+                    step="1"
+                    value={rootDraft.amount}
+                    disabled={!canWrite || savingEconomy}
+                    placeholder="например 5 или -3"
+                    onChange={(e) =>
+                      setRootDraft((prev) => ({
+                        ...prev,
+                        amount: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Причина (аудит)
+                  <input
+                    type="text"
+                    value={rootDraft.reason}
+                    disabled={!canWrite || savingEconomy}
+                    placeholder="например bonus или penalty"
+                    onChange={(e) =>
+                      setRootDraft((prev) => ({
+                        ...prev,
+                        reason: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <div className="admin-actions">
+                <button
+                  className="admin-primary"
+                  onClick={handleApplyRoot}
+                  disabled={!canWrite || savingEconomy}
+                >
+                  {savingEconomy ? 'Сохранение…' : 'Применить ROOT'}
+                </button>
+              </div>
+
+              {/* ГАЗ */}
+              <p className="admin-kicker" style={{ marginTop: '18px' }}>
+                GAS
+              </p>
+              <div className="admin-grid">
+                <label>
+                  Сумма
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={gasDraftEconomy.amount}
+                    disabled={!canWrite || savingEconomy}
+                    placeholder="например 5.5 или -3"
+                    onChange={(e) =>
+                      setGasDraftEconomy((prev) => ({
+                        ...prev,
+                        amount: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Причина (аудит)
+                  <input
+                    type="text"
+                    value={gasDraftEconomy.reason}
+                    disabled={!canWrite || savingEconomy}
+                    placeholder="например bonus или refill"
+                    onChange={(e) =>
+                      setGasDraftEconomy((prev) => ({
+                        ...prev,
+                        reason: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <div className="admin-actions">
+                <button
+                  className="admin-primary"
+                  onClick={handleApplyGasEconomy}
+                  disabled={!canWrite || savingEconomy}
+                >
+                  {savingEconomy ? 'Сохранение…' : 'Применить ГАЗ'}
+                </button>
+              </div>
+
+              <div className="admin-actions" style={{ marginTop: '18px' }}>
+                <button
+                  className="admin-secondary"
+                  onClick={() => setEconomyOpen(false)}
+                  disabled={savingEconomy}
+                >
+                  Закрыть
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
       </section>
     </div>

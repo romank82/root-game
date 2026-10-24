@@ -1727,6 +1727,28 @@ export async function updatePlayerGas(
   return body.player
 }
 
+export type RootAdjustmentPayload = {
+  amount: number
+  reason: string
+}
+
+export async function updatePlayerRoot(
+  playerId: string,
+  payload: RootAdjustmentPayload,
+): Promise<AdminPlayerCard> {
+  const response = await adminFetch(
+    `/api/v1/admin/players/${encodeURIComponent(playerId)}/root`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { player: AdminPlayerCard }
+  return body.player
+}
+
 export type GasTransaction = {
   id: string
   amount: string
