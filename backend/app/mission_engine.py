@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
+from app.country_policy import is_feature_restricted
 from app.datetime_utils import ensure_utc
 from app.db import SessionLocal
 from app.fallback_shop import (
@@ -1261,6 +1262,9 @@ def _accept_mission_once(
     with session.begin():
         mission = _load_mission_for_accept(session, mission_id)
         player = _ensure_player(session, player_id)
+        # 13.2-b-2: страна игрока — restricted с mission в списке.
+        if is_feature_restricted(session, player.country, "mission"):
+            raise MissionEngineError(403, "Миссии из вашей страны ограничены.")
         _synchronize_player_missions(session, player_id)
 
         player_mission = session.scalars(

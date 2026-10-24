@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.admin_player_wallet import ACTIVE_SETTING_STATUS
+from app.country_policy import is_feature_restricted
 from app.db import SessionLocal
 from app.mission_engine import (
     ROOT_CURRENCY,
@@ -156,6 +157,10 @@ def transfer_root(
     from_player = session.get(GamePlayer, from_player_id)
     if from_player is None:
         raise MissionEngineError(404, "Отправитель не найден.")
+
+    # 13.2-b-2: страна отправителя — restricted с transfer в списке.
+    if is_feature_restricted(session, from_player.country, "transfer"):
+        raise MissionEngineError(403, "Переводы из вашей страны ограничены.")
 
     to_player = session.get(GamePlayer, to_player_id)
     if to_player is None:

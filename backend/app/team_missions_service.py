@@ -26,6 +26,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.country_policy import is_feature_restricted
 from app.geo_country import resolve_country_or_none
 
 # Активные командные сессии — в этих статусах игрок задействован в миссии.
@@ -461,6 +462,10 @@ def _submit_location(
         raise _mission_error(404, "Игрок не найден.")
     if player.status != "active":
         raise _mission_error(403, "Игровой профиль неактивен.")
+
+    # 13.2-b-2: страна игрока — restricted с team в списке.
+    if is_feature_restricted(session, player.country, "team"):
+        raise _mission_error(403, "Командные миссии из вашей страны ограничены.")
 
     # 2. Session existsE presence only while collecting/ready_to_start.
     team_session = session.get(TeamSession, session_id)
