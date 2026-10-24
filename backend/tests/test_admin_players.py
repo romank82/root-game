@@ -1209,5 +1209,268 @@ class AdminPlayerGasPatchTests(unittest.TestCase):
         self.assertEqual(zero_limit["limit"], 1)  # min limit
 
 
+class AdminPlayerRootPatchTests(unittest.TestCase):
+    """PATCH ROOT (13.7-c-тесты): начислить/списать + аудит + проводки.
+
+    Живая SQLite + alembic upgrade head (как AdminPlayerGasPatchTests):
+    update_admin_player_root пишет в БД (row-lock Wallet, создание проводки,
+    аудит), поэтому FakeSession не подходит. У класса своя
+    TemporaryDirectory/БД, чтобы не пересечься с газовыми тестами.
+
+    Баланс ROOT — Integer: rootBalance в карточке и before/after аудита
+    приходят числами (int), поэтому сравнения идут напрямую, без
+    Decimal-обёрток из газовых тестов.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from app import admin_players
+
+        cls.admin_players = admin_players
+        cls._session_local_patch = None
+
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory(
+            prefix="chimera-admin-players-root-"
+        )
+        self.database_path = Path(self._temporary_directory.name) / "root.sqlite3"
+        database_url = f"sqlite:///{self.database_path}"
+
+        environment = os.environ.copy()
+        environment["DATABASE_URL"] = database_url
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                str(BACKEND_ROOT / "alembic.ini"),
+                "upgrade",
+                "head",
+            ],
+            cwd=BACKEND_ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+        )
+
+        @event.listens_for(self.engine, "connect")
+        def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        self.SessionLocal = sessionmaker(
+            bind=self.engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+        self._session_local_patch = patch.object(
+            self.admin_players, "SessionLocal", self.SessionLocal
+        )
+        self._session_local_patch.start()
+
+    def tearDown(self) -> None:
+        self._session_local_patch.stop()
+        self.engine.dispose()
+        self._temporary_directory.cleanup()
+
+    # ---- Fixtures и хелперы ---------------------------------------------
+
+    def _make_admin(self):
+        from app.models import AdminUser
+
+        admin_id = f"admin-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                AdminUser(
+                    id=admin_id,
+                    username=f"admin-{admin_id[-6:]}",
+                    password_hash="test-hash",
+                    role="super_admin",
+                    is_super_admin=True,
+                    is_active=True,
+                    is_deleted=False,
+                )
+            )
+        with self.SessionLocal() as session:
+            return session.get(AdminUser, admin_id)
+
+    def _make_player(self) -> str:
+        from app.models import GamePlayer
+
+        player_id = f"player-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GamePlayer(
+                    id=player_id,
+                    display_name="ROOT-игрок",
+                    auth_provider="test",
+                    external_id=f"test-{uuid.uuid4().hex}",
+                    status="active",
+                )
+            )
+        return player_id
+
+    def _make_wallet(self, player_id: str, balance: int) -> str:
+        from app.models import Wallet
+
+        wallet_id = f"wallet-{uuid.uuid4().hex}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                Wallet(
+                    id=wallet_id,
+                    player_id=player_id,
+                    currency="ROOT",
+                    available_balance=balance,
+                    locked_balance=0,
+                )
+            )
+        return wallet_id
+
+    def _get_wallet(self, player_id: str):
+        from app.models import Wallet
+
+        with self.SessionLocal() as session:
+            return session.scalar(
+                select(Wallet).where(Wallet.player_id == player_id)
+            )
+
+    def _get_wallet_transactions(self, wallet_id: str):
+        from app.models import WalletTransaction
+
+        with self.SessionLocal() as session:
+            return session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet_id
+                )
+            ).all()
+
+    def _find_root_audits(self):
+        from app.models import AdminAuditLog
+
+        with self.SessionLocal() as session:
+            return session.scalars(
+                select(AdminAuditLog).where(
+                    AdminAuditLog.action == "player.root_adjusted"
+                )
+            ).all()
+
+    def _call_root_patch(
+        self, player_id: str, amount: int, reason: str, admin
+    ) -> dict:
+        return self.admin_players.update_admin_player_root(
+            player_id,
+            self.admin_players.RootAdjustmentPayload(amount=amount, reason=reason),
+            request=None,
+            admin=admin,
+        )
+
+    # ---- Сценарии --------------------------------------------------------
+
+    def test_patch_root_credit(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_wallet(player_id, 10)
+
+        result = self._call_root_patch(player_id, 5, "bonus", admin)
+
+        # Баланс в карточке (блок wallet): 10 + 5 = 15.
+        self.assertEqual(result["player"]["wallet"]["availableBalance"], 15)
+
+        # Проводка: credit, amount, balance_after.
+        txs = self._get_wallet_transactions(wallet_id)
+        self.assertEqual(len(txs), 1)
+        tx = txs[0]
+        self.assertEqual(tx.transaction_type, "credit")
+        self.assertEqual(tx.amount, 5)
+        self.assertEqual(tx.balance_after, 15)
+        self.assertEqual(tx.reason, "bonus")
+        self.assertEqual(tx.reference_type, "admin_root_adjustment")
+        self.assertIsNotNone(tx.reference_id)
+        self.assertEqual(tx.metadata_json, {"adminId": admin.id})
+
+        # Аудит: action зафиксирован фильтром, before/after и amount — int.
+        audits = self._find_root_audits()
+        self.assertEqual(len(audits), 1)
+        audit = audits[0]
+        self.assertEqual(audit.entity_id, player_id)
+        self.assertEqual(audit.permission_code, "players.manage")
+        self.assertEqual(audit.before_json["rootBalance"], 10)
+        self.assertEqual(audit.after_json["rootBalance"], 15)
+        self.assertEqual(audit.metadata_json, {"amount": 5, "reason": "bonus"})
+
+    def test_patch_root_debit(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_wallet(player_id, 10)
+
+        result = self._call_root_patch(player_id, -3, "spend", admin)
+
+        # Баланс в карточке (блок wallet): 10 - 3 = 7.
+        self.assertEqual(result["player"]["wallet"]["availableBalance"], 7)
+
+        txs = self._get_wallet_transactions(wallet_id)
+        self.assertEqual(len(txs), 1)
+        tx = txs[0]
+        self.assertEqual(tx.transaction_type, "debit")
+        self.assertEqual(tx.amount, 3)
+        self.assertEqual(tx.balance_after, 7)
+        self.assertEqual(tx.reason, "spend")
+
+    def test_patch_root_insufficient(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+        wallet_id = self._make_wallet(player_id, 10)
+
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_root_patch(player_id, -100, "spend", admin)
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertEqual(ctx.exception.detail, "Недостаточно ROOT для списания.")
+
+        # Транзакция откатилась: баланс не изменился, проводок и аудита нет.
+        wallet = self._get_wallet(player_id)
+        self.assertEqual(wallet.available_balance, 10)
+        self.assertEqual(self._get_wallet_transactions(wallet_id), [])
+        self.assertEqual(self._find_root_audits(), [])
+
+    def test_patch_root_zero_amount(self) -> None:
+        admin = self._make_admin()
+
+        # Проверка amount != 0 идёт до обращения к БД, игрок не нужен.
+        with self.assertRaises(HTTPException) as ctx:
+            self._call_root_patch("player-unknown", 0, "noop", admin)
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertEqual(ctx.exception.detail, "Сумма ROOT должна быть ненулевой.")
+
+    def test_patch_root_creates_wallet(self) -> None:
+        admin = self._make_admin()
+        player_id = self._make_player()
+
+        result = self._call_root_patch(player_id, 5, "first bonus", admin)
+
+        # Баланс в карточке (блок wallet): 0 + 5 = 5.
+        self.assertEqual(result["player"]["wallet"]["availableBalance"], 5)
+
+        # Кошелёк создан (у игрока его не было) + проводка credit.
+        wallet = self._get_wallet(player_id)
+        self.assertIsNotNone(wallet)
+        self.assertEqual(wallet.available_balance, 5)
+
+        txs = self._get_wallet_transactions(wallet.id)
+        self.assertEqual(len(txs), 1)
+        self.assertEqual(txs[0].transaction_type, "credit")
+        self.assertEqual(txs[0].amount, 5)
+        self.assertEqual(txs[0].balance_after, 5)
+
+
 if __name__ == "__main__":
     unittest.main()
