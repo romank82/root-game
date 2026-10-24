@@ -24,13 +24,31 @@ import { SettingsSection } from './components/admin/SettingsSection'
 import { AdminsSection } from './components/admin/AdminsSection'
 import { KeysSection } from './components/admin/KeysSection'
 import { ContentSection } from './components/admin/ContentSection'
-import { EconomySection } from './components/admin/EconomySection'
 import { PlayersSection } from './components/admin/PlayersSection'
 import { MissionsSection } from './components/admin/MissionsSection'
 import { SeasonsSection } from './components/admin/SeasonsSection'
 import { ChaptersSection } from './components/admin/ChaptersSection'
 import { StoryNodesSection } from './components/admin/StoryNodesSection'
 import { CascadeSection } from './components/admin/CascadeSection'
+
+// 13.7-j: валидные вкладки админки. 'economy' удалена — реестр операций
+// перенесён в карточку игрока (PlayersSection), настройки — в CMS.
+// Список используется для фолбэка старой вкладки из localStorage.
+const ADMIN_SECTIONS = [
+  'missions',
+  'settings',
+  'admins',
+  'keys',
+  'content',
+  'seasons',
+  'chapters',
+  'story-nodes',
+  'minigame-profiles',
+  'cascade',
+  'players',
+] as const
+
+type AdminSection = (typeof ADMIN_SECTIONS)[number]
 
 function AdminApp() {
   const [admin, setAdmin] = useState<AdminUser | null>(null)
@@ -40,35 +58,14 @@ function AdminApp() {
   const [notice, setNotice] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [section, setSection] = useState<
-    'missions'
-    | 'settings'
-    | 'admins'
-    | 'keys'
-    | 'content'
-    | 'seasons'
-    | 'chapters'
-    | 'story-nodes'
-    | 'minigame-profiles'
-    | 'cascade'
-    | 'economy'
-    | 'players'
-  >(
-    () =>
-      (localStorage.getItem('chimera-admin-section') as
-        | 'missions'
-        | 'settings'
-        | 'admins'
-        | 'keys'
-        | 'content'
-        | 'seasons'
-        | 'chapters'
-        | 'story-nodes'
-        | 'minigame-profiles'
-        | 'cascade'
-        | 'economy'
-        | 'players') ?? 'missions',
-  )
+  const [section, setSection] = useState<AdminSection>(() => {
+    // 13.7-j: если в localStorage сохранена удалённая вкладка 'economy'
+    // (или любое другое невалидное значение) — фолбэк на 'missions'.
+    const saved = localStorage.getItem('chimera-admin-section')
+    return ADMIN_SECTIONS.includes(saved as (typeof ADMIN_SECTIONS)[number])
+      ? (saved as (typeof ADMIN_SECTIONS)[number])
+      : 'missions'
+  })
   const [geoZones, setGeoZones] = useState<AdminGeoZone[]>([])
   // setGeoZonesError и setARObjectsError всё ещё используются эффектом загрузки миссий;
   // сами geoZonesError/arObjectsError больше не отображаются в AdminApp (редакторы
@@ -474,7 +471,6 @@ function AdminApp() {
             {section === 'story-nodes' && 'Story Nodes'}
             {section === 'minigame-profiles' && 'Мини-игры'}
             {section === 'cascade' && 'Конструктор'}
-            {section === 'economy' && 'Экономика'}
             {section === 'players' && 'Игроки'}
           </h1>
 
@@ -510,13 +506,6 @@ function AdminApp() {
               onClick={() => setSection('keys')}
             >
               Ключи
-            </button>
-
-            <button
-              className={section === 'economy' ? 'is-active' : ''}
-              onClick={() => setSection('economy')}
-            >
-              Экономика
             </button>
 
             <button
@@ -615,15 +604,6 @@ function AdminApp() {
           onError={setError}
           onNotice={setNotice}
           keyItems={keyItems}
-        />
-      )}
-
-      {section === 'economy' && (
-        <EconomySection
-          admin={admin}
-          canWrite={canWrite}
-          onError={setError}
-          onNotice={setNotice}
         />
       )}
 
