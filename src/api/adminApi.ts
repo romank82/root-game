@@ -1750,6 +1750,44 @@ export async function updatePlayerRoot(
   return body.player
 }
 
+export type PlayerBlockPayload = {
+  reason: string
+}
+
+export async function blockPlayer(
+  playerId: string,
+  payload: PlayerBlockPayload,
+): Promise<AdminPlayerCard> {
+  const response = await adminFetch(
+    `/api/v1/admin/players/${encodeURIComponent(playerId)}/block`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { player: AdminPlayerCard }
+  return body.player
+}
+
+export async function unblockPlayer(
+  playerId: string,
+  payload: PlayerBlockPayload,
+): Promise<AdminPlayerCard> {
+  const response = await adminFetch(
+    `/api/v1/admin/players/${encodeURIComponent(playerId)}/unblock`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  const body = (await response.json()) as { player: AdminPlayerCard }
+  return body.player
+}
+
 export type GasTransaction = {
   id: string
   amount: string

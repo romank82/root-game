@@ -9,11 +9,13 @@ import {
   YAxis,
 } from 'recharts'
 import {
+  blockPlayer,
   getPlayer,
   getPlayerGasTransactions,
   getPlayerRootTransactions,
   getProfileFields,
   listPlayers,
+  unblockPlayer,
   updatePlayerGas,
   updatePlayerRoot,
   type AdminPlayerCard,
@@ -21,6 +23,7 @@ import {
   type AdminProfileField,
   type AdminUser,
   type GasTransaction,
+  type PlayerBlockPayload,
   type RootAdjustmentPayload,
   type RootTransaction,
 } from '../../api/adminApi'
@@ -136,7 +139,7 @@ export function PlayersSection({
   admin: _admin,
   canWrite,
   onError,
-  onNotice: _onNotice,
+  onNotice,
 }: PlayersSectionProps) {
   const [players, setPlayers] = useState<AdminPlayerSummary[]>([])
   const [total, setTotal] = useState(0)
@@ -199,6 +202,15 @@ export function PlayersSection({
   const [savingEconomy, setSavingEconomy] = useState(false)
   const [economyError, setEconomyError] = useState<string | null>(null)
   const [economyNotice, setEconomyNotice] = useState<string | null>(null)
+
+  // 13.7-h-2: блокировка/разблокировка игрока — модалка с reason.
+  // Имя держим отдельно от economy-модалки (blockReason), чтобы не мешать
+  // драфтам ROOT/ГАЗ; статус кнопки/заголовка — по selectedPlayer.player.status.
+  const [blockModalOpen, setBlockModalOpen] = useState(false)
+  const [blockReason, setBlockReason] = useState('')
+  const [savingBlock, setSavingBlock] = useState(false)
+  const [blockError, setBlockError] = useState<string | null>(null)
+  const [blockNotice, setBlockNotice] = useState<string | null>(null)
 
   // Поля card-карточки (labels для read-only показа, 13.7-a) — один раз на mount.
   useEffect(() => {
@@ -264,6 +276,11 @@ export function PlayersSection({
     setEconomyOpen(false)
     setEconomyError(null)
     setEconomyNotice(null)
+    // 13.7-h-2: и модалку блокировки/разблокировки.
+    setBlockModalOpen(false)
+    setBlockReason('')
+    setBlockError(null)
+    setBlockNotice(null)
     if (selectedPlayerId === null) {
       setSelectedPlayer(null)
       setCardError(null)
@@ -412,6 +429,72 @@ export function PlayersSection({
     setEconomyError(null)
     setEconomyNotice(null)
     setEconomyOpen(true)
+  }
+
+  // 13.7-h-2: блокировка/разблокировка игрока — модалка с reason.
+  function openBlockModal() {
+    setBlockReason('')
+    setBlockError(null)
+    setBlockNotice(null)
+    setBlockModalOpen(true)
+  }
+
+  function closeBlockModal() {
+    setBlockModalOpen(false)
+    setBlockError(null)
+    setBlockNotice(null)
+  }
+
+  async function handleBlockPlayer() {
+    if (!selectedPlayer) return
+
+    const reason = blockReason.trim()
+    if (reason === '') {
+      setBlockError('Укажите причину блокировки (она попадёт в аудит).')
+      return
+    }
+
+    setSavingBlock(true)
+    setBlockError(null)
+    setBlockNotice(null)
+    try {
+      const payload: PlayerBlockPayload = { reason }
+      const updated = await blockPlayer(selectedPlayer.player.id, payload)
+      setSelectedPlayer(updated)
+      setBlockModalOpen(false)
+      setBlockReason('')
+      onNotice('Игрок заблокирован.')
+    } catch (err) {
+      setBlockError((err as Error).message)
+    } finally {
+      setSavingBlock(false)
+    }
+  }
+
+  async function handleUnblockPlayer() {
+    if (!selectedPlayer) return
+
+    const reason = blockReason.trim()
+    if (reason === '') {
+      setBlockError('Укажите причину разблокировки (она попадёт в аудит).')
+      return
+    }
+
+    setSavingBlock(true)
+    setBlockError(null)
+    setBlockNotice(null)
+    try {
+      const payload: PlayerBlockPayload = { reason }
+      const updated = await unblockPlayer(selectedPlayer.player.id, payload)
+      setSelectedPlayer(updated)
+      setBlockModalOpen(false)
+      setBlockReason('')
+      onNotice('Игрок разблокирован.')
+    } catch (err) {
+      setBlockError((err as Error).message)
+    } finally {
+      setSavingBlock(false)
+    }
   }
 
   async function handleApplyRoot() {
@@ -733,7 +816,14 @@ export function PlayersSection({
                 Закрыто: {formatAmount(selectedPlayer.wallet.lockedBalance)}{' '}
                 {selectedPlayer.wallet.currency}
               </p>
-              <div style={{ marginTop: '12px' }}>
+              <div
+                style={{
+                  marginTop: '12px',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                }}
+              >
                 <button
                   className="admin-secondary"
                   onClick={openEconomyModal}
@@ -741,6 +831,23 @@ export function PlayersSection({
                 >
                   Экономика игрока
                 </button>
+                {selectedPlayer.player.status === 'blocked' ? (
+                  <button
+                    className="admin-secondary"
+                    onClick={openBlockModal}
+                    disabled={!canWrite || savingBlock}
+                  >
+                    Разблокировать
+                  </button>
+                ) : (
+                  <button
+                    className="admin-secondary"
+                    onClick={openBlockModal}
+                    disabled={!canWrite || savingBlock}
+                  >
+                    Заблокировать
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1076,6 +1183,92 @@ export function PlayersSection({
                   className="admin-secondary"
                   onClick={() => setEconomyOpen(false)}
                   disabled={savingEconomy}
+                >
+                  Закрыть
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {/* 13.7-h-2: блокировка/разблокировка игрока — модалка с reason.
+            Отдельная от economy-модалки (не конфликтует с драфтами ROOT/ГАЗ);
+            заголовок/действие зависят от текущего статуса игрока. */}
+        {blockModalOpen && selectedPlayer ? (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 110,
+              background: 'rgba(2, 8, 6, 0.66)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'center',
+              overflowY: 'auto',
+              padding: '40px 16px',
+            }}
+          >
+            <div
+              style={{
+                background: '#0d1c18',
+                border: '1px solid rgba(190, 255, 226, 0.24)',
+                borderRadius: '12px',
+                padding: '20px',
+                width: 'min(560px, 100%)',
+                boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
+              }}
+            >
+              <p className="admin-kicker">PLAYER RESTRICTION</p>
+              <h3 style={{ margin: '0 0 16px' }}>
+                {selectedPlayer.player.status === 'blocked'
+                  ? 'Разблокировать'
+                  : 'Заблокировать'}
+              </h3>
+
+              {blockError && (
+                <p className="admin-alert admin-error">{blockError}</p>
+              )}
+              {blockNotice && (
+                <p className="admin-alert admin-notice">{blockNotice}</p>
+              )}
+
+              <p className="admin-kicker">ПРИЧИНА (АУДИТ)</p>
+              <label>
+                <input
+                  type="text"
+                  value={blockReason}
+                  disabled={!canWrite || savingBlock}
+                  placeholder={
+                    selectedPlayer.player.status === 'blocked'
+                      ? 'например, апелляция принята'
+                      : 'например, мошенничество'
+                  }
+                  onChange={(e) => setBlockReason(e.target.value)}
+                />
+              </label>
+
+              <div className="admin-actions">
+                <button
+                  className="admin-primary"
+                  onClick={
+                    selectedPlayer.player.status === 'blocked'
+                      ? handleUnblockPlayer
+                      : handleBlockPlayer
+                  }
+                  disabled={!canWrite || savingBlock}
+                >
+                  {savingBlock
+                    ? 'Сохранение…'
+                    : selectedPlayer.player.status === 'blocked'
+                      ? 'Разблокировать'
+                      : 'Заблокировать'}
+                </button>
+              </div>
+
+              <div className="admin-actions" style={{ marginTop: '18px' }}>
+                <button
+                  className="admin-secondary"
+                  onClick={closeBlockModal}
+                  disabled={savingBlock}
                 >
                   Закрыть
                 </button>
