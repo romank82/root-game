@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -16,6 +16,7 @@ from app.db import SessionLocal
 from app.app_errors import record_app_error
 from app.player_events import record_player_event
 from app.mission_engine import (
+    _new_id,
     MissionEngineError,
     accept_mission,
     expire_mission,
@@ -24,7 +25,7 @@ from app.mission_engine import (
     process_qr_scan,
     submit_mission,
 )
-from app.models import GamePlayer, GasWallet
+from app.models import GamePlayer, GasWallet, TonWallet
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
 from app.shop_service import list_catalog_items, purchase_catalog_item
 from app.slug_utils import generate_nickname
@@ -65,6 +66,7 @@ from app.stars_service import (
     handle_successful_payment,
     send_gas_invoice,
 )
+from app.ton_service import validate_ton_address
 from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -215,6 +217,11 @@ class TransferPayload(BaseModel):
     to_player_id: str = Field(..., min_length=1)
     amount: int = Field(..., gt=0)
     request_id: str = Field(..., min_length=1, max_length=64)
+
+class TonWalletPayload(BaseModel):
+    """POST /api/v1/me/ton-wallet (11.0-a): сохранение TON-адреса игрока."""
+    model_config = ConfigDict(extra="forbid")
+    address: str = Field(..., min_length=1, max_length=128)
 
 class GasInvoicePayload(BaseModel):
     """POST /api/v1/engine/gas/invoice (10.4-j-0)."""
@@ -727,6 +734,89 @@ def transfer_root_route(
             status_code=error.status_code,
             detail=error.detail,
         ) from error
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/me/ton-wallet")
+def get_my_ton_wallet_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Мой активный TON-адрес (11.0-a): {address, status} или null."""
+    with SessionLocal() as session:
+        wallet = session.scalar(
+            select(TonWallet).where(
+                TonWallet.player_id == player_id,
+                TonWallet.status == "active",
+            )
+        )
+    if wallet is None:
+        return {"address": None, "status": None}
+    return {"address": wallet.address, "status": wallet.status}
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/me/ton-wallet")
+def save_my_ton_wallet_route(
+    request: Request,
+    payload: TonWalletPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Сохранить/заменить мой TON-адрес (11.0-a) — upsert одной строки.
+
+    TonWallet имеет unique(player_id) и unique(address) в схеме, поэтому
+    вторая строка для игрока невозможна (models/migration не меняются).
+    Upsert: если строка уже есть — обновляем address и status='active',
+    иначе создаём. История адресов не хранится (одна строка на игрока).
+    Валидация TON-адреса — pytoniq (ton_service.validate_ton_address,
+    422 на невалид).
+    """
+    try:
+        normalized = validate_ton_address(payload.address)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+    with SessionLocal.begin() as session:
+        wallet = session.scalar(
+            select(TonWallet).where(TonWallet.player_id == player_id)
+        )
+        if wallet is None:
+            wallet = TonWallet(
+                id=_new_id("ton-wallet"),
+                player_id=player_id,
+                address=normalized,
+                status="active",
+            )
+            session.add(wallet)
+        else:
+            wallet.address = normalized
+            wallet.status = "active"
+        session.flush()
+        return {"address": normalized, "status": "active"}
+
+
+@limiter.limit("10/minute")
+@app.delete("/api/v1/me/ton-wallet")
+def delete_my_ton_wallet_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Удалить мой TON-адрес (11.0-a): активный помечается 'removed'."""
+    with SessionLocal.begin() as session:
+        wallet = session.scalar(
+            select(TonWallet).where(
+                TonWallet.player_id == player_id,
+                TonWallet.status == "active",
+            )
+        )
+        if wallet is None:
+            raise HTTPException(status_code=404, detail="TON-кошелёк не найден.")
+        wallet.status = "removed"
+        session.flush()
+        return {"deleted": True}
 
 
 @limiter.limit("10/minute")
