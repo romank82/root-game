@@ -32,6 +32,8 @@ class Settings:
     ton_payout_mnemonic: str = ""
     ton_network: str = "testnet"
     ton_api_endpoint: str = ""
+    # Адрес минтера ROOT (Jetton master) — для Jetton transfer.
+    ton_root_jetton_master: str = ""
 
 DEFAULT_SQLITE_PATH = BACKEND_DIR / "chimera.db"
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_SQLITE_PATH}"
@@ -64,4 +66,5 @@ settings = Settings(
     ton_payout_mnemonic=os.getenv("TON_PAYOUT_MNEMONIC", ""),
     ton_network=os.getenv("TON_NETWORK", "testnet"),
     ton_api_endpoint=os.getenv("TON_API_ENDPOINT", ""),
+    ton_root_jetton_master=os.getenv("TON_ROOT_JETTON_MASTER", ""),
 )
