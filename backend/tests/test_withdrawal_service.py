@@ -1,9 +1,10 @@
-"""Тесты withdrawal_service (этап 11.5-a): заявка на вывод ROOT в TON.
+"""Тесты withdrawal_service (этапы 11.5-a/11.5-b): заявка на вывод ROOT в TON.
 
 Инфраструктура — паттерн test_stars_service.py: на каждый тест свежая
 disposable SQLite + alembic upgrade head; SessionLocal патчится в ДВА канала
 (app.db — ленивые импорты; withdrawal_service.SessionLocal — прямой импорт).
-Сеть TON не вызывается вообще (валидация адреса — локальная, pytoniq-core).
+Сеть TON не вызывается вообще (валидация адреса — локальная, pytoniq-core;
+send_jetton_transfer_sync — мок).
 
 Покрытие:
   1. Успешная заявка: pending + debit-холд withdrawal_hold + баланс 900;
@@ -11,7 +12,10 @@ disposable SQLite + alembic upgrade head; SessionLocal патчится в ДВ�
   3. withdrawal_restricted -> 403, ничего не списывается;
   4. withdrawal_enabled=False -> 503 (CMS-переключатель);
   5. amount_root < ton.min_amount_root -> 422;
-  6. Сумма + существующий холд-объём > ton.daily_withdrawal_limit -> 429.
+  6. Сумма + существующий холд-объём > ton.daily_withdrawal_limit -> 429;
+  7. Батч-выплата: pending -> confirmed + ton_tx_hash + batch_id, баланс 900;
+  8. Батч при ошибке send_jetton_transfer_sync -> failed + refund (1000);
+  9. reject: pending -> rejected + reason + refund (1000).
 """
 from __future__ import annotations
 
@@ -134,6 +138,22 @@ class WithdrawalServiceTests(unittest.TestCase):
         )
         session.flush()
         return player_id
+
+    def _make_admin(self, session) -> str:
+        """AdminUser — FK для WithdrawalRequest.admin_id (батч/reject)."""
+        admin_id = f"admin-{uuid.uuid4().hex[:12]}"
+        session.add(
+            AdminUser(
+                id=admin_id,
+                username=f"withdrawal-batch-admin-{uuid.uuid4().hex[:8]}",
+                password_hash="not-a-real-hash",
+                role="super_admin",
+                is_super_admin=True,
+                is_active=True,
+            )
+        )
+        session.flush()
+        return admin_id
 
     def _seed_setting(
         self, session, key: str, value_json, value_type: str
@@ -435,3 +455,120 @@ class WithdrawalServiceTests(unittest.TestCase):
                 ),
                 1,
             )
+
+    # ---- 11.5-b: батч-выплата и отклонение ---------------------------------
+
+    def test_process_batch_success(self) -> None:
+        """Одна pending: батч -> confirmed + ton_tx_hash + batch_id + admin."""
+        with self.SessionLocal.begin() as session:
+            player_id = self._make_player(session)
+            admin_id = self._make_admin(session)
+            self._seed_withdrawal_settings(session)
+            self._seed_wallet(session, player_id, 1000)
+
+        withdrawal_id = self.withdrawal_service.create_withdrawal_request(
+            player_id, 100, VALID_TON_ADDRESS
+        )["withdrawalId"]
+
+        with patch.object(
+            self.withdrawal_service,
+            "send_jetton_transfer_sync",
+            return_value="mock-tx-hash",
+        ) as mock_transfer:
+            batch = self.withdrawal_service.process_withdrawal_batch(
+                admin_id, limit=50
+            )
+
+        self.assertEqual(batch["confirmed"], 1)
+        self.assertEqual(batch["failed"], 0)
+        self.assertTrue(batch["batchId"].startswith("batch-"))
+        mock_transfer.assert_called_once()
+        # amount_root 100 -> 100 * 10^8 nanoROOT.
+        self.assertEqual(mock_transfer.call_args.args[1], 100 * 10**8)
+        self.assertEqual(mock_transfer.call_args.args[0], VALID_TON_ADDRESS)
+
+        with self.SessionLocal() as session:
+            request = session.get(WithdrawalRequest, withdrawal_id)
+            self.assertEqual(request.status, "confirmed")
+            self.assertEqual(request.ton_tx_hash, "mock-tx-hash")
+            self.assertEqual(request.batch_id, batch["batchId"])
+            self.assertEqual(request.admin_id, admin_id)
+            # Холд уже списан при create (1000 -> 900): батч не тратит ещё раз.
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == player_id)
+            )
+            self.assertEqual(wallet.available_balance, 900)
+
+    def test_process_batch_failed(self) -> None:
+        """send_jetton_transfer_sync кидает -> failed + refund (баланс 1000)."""
+        with self.SessionLocal.begin() as session:
+            player_id = self._make_player(session)
+            admin_id = self._make_admin(session)
+            self._seed_withdrawal_settings(session)
+            self._seed_wallet(session, player_id, 1000)
+
+        withdrawal_id = self.withdrawal_service.create_withdrawal_request(
+            player_id, 100, VALID_TON_ADDRESS
+        )["withdrawalId"]
+
+        with patch.object(
+            self.withdrawal_service,
+            "send_jetton_transfer_sync",
+            side_effect=RuntimeError("network down"),
+        ):
+            batch = self.withdrawal_service.process_withdrawal_batch(
+                admin_id, limit=50
+            )
+
+        self.assertEqual(batch["confirmed"], 0)
+        self.assertEqual(batch["failed"], 1)
+
+        with self.SessionLocal() as session:
+            request = session.get(WithdrawalRequest, withdrawal_id)
+            self.assertEqual(request.status, "failed")
+            self.assertIsNone(request.ton_tx_hash)
+            self.assertEqual(request.batch_id, batch["batchId"])
+            bank = session.scalar(
+                select(Wallet).where(Wallet.player_id == player_id)
+            )
+            self.assertEqual(bank.available_balance, 1000)
+            refund = session.scalar(
+                select(WalletTransaction).where(
+                    WalletTransaction.reference_type
+                    == self.withdrawal_service.WITHDRAWAL_REFUND_REFERENCE_TYPE,
+                    WalletTransaction.reference_id == withdrawal_id,
+                )
+            )
+            self.assertIsNotNone(refund)
+            self.assertEqual(refund.transaction_type, "credit")
+            self.assertEqual(refund.amount, 100)
+            self.assertEqual(refund.balance_after, 1000)
+
+    def test_reject_withdrawal(self) -> None:
+        """pending -> rejected + reason + refund (баланс 1000)."""
+        with self.SessionLocal.begin() as session:
+            player_id = self._make_player(session)
+            admin_id = self._make_admin(session)
+            self._seed_withdrawal_settings(session)
+            self._seed_wallet(session, player_id, 1000)
+
+        withdrawal_id = self.withdrawal_service.create_withdrawal_request(
+            player_id, 100, VALID_TON_ADDRESS
+        )["withdrawalId"]
+
+        result = self.withdrawal_service.reject_withdrawal(
+            admin_id, withdrawal_id, "Адрес не подтверждён."
+        )
+        self.assertEqual(result["withdrawalId"], withdrawal_id)
+        self.assertEqual(result["status"], "rejected")
+        self.assertEqual(result["reason"], "Адрес не подтверждён.")
+
+        with self.SessionLocal() as session:
+            request = session.get(WithdrawalRequest, withdrawal_id)
+            self.assertEqual(request.status, "rejected")
+            self.assertEqual(request.reason, "Адрес не подтверждён.")
+            self.assertEqual(request.admin_id, admin_id)
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == player_id)
+            )
+            self.assertEqual(wallet.available_balance, 1000)

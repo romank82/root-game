@@ -1,4 +1,4 @@
-"""Сервис заявок на вывод ROOT в TON (этап 11.5-a, roadmap-detailed.md).
+"""Сервис заявок на вывод ROOT в TON (этапы 11.5-a/11.5-b, roadmap-detailed.md).
 
 Игрок подаёт заявку (status="pending"), ROOT списывается немедленно в холд:
 wallet.available_balance -= amount_root + immutable WalletTransaction
@@ -10,9 +10,16 @@ ton.daily_withdrawal_limit (UTC-сутки). Всё — в одной транз
 (SessionLocal.begin()): при MissionEngineError транзакция откатывается,
 баланс не меняется.
 
-Батч-выплата (process_withdrawal_batch) — этап 11.5-b, здесь НЕ реализуется.
+11.5-b: process_withdrawal_batch — админский батч-выплата pending-заявок
+(игроки с активным withdrawal_restricted пропускаются): processing ->
+send_jetton_transfer_sync (Jetton ROOT из payout-кошелька ton_service) ->
+confirmed + ton_tx_hash; при ошибке — failed + автоматический возврат холда
+игроку (_refund_withdrawal_hold). reject_withdrawal — отклонение одной
+заявки с возвратом холда. Админский HTTP-слой — этап 11.6.
 """
 from __future__ import annotations
+
+import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -21,14 +28,23 @@ from app.admin_player_wallet import ACTIVE_SETTING_STATUS
 from app.db import SessionLocal
 from app.mission_engine import (
     MissionEngineError,
+    ROOT_CURRENCY,
     _get_root_wallet_for_update,
     _new_id,
     _utcnow,
 )
-from app.models import SystemSetting, WalletTransaction, WithdrawalRequest
+from app.models import (
+    PlayerRestriction,
+    SystemSetting,
+    Wallet,
+    WalletTransaction,
+    WithdrawalRequest,
+)
 from app.player_restrictions_engine import get_active_restrictions
 from app.system_settings_catalog import get_definition
-from app.ton_service import validate_ton_address
+from app.ton_service import send_jetton_transfer_sync, validate_ton_address
+
+logger = logging.getLogger(__name__)
 
 # --- Ключи CMS (system_settings_catalog.py, категория ton) -------------------
 
@@ -44,6 +60,15 @@ WITHDRAWAL_HOLD_REFERENCE_TYPE = "withdrawal_hold"
 
 # Статусы заявок, «весящие» в дневном лимите (холд до выплаты/reject).
 WITHDRAWAL_HOLD_STATUSES = ("pending", "approved", "processing", "confirmed")
+
+# Reference type возврата холда (failed/rejected) — immutable credit-проводка.
+WITHDRAWAL_REFUND_REFERENCE_TYPE = "withdrawal_refund"
+
+# Статусы, в которых можно отклонить заявку (холд ещё не выплачен).
+WITHDRAWAL_REJECTABLE_STATUSES = ("pending", "approved", "processing")
+
+# Лимит заявок в одном батч-выплате (админский операционный лимит).
+WITHDRAWAL_BATCH_DEFAULT_LIMIT = 50
 
 
 def _read_int_setting(session: Session, key: str, fallback: int) -> int:
@@ -188,4 +213,133 @@ def create_withdrawal_request(
             "amountRoot": amount_root,
             "toAddress": canonical_address,
             "status": "pending",
+        }
+
+
+def _refund_withdrawal_hold(
+    session: Session, withdrawal: WithdrawalRequest
+) -> None:
+    """Возврат холда ROOT в кошелёк игрока + immutable credit-проводка.
+
+    Вызывается при failed (батч) и rejected (reject_withdrawal).
+    Баланс кэша правится атомарно с проводкой — ledger остаётся источником.
+    """
+    wallet = session.scalar(
+        select(Wallet).where(
+            Wallet.player_id == withdrawal.player_id,
+            Wallet.currency == ROOT_CURRENCY,
+        )
+    )
+    if wallet is None:
+        raise MissionEngineError(
+            409, "ROOT-кошелёк игрока не найден при возврате холда."
+        )
+
+    wallet.available_balance += withdrawal.amount_root
+    session.add(
+        WalletTransaction(
+            id=_new_id("wallet-transaction"),
+            wallet_id=wallet.id,
+            amount=withdrawal.amount_root,
+            balance_after=wallet.available_balance,
+            transaction_type="credit",
+            reason=f"Withdrawal refund {withdrawal.id}",
+            reference_type=WITHDRAWAL_REFUND_REFERENCE_TYPE,
+            reference_id=withdrawal.id,
+            metadata_json={},
+        )
+    )
+
+
+def process_withdrawal_batch(
+    admin_id: str, limit: int = WITHDRAWAL_BATCH_DEFAULT_LIMIT
+) -> dict:
+    """Батч-выплата pending-заявок (этап 11.5-b).
+
+    Берутся pending (кроме игроков с активным withdrawal_restricted) по
+    created_at, лимитом. Каждая помечается processing, шлётся Jetton
+    ROOT через send_jetton_transfer_sync (sync-обёртка ton_service с
+    asyncio.run); успех -> confirmed + ton_tx_hash, ошибка -> failed +
+    возврат холда в кошелёк игрока. Всё в одной транзакции.
+
+    Возвращает {"batchId", "confirmed", "failed"}.
+    """
+    batch_id = _new_id("batch")
+    confirmed = 0
+    failed = 0
+
+    with SessionLocal.begin() as session:
+        restricted_player_ids = select(PlayerRestriction.player_id).where(
+            PlayerRestriction.restriction_type == "withdrawal_restricted",
+            PlayerRestriction.status == "active",
+        )
+        withdrawals = session.scalars(
+            select(WithdrawalRequest)
+            .where(
+                WithdrawalRequest.status == "pending",
+                WithdrawalRequest.player_id.not_in(restricted_player_ids),
+            )
+            .order_by(WithdrawalRequest.created_at)
+            .limit(limit)
+        ).all()
+
+        for withdrawal in withdrawals:
+            withdrawal.status = "processing"
+            withdrawal.batch_id = batch_id
+            withdrawal.admin_id = admin_id
+            session.flush()
+            try:
+                amount_nano = withdrawal.amount_root * 10**8
+                tx_hash = send_jetton_transfer_sync(
+                    withdrawal.to_address, amount_nano
+                )
+                withdrawal.status = "confirmed"
+                withdrawal.ton_tx_hash = tx_hash
+                session.flush()
+                confirmed += 1
+            except Exception as error:  # noqa: BLE001 — сеть/пайлоад/конфиг
+                withdrawal.status = "failed"
+                _refund_withdrawal_hold(session, withdrawal)
+                session.flush()
+                failed += 1
+                logger.warning(
+                    "Withdrawal %s failed in batch %s: %s",
+                    withdrawal.id,
+                    batch_id,
+                    error,
+                )
+
+    return {"batchId": batch_id, "confirmed": confirmed, "failed": failed}
+
+
+def reject_withdrawal(
+    admin_id: str, withdrawal_id: str, reason: str
+) -> dict:
+    """Отклонить одну заявку (11.5-b): refund холда + status='rejected'.
+
+    404, если заявки нет или она не в статусе pending/approved/processing
+    (failed/confirmed/rejected уже закрыты).
+    Возвращает {"withdrawalId", "status": "rejected", "reason"}.
+    """
+    with SessionLocal.begin() as session:
+        withdrawal = session.scalar(
+            select(WithdrawalRequest).where(
+                WithdrawalRequest.id == withdrawal_id,
+                WithdrawalRequest.status.in_(WITHDRAWAL_REJECTABLE_STATUSES),
+            )
+        )
+        if withdrawal is None:
+            raise MissionEngineError(404, "Активная заявка на вывод не найдена.")
+
+        withdrawal.status = "rejected"
+        withdrawal.reason = reason
+        withdrawal.admin_id = admin_id
+        session.flush()
+        _refund_withdrawal_hold(session, withdrawal)
+        session.flush()
+
+        return {
+            "withdrawalId": withdrawal.id,
+            "status": "rejected",
+            "reason": reason,
         }
