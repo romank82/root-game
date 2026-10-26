@@ -591,3 +591,29 @@ Fallback purchases (4.4) входят в API v1: `POST /api/v1/engine/fallback-o
 реализован в 4.4; `GET /api/v1/engine/fallback-offers` — отдельный маршрут (4.3b).
 Legacy `POST /api/v1/engine/missions/{mission_id}/submit` остаётся отдельным
 маршрутом до отдельной reviewed migration/deprecation задачи.
+
+## Вывод ROOT в TON — заявки на вывод (11.7)
+
+### Игрок: /api/v1/me/withdrawals
+- `GET /api/v1/me/withdrawals?limit=&offset=` — список своих заявок.
+  Ответ: `{withdrawals, total, limit, offset}`. Поля записей:
+  `withdrawalId`, `amountRoot`, `toAddress`, `status`, `tonTxHash`,
+  `reason`, `createdAt`, `updatedAt`.
+- `POST /api/v1/me/withdrawals` — создание заявки на вывод.
+  Body (snake_case): `{amount_root, to_address}`.
+  Ответ: `{withdrawalId, amountRoot, toAddress, status}`.
+  Валидация: `amount_root` — целый ROOT (> 0, не ниже минимума из
+  CMS `ton.min_amount_root`); `to_address` — валидный TON-адрес.
+
+### Админ: /api/v1/admin/withdrawals
+- `GET /api/v1/admin/withdrawals` — список заявок для админа.
+  Поля записей: `id`, `playerId`, `amountRoot`, `toAddress`, `status`,
+  `tonTxHash`, `reason`, `batchId`, `adminId`, `createdAt`, `updatedAt`.
+- `POST /api/v1/admin/withdrawals/batch` — батч-выплата: выбранные
+  pending/approved-заявки получают общий `batchId` и переводятся в
+  обработку (отправка в TON).
+- `POST /api/v1/admin/withdrawals/{id}/reject` — отклонение заявки
+  с причиной. Body: `{reason}`. Статус → `rejected`.
+
+Статусы заявки: `pending` → `approved`/`rejected` → `processing` →
+`confirmed`/`failed`.
