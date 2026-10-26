@@ -28,6 +28,10 @@ class Settings:
     game_session_secret: str
     game_session_lifetime_seconds: int
     admin_session_lifetime_seconds: int
+    # TON (testnet): мнемоника «спец» payout-кошелька и сеть.
+    ton_payout_mnemonic: str = ""
+    ton_network: str = "testnet"
+    ton_api_endpoint: str = ""
 
 DEFAULT_SQLITE_PATH = BACKEND_DIR / "chimera.db"
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_SQLITE_PATH}"
@@ -57,4 +61,7 @@ settings = Settings(
     admin_session_lifetime_seconds=int(
         os.getenv("ADMIN_SESSION_LIFETIME_SECONDS", "86400")
     ),
+    ton_payout_mnemonic=os.getenv("TON_PAYOUT_MNEMONIC", ""),
+    ton_network=os.getenv("TON_NETWORK", "testnet"),
+    ton_api_endpoint=os.getenv("TON_API_ENDPOINT", ""),
 )
