@@ -114,6 +114,7 @@ from app.admin_player_mission import router as admin_player_mission_router
 from app.admin_player_restrictions import router as admin_player_restrictions_router
 from app.admin_country_policies import router as admin_country_policies_router
 from app.admin_monitoring import router as admin_monitoring_router
+from app.admin_withdrawals import router as admin_withdrawals_router
 from app.admin_teams import router as admin_teams_router
 
 SESSION_COOKIE_NAME = "chimera_session"
@@ -1676,6 +1677,7 @@ app.include_router(admin_player_mission_router)
 app.include_router(admin_player_restrictions_router)
 app.include_router(admin_country_policies_router)
 app.include_router(admin_monitoring_router)
+app.include_router(admin_withdrawals_router)
 app.include_router(admin_teams_router)
 
 
