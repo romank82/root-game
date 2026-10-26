@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -1854,3 +1855,84 @@ class AdminAuditLog(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class TonWallet(TimestampMixin, Base):
+    """TON-адрес игрока для вывода ROOT в TON (11.1).
+
+    Один игрок — один TON-адрес (unique player_id). address — сырой
+    TON-адрес строкой (String(128)); каноническая форма и валидация —
+    в сервисе вывода (11.5). status: 'active' | 'removed' — физическое
+    удаление записей запрещено (lifecycle через статусы).
+    """
+
+    __tablename__ = "ton_wallets"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    address: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="active"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("player_id", name="uq_ton_wallets_player_id"),
+        UniqueConstraint("address", name="uq_ton_wallets_address"),
+        CheckConstraint(
+            "status IN ('active','removed')",
+            name="ck_ton_wallets_status",
+        ),
+    )
+
+
+class WithdrawalRequest(TimestampMixin, Base):
+    """Заявка на вывод ROOT → TON (11.1). Одна запись = одна заявка.
+
+    Жизненный цикл: pending → approved/rejected → processing →
+    confirmed/failed. Логики вывода здесь нет — только модель (сервис
+    вывода + ledger — 11.5). Физическое удаление записи запрещено.
+
+    amount_root: сейчас целый ROOT (1:1), позже — NanoROOT (10^8).
+    Поэтому тип BigInteger (а не Integer) — чтобы позже хранить
+    NanoROOT без миграции схемы (пометка 11.8).
+    """
+
+    __tablename__ = "withdrawal_requests"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    amount_root: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    to_address: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", index=True
+    )
+    ton_tx_hash: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    batch_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=True
+    )
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "amount_root > 0",
+            name="ck_withdrawal_requests_amount_root_positive",
+        ),
+        CheckConstraint(
+            "status IN "
+            "('pending','approved','rejected','processing','confirmed','failed')",
+            name="ck_withdrawal_requests_status",
+        ),
+    )
+
