@@ -67,7 +67,10 @@ from app.stars_service import (
     send_gas_invoice,
 )
 from app.ton_service import validate_ton_address
-from app.withdrawal_service import create_withdrawal_request
+from app.withdrawal_service import (
+    create_withdrawal_request,
+    list_player_withdrawals,
+)
 from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -844,6 +847,29 @@ def create_my_withdrawal_route(
         return create_withdrawal_request(
             player_id, payload.amount_root, payload.to_address
         )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/me/withdrawals")
+def list_my_withdrawals_route(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    player_id: str = Depends(get_current_player_id),
+) -> dict:
+    """Список заявок игрока (11.7-a): свои, новее сверху.
+
+    {withdrawals: [...], total, limit, offset}. Поля — только игровые
+    (withdrawalId/amountRoot/toAddress/status/tonTxHash/reason/createdAt/
+    updatedAt), без id/playerId/batchId/adminId. Read-only, без мутаций.
+    """
+    try:
+        return list_player_withdrawals(player_id, limit, offset)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

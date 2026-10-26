@@ -343,3 +343,64 @@ def reject_withdrawal(
             "status": "rejected",
             "reason": reason,
         }
+
+def _serialize_player_withdrawal(withdrawal: WithdrawalRequest) -> dict:
+    """Заявка для игрока (11.7-a): только игровые поля.
+
+    id/playerId/batchId/adminId игроку не отдаются — не нужны и лишнее.
+    """
+    return {
+        "withdrawalId": withdrawal.id,
+        "amountRoot": withdrawal.amount_root,
+        "toAddress": withdrawal.to_address,
+        "status": withdrawal.status,
+        "tonTxHash": withdrawal.ton_tx_hash,
+        "reason": withdrawal.reason,
+        "createdAt": (
+            withdrawal.created_at.isoformat() if withdrawal.created_at else None
+        ),
+        "updatedAt": (
+            withdrawal.updated_at.isoformat() if withdrawal.updated_at else None
+        ),
+    }
+
+
+def list_player_withdrawals(
+    player_id: str,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Список заявок игрока (11.7-a): свои заявки, новее сверху.
+
+    LIMIT clamp 1..200, offset >= 0. Read-only — SessionLocal() без begin(),
+    как в admin_withdrawals. Возвращает {withdrawals, total, limit, offset}.
+    """
+    safe_limit = max(1, min(limit, 200))
+    safe_offset = max(0, offset)
+
+    with SessionLocal() as session:
+        total = (
+            session.scalar(
+                select(func.count())
+                .select_from(WithdrawalRequest)
+                .where(WithdrawalRequest.player_id == player_id)
+            )
+            or 0
+        )
+        rows = session.scalars(
+            select(WithdrawalRequest)
+            .where(WithdrawalRequest.player_id == player_id)
+            .order_by(
+                WithdrawalRequest.created_at.desc(),
+                WithdrawalRequest.id.desc(),
+            )
+            .offset(safe_offset)
+            .limit(safe_limit)
+        ).all()
+
+    return {
+        "withdrawals": [_serialize_player_withdrawal(row) for row in rows],
+        "total": total,
+        "limit": safe_limit,
+        "offset": safe_offset,
+    }
