@@ -653,3 +653,65 @@ export async function deleteMyTonWallet(): Promise<{ deleted: boolean }> {
   return response.json() as Promise<{ deleted: boolean }>
 }
 
+// 11.7-b: вывод ROOT → TON (POST/GET /api/v1/me/withdrawals) — создание
+// заявки и список своих заявок. Поля — игровые, в статусе строки из
+// бэкенд-контракта (pending/approved/rejected/processing/confirmed/failed).
+export type PlayerWithdrawal = {
+  withdrawalId: string
+  amountRoot: number
+  toAddress: string
+  status: string
+  tonTxHash: string | null
+  reason: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type WithdrawalsListResponse = {
+  withdrawals: PlayerWithdrawal[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type CreateWithdrawalResult = {
+  withdrawalId: string
+  amountRoot: number
+  toAddress: string
+  status: string
+}
+
+export async function createWithdrawal(
+  amountRoot: number,
+  toAddress: string,
+): Promise<CreateWithdrawalResult> {
+  const response = await apiFetch('/api/v1/me/withdrawals', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    // Контракт бэкенда (WithdrawalPayload): поля snake_case.
+    body: JSON.stringify({ amount_root: amountRoot, to_address: toAddress }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<CreateWithdrawalResult>
+}
+
+export async function listMyWithdrawals(
+  limit = 50,
+  offset = 0,
+): Promise<WithdrawalsListResponse> {
+  const response = await apiFetch(
+    `/api/v1/me/withdrawals?limit=${limit}&offset=${offset}`,
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<WithdrawalsListResponse>
+}

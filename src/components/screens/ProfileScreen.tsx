@@ -2,16 +2,19 @@ import { useEffect, useState } from 'react'
 import type { Screen } from '../../types/game'
 import {
   createGasInvoice,
+  createWithdrawal,
   deleteMyTonWallet,
   getEngineBootstrap,
   getMyProfile,
   getMyTonWallet,
+  listMyWithdrawals,
   saveMyProfile,
   saveMyTonWallet,
   sendGasInvoice,
   type MyProfile,
   type MyProfilePayload,
   type MyTonWallet,
+  type PlayerWithdrawal,
 } from '../../api/engineApi'
 
 interface ProfileScreenProps {
@@ -345,6 +348,13 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
   const [savingTonWallet, setSavingTonWallet] = useState(false)
   const [tonWalletError, setTonWalletError] = useState<string | null>(null)
   const [tonWalletNotice, setTonWalletNotice] = useState<string | null>(null)
+  // 11.7-b: вывод ROOT → TON — форма заявки и список своих заявок.
+  const [withdrawAmount, setWithdrawAmount] = useState('')
+  const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
+  const [withdrawError, setWithdrawError] = useState<string | null>(null)
+  const [withdrawNotice, setWithdrawNotice] = useState<string | null>(null)
+  const [withdrawals, setWithdrawals] = useState<PlayerWithdrawal[]>([])
+  const [withdrawalsLoading, setWithdrawalsLoading] = useState(false)
   // 11.0-b: сохранённый адрес (удобное сужение типа для JSX).
   const savedAddress = tonWallet?.address ?? null
   // 10.0.5-b-2: страна определена автоматически по координатам ('auto') —
@@ -399,6 +409,26 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       })
       .catch((err: Error) => {
         if (!cancelled) setTonWalletError(err.message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // 11.7-b: список своих заявок на вывод ROOT → TON при открытии профиля.
+  useEffect(() => {
+    let cancelled = false
+    setWithdrawalsLoading(true)
+    listMyWithdrawals(50, 0)
+      .then((data) => {
+        if (cancelled) return
+        setWithdrawals(data.withdrawals)
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setWithdrawError(err.message)
+      })
+      .finally(() => {
+        if (!cancelled) setWithdrawalsLoading(false)
       })
     return () => {
       cancelled = true
@@ -550,6 +580,37 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     }
   }
 
+  // 11.7-b: создать заявку на вывод ROOT → TON.
+  async function handleSubmitWithdrawal() {
+    const address = savedAddress
+    if (!address) {
+      setWithdrawError('Сначала сохраните TON-адрес.')
+      return
+    }
+    const amount = parseInt(withdrawAmount, 10)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setWithdrawError('Сумма должна быть положительным целым числом.')
+      return
+    }
+    setSubmittingWithdrawal(true)
+    setWithdrawError(null)
+    setWithdrawNotice(null)
+    try {
+      const result = await createWithdrawal(amount, address)
+      setWithdrawNotice(
+        `Заявка ${result.withdrawalId} создана (${result.status}).`,
+      )
+      setWithdrawAmount('')
+      // Обновляем список, чтобы новая заявка появилась сразу.
+      const refreshed = await listMyWithdrawals(50, 0)
+      setWithdrawals(refreshed.withdrawals)
+    } catch (err) {
+      setWithdrawError((err as Error).message)
+    } finally {
+      setSubmittingWithdrawal(false)
+    }
+  }
+
   return (
     <section className="inventory">
       <p className="eyebrow">ПРОФИЛЬ / АНКЕТА ИГРОКА</p>
@@ -617,6 +678,78 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
         {tonWalletError && <p className="repair-error">{tonWalletError}</p>}
         {tonWalletNotice && (
           <p className="mission-success-card">{tonWalletNotice}</p>
+        )}
+      </div>
+
+      <div className="gas-block">
+        <h3>Вывод ROOT → TON</h3>
+        {savedAddress === null ? (
+          <p className="admin-muted">Сначала сохраните TON-адрес выше.</p>
+        ) : (
+          <>
+            <label>
+              Сумма ROOT
+              <input
+                type="text"
+                value={withdrawAmount}
+                placeholder="например, 100"
+                autoComplete="off"
+                onChange={(e) => setWithdrawAmount(e.target.value)}
+              />
+            </label>
+            <p>
+              На адрес: <b>{savedAddress}</b>
+            </p>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={submittingWithdrawal || withdrawAmount.trim() === ''}
+              onClick={handleSubmitWithdrawal}
+            >
+              {submittingWithdrawal ? 'Отправка…' : 'Создать заявку'}
+            </button>
+          </>
+        )}
+        {withdrawError && <p className="repair-error">{withdrawError}</p>}
+        {withdrawNotice && (
+          <p className="mission-success-card">{withdrawNotice}</p>
+        )}
+
+        <h4>Мои заявки</h4>
+        {withdrawalsLoading ? (
+          <p>Загрузка…</p>
+        ) : withdrawals.length === 0 ? (
+          <p>Заявок пока нет.</p>
+        ) : (
+          <ul>
+            {withdrawals.map((item) => {
+              const statusLabel =
+                (
+                  {
+                    pending: 'В обработке',
+                    confirmed: 'Выплачено',
+                    rejected: 'Отклонено',
+                    failed: 'Ошибка',
+                  } as Record<string, string>
+                )[item.status] ?? item.status
+              const createdAt = item.createdAt
+                ? new Date(item.createdAt).toLocaleString()
+                : '—'
+              return (
+                <li key={item.withdrawalId}>
+                  <p>
+                    {item.amountRoot} ROOT → {item.toAddress.slice(0, 12)}…
+                    <br />
+                    Статус: <b>{statusLabel}</b> · {createdAt}
+                  </p>
+                  {(item.status === 'rejected' || item.status === 'failed') &&
+                    item.reason && (
+                      <p className="repair-error">{item.reason}</p>
+                    )}
+                </li>
+              )
+            })}
+          </ul>
         )}
       </div>
 
