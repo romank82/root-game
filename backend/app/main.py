@@ -67,6 +67,7 @@ from app.stars_service import (
     send_gas_invoice,
 )
 from app.ton_service import validate_ton_address
+from app.withdrawal_service import create_withdrawal_request
 from app.player_restrictions_engine import recompute_player_status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -222,6 +223,12 @@ class TonWalletPayload(BaseModel):
     """POST /api/v1/me/ton-wallet (11.0-a): сохранение TON-адреса игрока."""
     model_config = ConfigDict(extra="forbid")
     address: str = Field(..., min_length=1, max_length=128)
+
+class WithdrawalPayload(BaseModel):
+    """POST /api/v1/me/withdrawals (11.5-a): заявка на вывод ROOT в TON."""
+    model_config = ConfigDict(extra="forbid")
+    amount_root: int = Field(..., gt=0)
+    to_address: str = Field(..., min_length=1, max_length=128)
 
 class GasInvoicePayload(BaseModel):
     """POST /api/v1/engine/gas/invoice (10.4-j-0)."""
@@ -817,6 +824,30 @@ def delete_my_ton_wallet_route(
         wallet.status = "removed"
         session.flush()
         return {"deleted": True}
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/me/withdrawals")
+def create_my_withdrawal_route(
+    request: Request,
+    payload: WithdrawalPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Подать заявку на вывод ROOT → TON (11.5-a).
+
+    ROOT списывается сразу в холд (immutable-проводка withdrawal_hold);
+    возвращает {withdrawalId, amountRoot, toAddress, status:"pending"}.
+    Валидации и коды ошибок — в withdrawal_service.create_withdrawal_request.
+    """
+    try:
+        return create_withdrawal_request(
+            player_id, payload.amount_root, payload.to_address
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
 
 
 @limiter.limit("10/minute")
