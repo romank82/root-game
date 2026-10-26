@@ -1957,3 +1957,82 @@ export async function getMonitoringEvents(
   if (!response.ok) throw new Error(await readError(response))
   return response.json() as Promise<MonitoringEventsResponse>
 }
+
+export type Withdrawal = {
+  id: string
+  playerId: string
+  amountRoot: number
+  toAddress: string
+  status: string
+  tonTxHash: string | null
+  batchId: string | null
+  adminId: string | null
+  reason: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type WithdrawalsListResponse = {
+  withdrawals: Withdrawal[]
+  total: number
+  limit: number
+  offset: number
+}
+
+// 11.6-b: админ-эндпоинты заявок на вывод ROOT → TON (players.read/players.manage).
+export async function listWithdrawals(
+  options: {
+    status?: string
+    playerId?: string
+    period?: string
+    limit?: number
+    offset?: number
+  } = {},
+): Promise<WithdrawalsListResponse> {
+  const params = new URLSearchParams()
+  if (options.status) params.set('status', options.status)
+  if (options.playerId) params.set('player_id', options.playerId)
+  if (options.period) params.set('period', options.period)
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.offset !== undefined) params.set('offset', String(options.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(`/api/v1/admin/withdrawals${query}`)
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<WithdrawalsListResponse>
+}
+
+export async function runWithdrawalBatch(
+  limit = 50,
+): Promise<{ batchId: string; confirmed: number; failed: number }> {
+  const response = await adminFetch(
+    `/api/v1/admin/withdrawals/batch?limit=${limit}`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<{
+    batchId: string
+    confirmed: number
+    failed: number
+  }>
+}
+
+export async function rejectWithdrawal(
+  id: string,
+  reason: string,
+): Promise<{ withdrawalId: string; status: string; reason: string }> {
+  const response = await adminFetch(
+    `/api/v1/admin/withdrawals/${encodeURIComponent(id)}/reject`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<{
+    withdrawalId: string
+    status: string
+    reason: string
+  }>
+}
+

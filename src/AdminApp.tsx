@@ -31,6 +31,7 @@ import { ChaptersSection } from './components/admin/ChaptersSection'
 import { StoryNodesSection } from './components/admin/StoryNodesSection'
 import { CascadeSection } from './components/admin/CascadeSection'
 import { MonitoringSection } from './components/admin/MonitoringSection'
+import { WithdrawalsSection } from './components/admin/WithdrawalsSection'
 
 // 13.7-j: валидные вкладки админки. 'economy' удалена — реестр операций
 // перенесён в карточку игрока (PlayersSection), настройки — в CMS.
@@ -48,6 +49,7 @@ const ADMIN_SECTIONS = [
   'cascade',
   'players',
   'monitoring',
+  'withdrawals',
 ] as const
 
 type AdminSection = (typeof ADMIN_SECTIONS)[number]
@@ -475,6 +477,7 @@ function AdminApp() {
             {section === 'cascade' && 'Конструктор'}
             {section === 'players' && 'Игроки'}
             {section === 'monitoring' && 'Мониторинг'}
+            {section === 'withdrawals' && 'Заявки на вывод'}
           </h1>
 
           <nav className="admin-nav">
@@ -523,6 +526,13 @@ function AdminApp() {
               onClick={() => setSection('monitoring')}
             >
               Мониторинг
+            </button>
+
+            <button
+              className={section === 'withdrawals' ? 'is-active' : ''}
+              onClick={() => setSection('withdrawals')}
+            >
+              Заявки на вывод
             </button>
 
             <button
@@ -629,6 +639,8 @@ function AdminApp() {
       {section === 'monitoring' && (
         <MonitoringSection onError={setError} onNotice={setNotice} />
       )}
+
+      {section === 'withdrawals' && <WithdrawalsSection />}
 
       {section === 'seasons' && (
         <SeasonsSection
