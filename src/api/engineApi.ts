@@ -607,3 +607,49 @@ export async function sendGasInvoice(
   return response.json() as Promise<GasInvoiceSendResponse>
 }
 
+// 11.0-a/b: TON-кошелёк игрока (GET/POST/DELETE /api/v1/me/ton-wallet).
+export type MyTonWallet = {
+  address: string | null
+  status: string | null
+}
+
+export async function getMyTonWallet(): Promise<MyTonWallet> {
+  const response = await apiFetch('/api/v1/me/ton-wallet')
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<MyTonWallet>
+}
+
+export async function saveMyTonWallet(
+  address: string,
+): Promise<MyTonWallet> {
+  const response = await apiFetch('/api/v1/me/ton-wallet', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ address }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<MyTonWallet>
+}
+
+export async function deleteMyTonWallet(): Promise<{ deleted: boolean }> {
+  const response = await apiFetch('/api/v1/me/ton-wallet', {
+    method: 'DELETE',
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<{ deleted: boolean }>
+}
+

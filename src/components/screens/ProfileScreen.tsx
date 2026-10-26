@@ -2,12 +2,16 @@ import { useEffect, useState } from 'react'
 import type { Screen } from '../../types/game'
 import {
   createGasInvoice,
+  deleteMyTonWallet,
   getEngineBootstrap,
   getMyProfile,
+  getMyTonWallet,
   saveMyProfile,
+  saveMyTonWallet,
   sendGasInvoice,
   type MyProfile,
   type MyProfilePayload,
+  type MyTonWallet,
 } from '../../api/engineApi'
 
 interface ProfileScreenProps {
@@ -335,6 +339,14 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
   const [buyingGas, setBuyingGas] = useState(false)
   const [gasError, setGasError] = useState<string | null>(null)
   const [gasNotice, setGasNotice] = useState<string | null>(null)
+  // 11.0-b: TON-кошелёк — текущий адрес, черновик и статусы операций.
+  const [tonWallet, setTonWallet] = useState<MyTonWallet | null>(null)
+  const [tonWalletDraft, setTonWalletDraft] = useState('')
+  const [savingTonWallet, setSavingTonWallet] = useState(false)
+  const [tonWalletError, setTonWalletError] = useState<string | null>(null)
+  const [tonWalletNotice, setTonWalletNotice] = useState<string | null>(null)
+  // 11.0-b: сохранённый адрес (удобное сужение типа для JSX).
+  const savedAddress = tonWallet?.address ?? null
   // 10.0.5-b-2: страна определена автоматически по координатам ('auto') —
   // select disabled, hint под ним, country не попадает в payload.
   const countryLocked = profile?.country_source === 'auto'
@@ -371,6 +383,22 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       .catch(() => {
         // Газ — доп. информация: при сбое bootstrap блок остаётся «—»,
         // анкета (основной контент экрана) не ломается.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // 11.0-b: свежий TON-адрес игрока на момент открытия профиля.
+  useEffect(() => {
+    let cancelled = false
+    getMyTonWallet()
+      .then((data) => {
+        if (cancelled) return
+        setTonWallet(data)
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setTonWalletError(err.message)
       })
     return () => {
       cancelled = true
@@ -482,6 +510,46 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     }
   }
 
+  // 11.0-b: сохранить/заменить TON-адрес (upsert на бэке) или удалить.
+  async function handleSaveTonWallet() {
+    if (savingTonWallet) return
+    const address = tonWalletDraft.trim()
+    if (!address) {
+      setTonWalletError('Введите TON-адрес (EQ…/EQA…/kQA…).')
+      return
+    }
+    setSavingTonWallet(true)
+    setTonWalletError(null)
+    setTonWalletNotice(null)
+    try {
+      const next = await saveMyTonWallet(address)
+      setTonWallet(next)
+      setTonWalletDraft('')
+      setTonWalletNotice('TON-кошелёк сохранён.')
+    } catch (err) {
+      setTonWalletError((err as Error).message)
+    } finally {
+      setSavingTonWallet(false)
+    }
+  }
+
+  async function handleDeleteTonWallet() {
+    if (savingTonWallet) return
+    setSavingTonWallet(true)
+    setTonWalletError(null)
+    setTonWalletNotice(null)
+    try {
+      await deleteMyTonWallet()
+      setTonWallet(null)
+      setTonWalletDraft('')
+      setTonWalletNotice('TON-кошелёк удалён.')
+    } catch (err) {
+      setTonWalletError((err as Error).message)
+    } finally {
+      setSavingTonWallet(false)
+    }
+  }
+
   return (
     <section className="inventory">
       <p className="eyebrow">ПРОФИЛЬ / АНКЕТА ИГРОКА</p>
@@ -506,6 +574,50 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
           </button>
         ))}
         {buyingGas && <p>Создаём инвойс…</p>}
+      </div>
+
+      <div className="gas-block">
+        <h3>TON-кошелёк</h3>
+        {savedAddress ? (
+          <>
+            <p>
+              Адрес для вывода ROOT в TON: <b>{savedAddress}</b>
+            </p>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={savingTonWallet}
+              onClick={handleDeleteTonWallet}
+            >
+              {savingTonWallet ? 'Удаляем…' : 'Удалить'}
+            </button>
+          </>
+        ) : (
+          <>
+            <label>
+              TON-адрес (EQ…/EQA…/kQA…)
+              <input
+                type="text"
+                value={tonWalletDraft}
+                placeholder="EQ…"
+                autoComplete="off"
+                onChange={(e) => setTonWalletDraft(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={savingTonWallet || tonWalletDraft.trim() === ''}
+              onClick={handleSaveTonWallet}
+            >
+              {savingTonWallet ? 'Сохранение…' : 'Сохранить'}
+            </button>
+          </>
+        )}
+        {tonWalletError && <p className="repair-error">{tonWalletError}</p>}
+        {tonWalletNotice && (
+          <p className="mission-success-card">{tonWalletNotice}</p>
+        )}
       </div>
 
       {loading && <p>Загрузка…</p>}
