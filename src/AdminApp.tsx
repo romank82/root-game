@@ -25,10 +25,6 @@ import { AdminsSection } from './components/admin/AdminsSection'
 import { KeysSection } from './components/admin/KeysSection'
 import { ContentSection } from './components/admin/ContentSection'
 import { PlayersSection } from './components/admin/PlayersSection'
-import { MissionsSection } from './components/admin/MissionsSection'
-import { SeasonsSection } from './components/admin/SeasonsSection'
-import { ChaptersSection } from './components/admin/ChaptersSection'
-import { StoryNodesSection } from './components/admin/StoryNodesSection'
 import { CascadeSection } from './components/admin/CascadeSection'
 import { AdminTree } from './components/admin/AdminTree'
 import { MonitoringSection } from './components/admin/MonitoringSection'
@@ -36,17 +32,15 @@ import { WithdrawalsSection } from './components/admin/WithdrawalsSection'
 
 // 13.7-j: валидные вкладки админки. 'economy' удалена — реестр операций
 // перенесён в карточку игрока (PlayersSection), настройки — в CMS.
-// Список используется для фолбэка старой вкладки из localStorage.
+// Вкладки 'missions', 'seasons', 'chapters', 'story-nodes' заменены единой
+// вкладкой 'structure' (AdminTree). Список используется для фолбэка старой
+// вкладки из localStorage.
 const ADMIN_SECTIONS = [
-  'missions',
   'structure',
   'settings',
   'admins',
   'keys',
   'content',
-  'seasons',
-  'chapters',
-  'story-nodes',
   'minigame-profiles',
   'cascade',
   'players',
@@ -65,17 +59,18 @@ function AdminApp() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [section, setSection] = useState<AdminSection>(() => {
-    // 13.7-j: если в localStorage сохранена удалённая вкладка 'economy'
-    // (или любое другое невалидное значение) — фолбэк на 'missions'.
+    // 13.7-j: если в localStorage сохранена удалённая вкладка ('economy',
+    // 'missions', 'seasons', 'chapters', 'story-nodes' и т.п.) — фолбэк на
+    // 'structure'.
     const saved = localStorage.getItem('chimera-admin-section')
     return ADMIN_SECTIONS.includes(saved as (typeof ADMIN_SECTIONS)[number])
       ? (saved as (typeof ADMIN_SECTIONS)[number])
-      : 'missions'
+      : 'structure'
   })
   const [geoZones, setGeoZones] = useState<AdminGeoZone[]>([])
-  // setGeoZonesError и setARObjectsError всё ещё используются эффектом загрузки миссий;
-  // сами geoZonesError/arObjectsError больше не отображаются в AdminApp (редакторы
-  // геозон и AR-объектов показывают ошибки сами).
+  // setGeoZonesError и setARObjectsError всё ещё используются эффектом загрузки
+  // общих данных для AdminTree; сами geoZonesError/arObjectsError больше не
+  // отображаются в AdminApp (редакторы геозон и AR-объектов показывают ошибки сами).
   const [, setGeoZonesError] = useState<string | null>(null)
   const [, setARObjectsError] = useState<string | null>(null)
   const [arObjects, setARObjects] = useState<AdminARObject[]>([])
@@ -138,8 +133,11 @@ function AdminApp() {
       cancelled = true
     }
   }, [section])
+  // Общие данные (геозоны, AR-объекты, мини-игры) для AdminTree и связанных
+  // редакторов. Раньше грузились при открытии вкладки 'missions' — теперь
+  // грузятся при открытии 'structure', где эти данные нужны MissionsSection.
   useEffect(() => {
-    if (section !== 'missions') return
+    if (section !== 'structure') return
     let cancelled = false
 
     listGeoZones()
@@ -467,15 +465,11 @@ function AdminApp() {
         <div>
           <p className="admin-kicker">CHIMERA PROTOCOL / CONTENT CONTROL</p>
           <h1>
-            {section === 'missions' && 'Миссии'}
             {section === 'structure' && 'Структура игры'}
-            {section === 'content' && 'Контент'}
+            {section === 'content' && 'Каталог'}
             {section === 'settings' && 'Настройки'}
             {section === 'admins' && 'Администраторы'}
             {section === 'keys' && 'Ключи'}
-            {section === 'seasons' && 'Сезоны'}
-            {section === 'chapters' && 'Главы'}
-            {section === 'story-nodes' && 'Story Nodes'}
             {section === 'minigame-profiles' && 'Мини-игры'}
             {section === 'cascade' && 'Конструктор'}
             {section === 'players' && 'Игроки'}
@@ -484,12 +478,6 @@ function AdminApp() {
           </h1>
 
           <nav className="admin-nav">
-            <button
-              className={section === 'missions' ? 'is-active' : ''}
-              onClick={() => setSection('missions')}
-            >
-              Миссии
-            </button>
             <button
               className={section === 'structure' ? 'is-active' : ''}
               onClick={() => setSection('structure')}
@@ -500,7 +488,7 @@ function AdminApp() {
               className={section === 'content' ? 'is-active' : ''}
               onClick={() => setSection('content')}
             >
-              Контент
+              Каталог
             </button>
             <button
               className={section === 'settings' ? 'is-active' : ''}
@@ -545,27 +533,6 @@ function AdminApp() {
             </button>
 
             <button
-              className={section === 'seasons' ? 'is-active' : ''}
-              onClick={() => setSection('seasons')}
-            >
-              Сезоны
-            </button>
-
-            <button
-              className={section === 'chapters' ? 'is-active' : ''}
-              onClick={() => setSection('chapters')}
-            >
-              Главы
-            </button>
-
-            <button
-              className={section === 'story-nodes' ? 'is-active' : ''}
-              onClick={() => setSection('story-nodes')}
-            >
-              Story Nodes
-            </button>
-
-            <button
               className={section === 'minigame-profiles' ? 'is-active' : ''}
               onClick={() => setSection('minigame-profiles')}
             >
@@ -593,27 +560,6 @@ function AdminApp() {
 
       {error && <p className="admin-alert admin-error">{error}</p>}
       {notice && <p className="admin-alert admin-notice">{notice}</p>}
-
-      {section === 'missions' && (
-        <MissionsSection
-          admin={admin}
-          canWrite={canWrite}
-          onError={setError}
-          onNotice={setNotice}
-          keyItems={keyItems}
-          loadingKeyItems={loadingKeyItems}
-          geoZones={geoZones}
-          arObjects={arObjects}
-          minigameProfiles={minigameProfiles}
-          onDraftClear={(missionId) => {
-            try {
-              localStorage.removeItem(`draft_mission_${missionId}`)
-            } catch {
-              // localStorage недоступен — чистить нечего.
-            }
-          }}
-        />
-      )}
 
       {section === 'structure' && (
         <AdminTree
@@ -671,33 +617,6 @@ function AdminApp() {
       )}
 
       {section === 'withdrawals' && <WithdrawalsSection />}
-
-      {section === 'seasons' && (
-        <SeasonsSection
-          admin={admin}
-          canWrite={canWrite}
-          onError={setError}
-          onNotice={setNotice}
-        />
-      )}
-
-      {section === 'chapters' && (
-        <ChaptersSection
-          admin={admin}
-          canWrite={canWrite}
-          onError={setError}
-          onNotice={setNotice}
-        />
-      )}
-
-      {section === 'story-nodes' && (
-        <StoryNodesSection
-          admin={admin}
-          canWrite={canWrite}
-          onError={setError}
-          onNotice={setNotice}
-        />
-      )}
 
       {section === 'cascade' && (
         <CascadeSection
