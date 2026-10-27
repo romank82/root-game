@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type {
+  EngineInventoryItem,
   EngineMission,
   MissionSubmission,
 } from '../../api/engineApi'
@@ -16,6 +17,8 @@ interface TerminalScreenProps {
   echo: number
   apiStatus: ApiStatus
   missions: EngineMission[]
+  rootBalance: number
+  inventory: EngineInventoryItem[]
   onScreenChange: (screen: Screen) => void
   onSubmitMission: (
     missionId: string,
@@ -52,6 +55,8 @@ export function TerminalScreen({
   echo,
   apiStatus,
   missions,
+  rootBalance,
+  inventory,
   onScreenChange,
   onSubmitMission,
   onAcceptMission,
@@ -167,6 +172,38 @@ export function TerminalScreen({
     const isLocked = mission.status === 'locked'
     const isInProgress = mission.status === 'in_progress'
 
+    // Sprint 8.x: цена входа (atomic ROOT) и требуемые ключи из runtime policy.
+    const missingRoot =
+      typeof mission.entryRoot === 'number' &&
+      mission.entryRoot > 0 &&
+      rootBalance < mission.entryRoot
+    const requiredItems = mission.requiredItems ?? []
+    const hasAllKeys = requiredItems.every((requirement) => {
+      const owned =
+        inventory.find((item) => item.id === requirement.itemId)?.quantity ?? 0
+      return owned >= requirement.quantity
+    })
+
+    // Sprint 8.x: публичные награды миссии (mission.rewards). Валютная награда
+    // снижается с каждой попыткой → помечаем «До». Пустые/неизвестные типы
+    // пропускаем.
+    const rewardLabels = (mission.rewards ?? [])
+      .map((reward) => {
+        if (reward.type === 'currency' && typeof reward.amount === 'number') {
+          return `До ${reward.amount} ROOT`
+        }
+        if (reward.type === 'item' && reward.itemId) {
+          // Человекочитаемый код из CMS (TEST_KEY_003); если его нет —
+          // системный itemId.
+          return `Предмет: ${reward.itemCode ?? reward.itemId}`
+        }
+        if (reward.type === 'story_node' && reward.storyNodeId) {
+          return `Сюжетный узел: ${reward.storyNodeId}`
+        }
+        return null
+      })
+      .filter((label): label is string => label !== null)
+
     return (
       <article className="puzzle" key={mission.id}>
         <span className="file-label">
@@ -235,6 +272,33 @@ export function TerminalScreen({
           </div>
         ) : (
           <>
+            {typeof mission.entryRoot === 'number' && mission.entryRoot > 0 && (
+              <>
+                <p>Вход: {mission.entryRoot} ROOT</p>
+                {missingRoot && (
+                  <p className="repair-error">
+                    Не хватает {mission.entryRoot - rootBalance} ROOT
+                  </p>
+                )}
+              </>
+            )}
+
+            {requiredItems.length > 0 && (
+              <p className={hasAllKeys ? undefined : 'repair-error'}>
+                Требуемые ключи:{' '}
+                {requiredItems
+                  .map(
+                    (requirement) =>
+                      `${requirement.itemCode ?? requirement.itemId} (${requirement.quantity})`,
+                  )
+                  .join(', ')}
+              </p>
+            )}
+
+            {rewardLabels.length > 0 && (
+              <p>Возможные награды: {rewardLabels.join(', ')}</p>
+            )}
+
             <div className="accept-row">
               <button
                 onClick={() => void handleAccept(mission)}

@@ -110,6 +110,8 @@ function App() {
           echo={echo}
           apiStatus={apiStatus}
           missions={missions}
+          rootBalance={echo}
+          inventory={inventory}
           onScreenChange={setScreen}
           onSubmitMission={submitMission}
           onAcceptMission={acceptMission}

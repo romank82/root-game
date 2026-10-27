@@ -304,7 +304,38 @@ function parseObject(value: string, label: string): Record<string, unknown> {
   return parsed as Record<string, unknown>
 }
 
-function formToPayload(form: MissionForm): AdminMissionPayload {
+function buildRewardPreview(
+  rewards: RewardForm[],
+  keyItems: KeyItem[],
+  storyNodes: AdminStoryNode[],
+): string {
+  const parts: string[] = []
+  for (const reward of rewards) {
+    const rewardType = reward.rewardType.trim()
+    if (rewardType === 'currency') {
+      const amount = reward.amount.trim()
+      if (amount === '' || !Number.isFinite(Number(amount))) continue
+      parts.push(`${Number(amount)} ROOT`)
+    } else if (rewardType === 'item') {
+      const itemId = reward.itemId.trim()
+      if (itemId === '') continue
+      const item = keyItems.find((entry) => entry.id === itemId)
+      parts.push(`предмет: ${item?.title ?? itemId}`)
+    } else if (rewardType === 'story_node') {
+      const storyNodeId = reward.storyNodeId.trim()
+      if (storyNodeId === '') continue
+      const storyNode = storyNodes.find((entry) => entry.id === storyNodeId)
+      parts.push(`сюжетный узел: ${storyNode?.title ?? storyNodeId}`)
+    }
+  }
+  return parts.join(', ')
+}
+
+function formToPayload(
+  form: MissionForm,
+  keyItems: KeyItem[],
+  storyNodes: AdminStoryNode[],
+): AdminMissionPayload {
   const rewards = form.rewards.map((reward) => ({
     reward_type: reward.rewardType.trim(),
     amount: reward.amount.trim() ? Number(reward.amount) : null,
@@ -374,10 +405,21 @@ function formToPayload(form: MissionForm): AdminMissionPayload {
     content = parseObject(form.content, 'Content')
   }
 
-  const isStructuredValidation =
+  // Награды — единый источник истины: content.ui.rewardPreview подставляется
+  // автоматически, чтобы админ не дублировал их вручную.
+  const rewardPreview = buildRewardPreview(form.rewards, keyItems, storyNodes)
+  const isStructuredContent =
     form.missionType === 'text_answer' ||
     form.missionType === 'code_repair' ||
     form.missionType === 'cipher'
+  if (rewardPreview !== '' && isStructuredContent) {
+    const ui = content.ui
+    if (typeof ui === 'object' && ui !== null && !Array.isArray(ui)) {
+      ;(ui as Record<string, unknown>).rewardPreview = { text: rewardPreview }
+    }
+  }
+
+  const isStructuredValidation = isStructuredContent
 
   let validation_config: Record<string, unknown>
   if (isStructuredValidation) {
@@ -836,7 +878,7 @@ export function MissionsSection({
     setSubmitting(true)
 
     try {
-      const payload = formToPayload(form)
+      const payload = formToPayload(form, keyItems, storyNodes)
 
       if (!payload.chapter_id || !payload.title) {
         throw new Error('Заполните chapter ID и название миссии.')

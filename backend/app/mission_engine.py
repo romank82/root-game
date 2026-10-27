@@ -553,16 +553,73 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
         _collect_ar_object_types(session, missions, segments)
     )
 
-    # Sprint 8.14 (ui): лимит попыток для UI-счётчика. Источник — единственная
-    # published MissionRuntimePolicy миссии; для legacy-миссий без policy — None.
-    # Частичный unique index гарантирует не более одной published policy на
-    # миссию, поэтому scalar-чтение по одной на миссию безопасно.
+    # Sprint 8.14 (ui): лимит попыток для UI-счётчика. Sprint 8.x: публичные
+    # данные policy (entry_root, required items) отдаются в bootstrap, чтобы
+    # фронт показывал стоимость входа и требуемые ключи ДО взятия миссии.
+    # Источник — единственная published MissionRuntimePolicy миссии (частичный
+    # unique index гарантирует не более одной published policy на миссию);
+    # для legacy-миссий без policy — None. Загружаем батчем — без N+1.
+    policies_by_mission: dict[str, MissionRuntimePolicy] = {}
+    mission_ids = [mission.id for mission in missions]
+    if mission_ids:
+        policies_by_mission = {
+            policy.mission_id: policy
+            for policy in session.scalars(
+                select(MissionRuntimePolicy).where(
+                    MissionRuntimePolicy.mission_id.in_(mission_ids),
+                    MissionRuntimePolicy.status == "published",
+                )
+            ).all()
+        }
+
     max_attempts_by_mission: dict[str, int | None] = {}
     for mission in missions:
-        policy = _get_published_runtime_policy(session, mission.id)
+        policy = policies_by_mission.get(mission.id)
         max_attempts_by_mission[mission.id] = (
             policy.max_attempts if policy is not None else None
         )
+
+    # Sprint 8.x: награды миссий (currency ROOT / item / story_node) для поля
+    # "rewards" в объекте миссии — игра показывает «Возможные награды».
+    # Загружаем батчем одним запросом, без N+1; у миссий без наград — [].
+    rewards_by_mission: dict[str, list[MissionReward]] = {}
+    if mission_ids:
+        for reward in session.scalars(
+            select(MissionReward)
+            .where(MissionReward.mission_id.in_(mission_ids))
+            .order_by(
+                MissionReward.mission_id,
+                MissionReward.sort_order,
+                MissionReward.id,
+            )
+        ).all():
+            rewards_by_mission.setdefault(reward.mission_id, []).append(reward)
+
+    # Sprint 8.x: человекочитаемый код предмета (например, TEST_KEY_003) вместо
+    # системного item_id — как в магазине (Item.code). Батчем, без N+1; для
+    # ненайденных предметов — null. Покрывает и награды-предметы, и требуемые
+    # ключи (requiredItems из runtime policy).
+    item_codes_by_id: dict[str, str] = {}
+    reward_item_ids = {
+        reward.item_id
+        for mission_rewards in rewards_by_mission.values()
+        for reward in mission_rewards
+        if reward.reward_type == "item" and reward.item_id
+    }
+    required_item_ids = {
+        requirement_item.get("itemId")
+        for policy in policies_by_mission.values()
+        for requirement_item in (policy.required_items_json or {}).get("items", [])
+        if isinstance(requirement_item, dict) and requirement_item.get("itemId")
+    }
+    all_item_ids = reward_item_ids | required_item_ids
+    if all_item_ids:
+        item_codes_by_id = {
+            item.id: item.code
+            for item in session.scalars(
+                select(Item).where(Item.id.in_(all_item_ids))
+            ).all()
+        }
 
     return {
         "player": {
@@ -597,6 +654,55 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "status": progress[mission.id].status,
                 "attemptCount": progress[mission.id].attempt_count,
                 "maxAttempts": max_attempts_by_mission[mission.id],
+                # Публичные данные runtime policy: цена входа (atomic ROOT) и
+                # требуемые ключи — фронт показывает их в карточке миссии ДО
+                # accept. Для legacy-миссий без policy: entryRoot=null, requiredItems=[].
+                "entryRoot": (
+                    policies_by_mission[mission.id].entry_root_atomic
+                    if mission.id in policies_by_mission
+                    else None
+                ),
+                "requiredItems": (
+                    [
+                        {
+                            "itemId": requirement_item["itemId"],
+                            # Код ключа из CMS (Item.code, например TEST_KEY_003) —
+                            # в карточке миссии показываем его, а не системный id.
+                            "itemCode": item_codes_by_id.get(
+                                requirement_item["itemId"]
+                            ),
+                            "quantity": requirement_item.get("quantity", 1),
+                        }
+                        for requirement_item in (
+                            policies_by_mission[mission.id].required_items_json
+                            or {}
+                        ).get("items", [])
+                        if isinstance(requirement_item, dict)
+                        and requirement_item.get("itemId")
+                    ]
+                    if mission.id in policies_by_mission
+                    else []
+                ),
+                # Публичные награды миссии: только то, что реально выводит
+                # _grant_rewards (currency отдаётся только для ROOT — см.
+                # ROOT_CURRENCY при awarding). Для миссий без наград — [].
+                "rewards": [
+                    {
+                        "type": reward.reward_type,
+                        "amount": reward.amount,
+                        "itemId": reward.item_id,
+                        # Код предмета из CMS (Item.code, например TEST_KEY_003) —
+                        # его же показывает магазин. null у не-item наград и
+                        # если предмет не найден.
+                        "itemCode": (
+                            item_codes_by_id.get(reward.item_id)
+                            if reward.reward_type == "item" and reward.item_id
+                            else None
+                        ),
+                        "storyNodeId": reward.story_node_id,
+                    }
+                    for reward in rewards_by_mission.get(mission.id, [])
+                ],
                 "startedAt": (
                     ensure_utc(progress[mission.id].started_at).isoformat()
                     if progress[mission.id].started_at

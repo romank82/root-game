@@ -17,6 +17,17 @@ export type EngineMissionSpawn = {
   generatedAt: string
 }
 
+export type EngineReward = {
+  type: string // 'currency' | 'item' | 'story_node'
+  amount: number | null
+  itemId: string | null
+  // Sprint 8.x: человекочитаемый код предмета (Item.code, например
+  // TEST_KEY_003) — его же показывает магазин; null у не-item наград
+  // и если предмет не найден. В UI предпочтителен над itemId.
+  itemCode: string | null
+  storyNodeId: string | null
+}
+
 export type EngineMission = {
   id: string
   slug: string
@@ -46,6 +57,20 @@ export type EngineMission = {
   executionTimeLimitSeconds: number | null
   deadlineAt: string | null
   availableAgainAt: string | null
+  // Sprint 8.x: публичные данные published runtime policy (цена входа в atomic
+  // ROOT и требуемые ключи). Отдаются движком в bootstrap для показа в карточке
+  // миссии ДО accept; у старых ответов отсутствуют → поля опциональны.
+  entryRoot?: number | null
+  requiredItems?: {
+    itemId: string
+    // Sprint 8.x: человекочитаемый код ключа (Item.code, например
+    // TEST_KEY_003). null, если предмет не найден; в UI предпочтителен над itemId.
+    itemCode: string | null
+    quantity: number
+  }[]
+  // Sprint 8.x: публичные награды миссии из MissionReward (currency ROOT /
+  // item / story_node) для блока «Возможные награды» в карточке.
+  rewards?: EngineReward[]
 }
 
 export type EngineAcceptMissionResponse = {
