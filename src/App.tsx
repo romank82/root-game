@@ -212,7 +212,6 @@ function App() {
           ОСТАНОВИТЬ СЕССИЮ
         </button>
       )}
-
     </main>
   )
 }

@@ -8,6 +8,7 @@ import type { Screen } from '../../types/game'
 import { useCameraStream } from '../../hooks/useCameraStream'
 import { useActiveMission } from '../../hooks/useActiveMission'
 import { MissionTimer } from '../MissionTimer'
+import Game3DScene from '../Game3DScene'
 import { getMissionLayerColor } from '../../constants/missionLayerColors'
 
 interface CameraTestScreenProps {
@@ -279,6 +280,13 @@ export function CameraTestScreen({
   // Цвет рёбер куба по слою миссии (story/team/solo) — единый источник правды.
   const cubeColor = getMissionLayerColor(mission?.missionLayer)
 
+  // Тип AR-объекта из админки (ARObjectsEditor): mission.content.arScene.object_type.
+  // Если не root_logo — рендерим старый CSS-куб (обратная совместимость).
+  const missionArScene = (mission?.content?.arScene ?? {}) as {
+    object_type?: string
+  }
+  const isRootLogoScene = missionArScene.object_type === 'root_logo'
+
   // Тап по кубу открывает мини-игру cipher (только для миссий типа cipher).
   const handleCubeTap = () => {
     if (!isNear || !isCentered) return
@@ -329,17 +337,35 @@ export function CameraTestScreen({
                 '--cube-color': cubeColor,
                 left: `${leftPercent}%`,
                 transform: `translate(-50%, -50%) scale(${scale})`,
+                // Расширяем рамку только под 3D-сцену (WebGL-канвасу нужен
+                // реальный размер, .ar-cube-world по CSS — до 110px).
+                // Для CSS-куба размер берётся из CSS, здесь нужен исходный.
+                ...(isRootLogoScene
+                  ? {
+                      width: 'min(44vmin, 220px)',
+                      height: 'min(44vmin, 220px)',
+                      // Перебиваем overflow инлайном (inline > классы), чтобы
+                      // WebGL-канваса не обрезалась контейнером.
+                      overflow: 'visible',
+                    }
+                  : {}),
               } as CSSProperties
             }
           >
-            <div className="ar-cube-3d">
-              <div className="ar-cube-3d-face ar-cube-3d-front" />
-              <div className="ar-cube-3d-face ar-cube-3d-back" />
-              <div className="ar-cube-3d-face ar-cube-3d-right" />
-              <div className="ar-cube-3d-face ar-cube-3d-left" />
-              <div className="ar-cube-3d-face ar-cube-3d-top" />
-              <div className="ar-cube-3d-face ar-cube-3d-bottom" />
-            </div>
+            {isRootLogoScene ? (
+              <div style={{ width: '100%', height: '100%' }}>
+                <Game3DScene />
+              </div>
+            ) : (
+              <div className="ar-cube-3d">
+                <div className="ar-cube-3d-face ar-cube-3d-front" />
+                <div className="ar-cube-3d-face ar-cube-3d-back" />
+                <div className="ar-cube-3d-face ar-cube-3d-right" />
+                <div className="ar-cube-3d-face ar-cube-3d-left" />
+                <div className="ar-cube-3d-face ar-cube-3d-top" />
+                <div className="ar-cube-3d-face ar-cube-3d-bottom" />
+              </div>
+            )}
           </div>
         )}
 

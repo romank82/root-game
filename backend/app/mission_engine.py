@@ -23,6 +23,7 @@ from app.player_restrictions_engine import recompute_player_status
 from app.qr_service import generate_qr_payload, get_qr_ttl_seconds
 from app.runtime_policy_contract import scaled_attempt_multipliers
 from app.models import (
+    ARObject,
     GamePlayer,
     GeoZone,
     InventoryEvent,
@@ -413,6 +414,87 @@ def _serialize_story_node(story_node: StoryNode) -> dict:
     }
 
 
+def _inject_ar_object_type(
+    content: dict[str, Any] | None,
+    object_type: str | None,
+) -> dict[str, Any] | None:
+    """Подставить тип AR-объекта в публичный content (БД не изменяется).
+
+    objectType — канонический ключ admin API (ARObjectsEditor); object_type —
+    ключ, который читает игровой фронт (ScannerScreen, CameraTestScreen).
+    Остальные поля arScene (scenePreset и т.п.) из авторинга сохраняются.
+    """
+    if not object_type or not content:
+        return content
+    raw_scene = content.get("arScene")
+    ar_scene = dict(raw_scene) if isinstance(raw_scene, dict) else {}
+    ar_scene["objectType"] = object_type
+    ar_scene["object_type"] = object_type
+    injected = dict(content)
+    injected["arScene"] = ar_scene
+    return injected
+
+
+def _collect_ar_object_types(
+    session: Session,
+    missions: list[Mission],
+    segments: list[Segment],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Карта mission/segment id -> object_type связанного AR-объекта.
+
+    У миссии привязка — mission.ar_object_id. У сегмента своей привязки нет,
+    поэтому тип берётся из первой active/published linked-миссии с назначенным
+    AR-объектом (порядок совпадает с linkedMissions в bootstrap).
+    """
+    ar_object_ids: set[str] = set()
+    for mission in missions:
+        if mission.ar_object_id:
+            ar_object_ids.add(mission.ar_object_id)
+    for segment in segments:
+        for link in segment.mission_links:
+            if (
+                link.status == "active"
+                and link.mission.status == "published"
+                and link.mission.ar_object_id
+            ):
+                ar_object_ids.add(link.mission.ar_object_id)
+
+    ar_objects_by_id: dict[str, ARObject] = {}
+    if ar_object_ids:
+        ar_objects_by_id = {
+            obj.id: obj
+            for obj in session.scalars(
+                select(ARObject).where(ARObject.id.in_(ar_object_ids))
+            ).all()
+        }
+
+    by_mission_id: dict[str, str] = {}
+    for mission in missions:
+        if mission.ar_object_id and mission.ar_object_id in ar_objects_by_id:
+            by_mission_id[mission.id] = ar_objects_by_id[
+                mission.ar_object_id
+            ].object_type
+
+    by_segment_id: dict[str, str] = {}
+    for segment in segments:
+        for link in sorted(
+            segment.mission_links,
+            key=lambda current: (current.sort_order, current.mission_id),
+        ):
+            if (
+                link.status == "active"
+                and link.mission.status == "published"
+                and link.mission.ar_object_id
+                and link.mission.ar_object_id in ar_objects_by_id
+            ):
+                by_segment_id[segment.id] = ar_objects_by_id[
+                    link.mission.ar_object_id
+                ].object_type
+                break
+
+    return by_mission_id, by_segment_id
+
+
 def _build_bootstrap(session: Session, player_id: str) -> dict:
     """
     Возвращает только публичные данные для клиента.
@@ -465,6 +547,12 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
         .order_by(Segment.sort_order, Segment.id)
     ).all()
 
+    # Инъекция object_type из привязанного AR-объекта при отдаче в игру:
+    # каталог AR-объектов наружу не отдаётся, фронт читает arScene из content.
+    ar_object_type_by_mission_id, ar_object_type_by_segment_id = (
+        _collect_ar_object_types(session, missions, segments)
+    )
+
     # Sprint 8.14 (ui): лимит попыток для UI-счётчика. Источник — единственная
     # published MissionRuntimePolicy миссии; для legacy-миссий без policy — None.
     # Частичный unique index гарантирует не более одной published policy на
@@ -495,7 +583,10 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "missionLayer": mission.mission_layer,
                 "title": mission.title,
                 "description": mission.description,
-                "content": mission.content,
+                "content": _inject_ar_object_type(
+                    mission.content,
+                    ar_object_type_by_mission_id.get(mission.id),
+                ),
                 "geoZoneId": mission.geo_zone_id,
                 "arObjectId": mission.ar_object_id,
                 "spawn": _extract_spawn_for_bootstrap(progress[mission.id]),
@@ -536,7 +627,10 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "slug": segment.slug,
                 "title": segment.title,
                 "description": segment.description,
-                "content": segment.content,
+                "content": _inject_ar_object_type(
+                    segment.content,
+                    ar_object_type_by_segment_id.get(segment.id),
+                ),
                 "status": segment.status,
                 "sortOrder": segment.sort_order,
                 "linkedMissions": [

@@ -13,6 +13,7 @@ import { EchoRadar } from '../EchoRadar'
 import { MissionTimer } from '../MissionTimer'
 import { useActiveMission, type MissionLayer } from '../../hooks/useActiveMission'
 import { MISSION_LAYER_COLORS } from '../../constants/missionLayerColors'
+import Game3DScene from '../Game3DScene'
 
 type SegmentContent = {
   code: string
@@ -22,6 +23,7 @@ type SegmentContent = {
   latitude: number
   longitude: number
   scenePreset: string
+  objectType: string | null
 }
 
 type CodeRepairContent = {
@@ -96,6 +98,9 @@ function parseSegmentContent(
   const latitude = asNumber(point?.latitude, -90, 90)
   const longitude = asNumber(point?.longitude, -180, 180)
   const scenePreset = asText(arScene?.scenePreset)
+  // Тип AR-объекта из админки (ARObjectsEditor). null — не задан:
+  // для обратной совместимости такой сегмент показывает старую заглушку.
+  const objectType = asText(arScene?.object_type)
 
   if (
     !code ||
@@ -118,6 +123,7 @@ function parseSegmentContent(
     latitude,
     longitude,
     scenePreset,
+    objectType,
   }
 }
 
@@ -614,7 +620,28 @@ export function ScannerScreen({
             }`}
           >
             <div className="ar-cube">
-              {virtualQrRevealed ? <span className="virtual-qr">▦</span> : '▦'}
+              {content.objectType === 'root_logo' ? (
+                <div
+                  style={{
+                    width: '100%',
+                    height: '220px',
+                    overflow: 'visible',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Game3DScene />
+                </div>
+              ) : (
+                <>
+                  {virtualQrRevealed ? (
+                    <span className="virtual-qr">▦</span>
+                  ) : (
+                    '▦'
+                  )}
+                </>
+              )}
             </div>
             <div className="ar-reticle">+</div>
             <span className="ar-scan-line" />

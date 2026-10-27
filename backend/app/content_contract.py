@@ -129,7 +129,16 @@ def validate_segment_content(content: Any) -> None:
     scene = _object(root.get("arScene"), "segment.content.arScene")
     _only(
         scene,
-        {"scenePreset", "scanHoldDurationMs", "visibleFaces", "qrMode"},
+        {
+            "scenePreset",
+            "scanHoldDurationMs",
+            "visibleFaces",
+            "qrMode",
+            # Тип AR-объекта (ARObjectsEditor): objectType — канонический ключ
+            # admin API, object_type — ключ, читаемый игровым фронтом.
+            "objectType",
+            "object_type",
+        },
         "segment.content.arScene",
     )
     _text(scene.get("scenePreset"), "segment.content.arScene.scenePreset", 128)
@@ -235,12 +244,28 @@ def validate_mission_content(
 ) -> None:
     _reject_hidden(content)
     root = _object(content, "mission.content")
-    _only(root, {"schemaVersion", "ui"}, "mission.content")
+    _only(root, {"schemaVersion", "ui", "arScene"}, "mission.content")
     _schema_version_one(
         root.get("schemaVersion"),
         "mission.content.schemaVersion",
     )
     ui = _object(root.get("ui"), "mission.content.ui")
+    if "arScene" in root:
+        scene = _object(root["arScene"], "mission.content.arScene")
+        _only(
+            scene,
+            {
+                "scenePreset",
+                "scanHoldDurationMs",
+                "visibleFaces",
+                "qrMode",
+                # Тип AR-объекта (ARObjectsEditor): objectType — канонический ключ
+                # admin API, object_type — ключ, читаемый игровым фронтом.
+                "objectType",
+                "object_type",
+            },
+            "mission.content.arScene",
+        )
     if mission_type == "text_answer":
         allowed = {"label", "question", "inputPlaceholder", "successTitle", "successText", "rewardPreview"}
         text_keys = allowed - {"rewardPreview"}

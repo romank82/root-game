@@ -335,6 +335,7 @@ export function ARObjectsEditor({
                     <option value="cube">cube — куб</option>
                     <option value="sphere">sphere — сфера</option>
                     <option value="custom">custom — другая 3D-модель</option>
+                    <option value="root_logo">root_logo — Золотой ROOT (логотип)</option>
                   </select>
                 </label>
 
