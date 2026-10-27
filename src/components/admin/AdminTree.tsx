@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChaptersSection } from './ChaptersSection'
 import { MissionsSection } from './MissionsSection'
+import { SeasonsSection } from './SeasonsSection'
+import { SegmentsEditor } from './SegmentsEditor'
+import { StoryNodesSection } from './StoryNodesSection'
 import {
   listAdminMissions,
   listChapters,
@@ -266,7 +269,43 @@ export function AdminTree({
         />
       )
     }
-    // Сезон, Story Node, Сегмент — формы подключим следующим шагом.
+    // Сезон: полноценная форма редактирования.
+    if (selectedItem.type === 'season') {
+      return (
+        <SeasonsSection
+          admin={admin}
+          canWrite={canWrite}
+          onError={onError}
+          onNotice={onNotice}
+          editingId={selectedItem.id}
+        />
+      )
+    }
+    // Story Node: полноценная форма редактирования.
+    if (selectedItem.type === 'storyNode') {
+      return (
+        <StoryNodesSection
+          admin={admin}
+          canWrite={canWrite}
+          onError={onError}
+          onNotice={onNotice}
+          editingId={selectedItem.id}
+        />
+      )
+    }
+    // Сегмент: полноценная форма редактирования.
+    if (selectedItem.type === 'segment') {
+      return (
+        <SegmentsEditor
+          admin={admin}
+          canWrite={canWrite}
+          onError={onError}
+          onNotice={onNotice}
+          editingId={selectedItem.id}
+        />
+      )
+    }
+    // Недостижимый fallback: все типы дерева имеют свою форму выше.
     return (
       <div>
         <h3>{selectedTypeLabel[selectedItem.type]}</h3>

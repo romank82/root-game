@@ -18,6 +18,8 @@ type SegmentsEditorProps = {
   canWrite: boolean
   onError: (message: string) => void
   onNotice: (message: string) => void
+  // Внешний выбор сегмента (например, из дерева структуры в AdminTree).
+  editingId?: string | null
 }
 
 export function SegmentsEditor({
@@ -25,6 +27,7 @@ export function SegmentsEditor({
   canWrite,
   onError: _onError,
   onNotice: _onNotice,
+  editingId,
 }: SegmentsEditorProps) {
   const [segments, setSegments] = useState<AdminSegment[]>([])
   const [loadingSegments, setLoadingSegments] = useState(false)
@@ -120,6 +123,15 @@ export function SegmentsEditor({
     setShowCreateSegment(false)
     setSegmentError(null)
   }, [selectedSegmentId])
+
+  // Внешний выбор сегмента (editingId из дерева структуры). Эффект выше
+  // заполнит поля формы (и скроет create-режим) из найденного сегмента.
+  useEffect(() => {
+    if (editingId === null || editingId === undefined) return
+    const segment = segments.find((item) => item.id === editingId)
+    if (segment) setSelectedSegmentId(segment.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, segments])
 
   // Загрузка миссий для привязки (в AdminApp: эффект при section === 'content').
 

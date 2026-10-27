@@ -16,6 +16,8 @@ type StoryNodesSectionProps = {
   canWrite: boolean
   onError: (message: string) => void
   onNotice: (message: string) => void
+  // Внешний выбор узла (например, из дерева структуры в AdminTree).
+  editingId?: string | null
 }
 
 export function StoryNodesSection({
@@ -23,6 +25,7 @@ export function StoryNodesSection({
   canWrite,
   onError: _onError,
   onNotice: _onNotice,
+  editingId,
 }: StoryNodesSectionProps) {
   const [storyNodes, setStoryNodes] = useState<AdminStoryNode[]>([])
   const [selectedStoryNodeId, setSelectedStoryNodeId] = useState<string | null>(
@@ -98,6 +101,18 @@ export function StoryNodesSection({
     )
     setStoryNodeSortOrder(String(node.sortOrder))
   }, [selectedStoryNodeId, storyNodes])
+
+  // Внешний выбор узла (editingId из дерева структуры). Внутренний эффект
+  // выше заполнит поля формы из найденного узла.
+  useEffect(() => {
+    if (editingId === null || editingId === undefined) return
+    const node = storyNodes.find((item) => item.id === editingId)
+    if (node) {
+      setShowCreateStoryNode(false)
+      setSelectedStoryNodeId(node.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, storyNodes])
 
   function handleShowCreateStoryNode() {
     setShowCreateStoryNode(true)

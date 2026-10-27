@@ -14,6 +14,8 @@ type SeasonsSectionProps = {
   canWrite: boolean
   onError: (message: string) => void
   onNotice: (message: string) => void
+  // Внешний выбор сезона (например, из дерева структуры в AdminTree).
+  editingId?: string | null
 }
 
 export function SeasonsSection({
@@ -21,6 +23,7 @@ export function SeasonsSection({
   canWrite,
   onError: _onError,
   onNotice: _onNotice,
+  editingId,
 }: SeasonsSectionProps) {
   const [seasons, setSeasons] = useState<AdminSeason[]>([])
   const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null)
@@ -69,6 +72,18 @@ export function SeasonsSection({
     setSeasonDescription(season.description ?? '')
     setSeasonSortOrder(String(season.sortOrder))
   }, [selectedSeasonId, seasons])
+
+  // Внешний выбор сезона (editingId из дерева структуры). Внутренний эффект
+  // выше заполнит поля формы из найденного сезона.
+  useEffect(() => {
+    if (editingId === null || editingId === undefined) return
+    const season = seasons.find((item) => item.id === editingId)
+    if (season) {
+      setShowCreateSeason(false)
+      setSelectedSeasonId(season.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, seasons])
 
   function handleShowCreateSeason() {
     setShowCreateSeason(true)
