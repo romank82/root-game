@@ -25,7 +25,6 @@ import { AdminsSection } from './components/admin/AdminsSection'
 import { KeysSection } from './components/admin/KeysSection'
 import { ContentSection } from './components/admin/ContentSection'
 import { PlayersSection } from './components/admin/PlayersSection'
-import { CascadeSection } from './components/admin/CascadeSection'
 import { AdminTree } from './components/admin/AdminTree'
 import { MonitoringSection } from './components/admin/MonitoringSection'
 import { WithdrawalsSection } from './components/admin/WithdrawalsSection'
@@ -33,8 +32,9 @@ import { WithdrawalsSection } from './components/admin/WithdrawalsSection'
 // 13.7-j: валидные вкладки админки. 'economy' удалена — реестр операций
 // перенесён в карточку игрока (PlayersSection), настройки — в CMS.
 // Вкладки 'missions', 'seasons', 'chapters', 'story-nodes' заменены единой
-// вкладкой 'structure' (AdminTree). Список используется для фолбэка старой
-// вкладки из localStorage.
+// вкладкой 'structure' (AdminTree); 'cascade' («Конструктор») тоже убрана —
+// она дублировала дерево для просмотра. Список используется для фолбэка
+// старой вкладки из localStorage.
 const ADMIN_SECTIONS = [
   'structure',
   'settings',
@@ -42,7 +42,6 @@ const ADMIN_SECTIONS = [
   'keys',
   'content',
   'minigame-profiles',
-  'cascade',
   'players',
   'monitoring',
   'withdrawals',
@@ -60,8 +59,8 @@ function AdminApp() {
   const [password, setPassword] = useState('')
   const [section, setSection] = useState<AdminSection>(() => {
     // 13.7-j: если в localStorage сохранена удалённая вкладка ('economy',
-    // 'missions', 'seasons', 'chapters', 'story-nodes' и т.п.) — фолбэк на
-    // 'structure'.
+    // 'missions', 'seasons', 'chapters', 'story-nodes', 'cascade' и т.п.) —
+    // фолбэк на 'structure'.
     const saved = localStorage.getItem('chimera-admin-section')
     return ADMIN_SECTIONS.includes(saved as (typeof ADMIN_SECTIONS)[number])
       ? (saved as (typeof ADMIN_SECTIONS)[number])
@@ -471,7 +470,6 @@ function AdminApp() {
             {section === 'admins' && 'Администраторы'}
             {section === 'keys' && 'Ключи'}
             {section === 'minigame-profiles' && 'Мини-игры'}
-            {section === 'cascade' && 'Конструктор'}
             {section === 'players' && 'Игроки'}
             {section === 'monitoring' && 'Мониторинг'}
             {section === 'withdrawals' && 'Заявки на вывод'}
@@ -537,13 +535,6 @@ function AdminApp() {
               onClick={() => setSection('minigame-profiles')}
             >
               Мини-игры
-            </button>
-
-            <button
-              className={section === 'cascade' ? 'is-active' : ''}
-              onClick={() => setSection('cascade')}
-            >
-              Конструктор
             </button>
           </nav>
         </div>
@@ -617,15 +608,6 @@ function AdminApp() {
       )}
 
       {section === 'withdrawals' && <WithdrawalsSection />}
-
-      {section === 'cascade' && (
-        <CascadeSection
-          admin={admin}
-          canWrite={canWrite}
-          onError={setError}
-          onNotice={setNotice}
-        />
-      )}
 
       {section === 'minigame-profiles' && (
         <div className="admin-layout">

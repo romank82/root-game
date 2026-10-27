@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { AdminARObject, AdminGeoZone, AdminUser } from '../../api/adminApi'
-import { SegmentsEditor } from './SegmentsEditor'
 import { GeoZonesEditor } from './GeoZonesEditor'
 import { ARObjectsEditor } from './ARObjectsEditor'
 
@@ -28,7 +27,7 @@ export function ContentSection({
   onGeoZonesChange,
   onARObjectsChange,
 }: ContentSectionProps) {
-  const [contentTab, setContentTab] = useState<'segments' | 'geozones' | 'arobjects'>('segments')
+  const [contentTab, setContentTab] = useState<'geozones' | 'arobjects'>('geozones')
 
   return (
     <>
@@ -40,12 +39,6 @@ export function ContentSection({
       </div>
 
       <nav className="admin-nav" style={{ marginBottom: '1rem' }}>
-        <button
-          className={contentTab === 'segments' ? 'is-active' : ''}
-          onClick={() => setContentTab('segments')}
-        >
-          Сегменты
-        </button>
         <button
           className={contentTab === 'geozones' ? 'is-active' : ''}
           onClick={() => setContentTab('geozones')}
@@ -59,10 +52,6 @@ export function ContentSection({
           AR-объекты
         </button>
       </nav>
-
-      {contentTab === 'segments' && (
-        <SegmentsEditor admin={admin} canWrite={canWrite} onError={onError} onNotice={onNotice} />
-      )}
 
       {contentTab === 'geozones' && (
         <GeoZonesEditor

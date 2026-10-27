@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   archiveChapter,
   createChapter,
@@ -18,6 +18,46 @@ type ChaptersSectionProps = {
   onNotice: (message: string) => void
   // Внешний выбор главы (например, из дерева структуры в AdminTree).
   editingId?: string | null
+}
+
+// --- Черновик формы главы ------------------------------------------------------
+// Хранится в localStorage по ключу `draft_chapter_<id>`. Компонент сохраняет
+// изменённые поля формы, восстанавливает их при повторном открытии главы
+// и удаляет после успешного сохранения.
+type ChapterDraftForm = {
+  chapterSeasonId: string
+  chapterTitle: string
+  chapterDescription: string
+  chapterSortOrder: string
+}
+
+function saveDraft<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // localStorage недоступен (приватный режим/SSR) — черновик не сохранится.
+  }
+}
+
+function loadDraft<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? null : (JSON.parse(raw) as T)
+  } catch {
+    return null
+  }
+}
+
+function removeDraft(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // localStorage недоступен — чистить нечего.
+  }
+}
+
+function draftKeyFor(id: string): string {
+  return `draft_chapter_${id}`
 }
 
 export function ChaptersSection({
@@ -41,6 +81,9 @@ export function ChaptersSection({
   const [savingChapterError, setSavingChapterError] = useState<string | null>(null)
   const [savingChapterNotice, setSavingChapterNotice] = useState<string | null>(null)
   const [seasons, setSeasons] = useState<AdminSeason[]>([])
+  // Черновик: изменённые поля помечаем «грязными» и храним в localStorage.
+  const [isDirty, setIsDirty] = useState(false)
+  const isDraftRestoredRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -81,12 +124,60 @@ export function ChaptersSection({
     const chapter =
       chapters.find((item) => item.id === selectedChapterId) ?? null
     if (!chapter) return
+    // Заполняем форму из базы. Сбрасываем флаг «черновик уже применён»: тогда
+    // restore-эффект ниже сработает повторно (поля изменились) и наложит
+    // черновик поверх свежих данных базы, а не даст базе затереть его.
+    isDraftRestoredRef.current = false
     setChapterSeasonId(chapter.seasonId)
     setChapterSlug(chapter.slug)
     setChapterTitle(chapter.title)
     setChapterDescription(chapter.description ?? '')
     setChapterSortOrder(String(chapter.sortOrder))
   }, [selectedChapterId, chapters])
+
+  // Восстановление черновика при открытии главы: данные из localStorage
+  // накладываются поверх формы из базы. Применяется один раз на выбранную
+  // главу (isDraftRestoredRef); флаг сбрасывается при выборе другой главы.
+  useEffect(() => {
+    if (selectedChapterId === null || isDraftRestoredRef.current) return
+    // Черновик восстанавливаем только для главы, выбранной в дереве.
+    // При рассинхроне (selectedChapterId !== editingId) восстановление
+    // пропускаем, чтобы черновик не попал под чужой ключ.
+    if (
+      editingId !== null &&
+      editingId !== undefined &&
+      selectedChapterId !== editingId
+    )
+      return
+    const restored = loadDraft<ChapterDraftForm>(draftKeyFor(selectedChapterId))
+    if (restored === null) return
+    setChapterSeasonId(restored.chapterSeasonId)
+    setChapterTitle(restored.chapterTitle)
+    setChapterDescription(restored.chapterDescription)
+    setChapterSortOrder(restored.chapterSortOrder)
+    setIsDirty(true)
+    isDraftRestoredRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChapterId, chapterSeasonId, chapterTitle, chapterDescription, chapterSortOrder])
+
+  // Сохранение черновика: только после реальных правок (isDirty). Чистая
+  // пересборка формы из базы черновик НЕ перезаписывает.
+  useEffect(() => {
+    if (selectedChapterId === null || !isDirty) return
+    saveDraft(draftKeyFor(selectedChapterId), {
+      chapterSeasonId,
+      chapterTitle,
+      chapterDescription,
+      chapterSortOrder,
+    })
+  }, [
+    selectedChapterId,
+    chapterSeasonId,
+    chapterTitle,
+    chapterDescription,
+    chapterSortOrder,
+    isDirty,
+  ])
 
   // Внешний выбор главы (editingId из дерева структуры). Внутренний эффект
   // выше заполнит поля формы из найденной главы.
@@ -96,6 +187,7 @@ export function ChaptersSection({
     if (chapter) {
       setShowCreateChapter(false)
       setSelectedChapterId(chapter.id)
+      isDraftRestoredRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, chapters])
@@ -108,6 +200,7 @@ export function ChaptersSection({
     setChapterTitle('')
     setChapterDescription('')
     setChapterSortOrder('0')
+    isDraftRestoredRef.current = false
     setSavingChapterError(null)
     setSavingChapterNotice(null)
   }
@@ -151,6 +244,7 @@ export function ChaptersSection({
       setChapters((prev) => [...prev, created])
       setShowCreateChapter(false)
       setSelectedChapterId(created.id)
+      setIsDirty(false)
       setSavingChapterNotice('Глава создана.')
     } catch (err) {
       setSavingChapterError((err as Error).message)
@@ -190,6 +284,8 @@ export function ChaptersSection({
       setChapters((prev) =>
         prev.map((item) => (item.id === updated.id ? updated : item)),
       )
+      removeDraft(draftKeyFor(chapter.id))
+      setIsDirty(false)
       setSavingChapterNotice('Глава сохранена.')
     } catch (err) {
       setSavingChapterError((err as Error).message)
@@ -282,6 +378,7 @@ export function ChaptersSection({
               onClick={() => {
                 setSelectedChapterId(chapter.id)
                 setShowCreateChapter(false)
+                isDraftRestoredRef.current = false
               }}
             >
               <span className={`admin-status admin-status-${chapter.status}`}>
@@ -328,7 +425,10 @@ export function ChaptersSection({
                 Сезон *
                 <select
                   value={chapterSeasonId}
-                  onChange={(e) => setChapterSeasonId(e.target.value)}
+                  onChange={(e) => {
+                    setChapterSeasonId(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingChapter}
                 >
                   <option value="">— выберите сезон —</option>
@@ -345,7 +445,10 @@ export function ChaptersSection({
                 <input
                   type="text"
                   value={chapterTitle}
-                  onChange={(e) => setChapterTitle(e.target.value)}
+                  onChange={(e) => {
+                    setChapterTitle(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingChapter}
                   maxLength={255}
                 />
@@ -368,7 +471,10 @@ export function ChaptersSection({
                 Описание
                 <textarea
                   value={chapterDescription}
-                  onChange={(e) => setChapterDescription(e.target.value)}
+                  onChange={(e) => {
+                    setChapterDescription(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingChapter}
                   rows={4}
                 />
@@ -380,7 +486,10 @@ export function ChaptersSection({
                   type="number"
                   min={0}
                   value={chapterSortOrder}
-                  onChange={(e) => setChapterSortOrder(e.target.value)}
+                  onChange={(e) => {
+                    setChapterSortOrder(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingChapter}
                 />
               </label>

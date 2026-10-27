@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   archiveSeason,
   createSeason,
@@ -16,6 +16,45 @@ type SeasonsSectionProps = {
   onNotice: (message: string) => void
   // Внешний выбор сезона (например, из дерева структуры в AdminTree).
   editingId?: string | null
+}
+
+// --- Черновик формы сезона -----------------------------------------------------
+// Хранится в localStorage по ключу `draft_season_<id>`. Компонент сохраняет
+// изменённые поля формы, восстанавливает их при повторном открытии сезона
+// и удаляет после успешного сохранения.
+type SeasonDraftForm = {
+  seasonTitle: string
+  seasonDescription: string
+  seasonSortOrder: string
+}
+
+function saveDraft<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // localStorage недоступен (приватный режим/SSR) — черновик не сохранится.
+  }
+}
+
+function loadDraft<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? null : (JSON.parse(raw) as T)
+  } catch {
+    return null
+  }
+}
+
+function removeDraft(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // localStorage недоступен — чистить нечего.
+  }
+}
+
+function draftKeyFor(id: string): string {
+  return `draft_season_${id}`
 }
 
 export function SeasonsSection({
@@ -37,6 +76,9 @@ export function SeasonsSection({
   const [savingSeason, setSavingSeason] = useState(false)
   const [savingSeasonError, setSavingSeasonError] = useState<string | null>(null)
   const [savingSeasonNotice, setSavingSeasonNotice] = useState<string | null>(null)
+  // Черновик: изменённые поля помечаем «грязными» и храним в localStorage.
+  const [isDirty, setIsDirty] = useState(false)
+  const isDraftRestoredRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -67,11 +109,50 @@ export function SeasonsSection({
   useEffect(() => {
     const season = seasons.find((item) => item.id === selectedSeasonId) ?? null
     if (!season) return
+    // Заполняем форму из базы. Сбрасываем флаг «черновик уже применён»: тогда
+    // restore-эффект ниже сработает повторно (поля изменились) и наложит
+    // черновик поверх свежих данных базы, а не даст базе затереть его.
+    isDraftRestoredRef.current = false
     setSeasonSlug(season.slug)
     setSeasonTitle(season.title)
     setSeasonDescription(season.description ?? '')
     setSeasonSortOrder(String(season.sortOrder))
   }, [selectedSeasonId, seasons])
+
+  // Восстановление черновика при открытии сезона: данные из localStorage
+  // накладываются поверх формы из базы. Применяется один раз на выбранный
+  // сезон (isDraftRestoredRef); флаг сбрасывается при выборе другого сезона.
+  useEffect(() => {
+    if (selectedSeasonId === null || isDraftRestoredRef.current) return
+    // Черновик восстанавливаем только для сезона, выбранного в дереве.
+    // При рассинхроне (selectedSeasonId !== editingId) восстановление
+    // пропускаем, чтобы черновик не попал под чужой ключ.
+    if (
+      editingId !== null &&
+      editingId !== undefined &&
+      selectedSeasonId !== editingId
+    )
+      return
+    const restored = loadDraft<SeasonDraftForm>(draftKeyFor(selectedSeasonId))
+    if (restored === null) return
+    setSeasonTitle(restored.seasonTitle)
+    setSeasonDescription(restored.seasonDescription)
+    setSeasonSortOrder(restored.seasonSortOrder)
+    setIsDirty(true)
+    isDraftRestoredRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSeasonId, seasonTitle, seasonDescription, seasonSortOrder])
+
+  // Сохранение черновика: только после реальных правок (isDirty). Чистая
+  // пересборка формы из базы черновик НЕ перезаписывает.
+  useEffect(() => {
+    if (selectedSeasonId === null || !isDirty) return
+    saveDraft(draftKeyFor(selectedSeasonId), {
+      seasonTitle,
+      seasonDescription,
+      seasonSortOrder,
+    })
+  }, [selectedSeasonId, seasonTitle, seasonDescription, seasonSortOrder, isDirty])
 
   // Внешний выбор сезона (editingId из дерева структуры). Внутренний эффект
   // выше заполнит поля формы из найденного сезона.
@@ -81,6 +162,7 @@ export function SeasonsSection({
     if (season) {
       setShowCreateSeason(false)
       setSelectedSeasonId(season.id)
+      isDraftRestoredRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, seasons])
@@ -92,6 +174,7 @@ export function SeasonsSection({
     setSeasonTitle('')
     setSeasonDescription('')
     setSeasonSortOrder('0')
+    isDraftRestoredRef.current = false
     setSavingSeasonError(null)
     setSavingSeasonNotice(null)
   }
@@ -129,6 +212,7 @@ export function SeasonsSection({
       setSeasons((prev) => [...prev, created])
       setShowCreateSeason(false)
       setSelectedSeasonId(created.id)
+      setIsDirty(false)
       setSavingSeasonNotice('Сезон создан.')
     } catch (err) {
       setSavingSeasonError((err as Error).message)
@@ -162,6 +246,8 @@ export function SeasonsSection({
       setSeasons((prev) =>
         prev.map((item) => (item.id === updated.id ? updated : item)),
       )
+      removeDraft(draftKeyFor(season.id))
+      setIsDirty(false)
       setSavingSeasonNotice('Сезон сохранён.')
     } catch (err) {
       setSavingSeasonError((err as Error).message)
@@ -251,6 +337,7 @@ export function SeasonsSection({
               onClick={() => {
                 setSelectedSeasonId(season.id)
                 setShowCreateSeason(false)
+                isDraftRestoredRef.current = false
               }}
             >
               <span className={`admin-status admin-status-${season.status}`}>
@@ -296,7 +383,10 @@ export function SeasonsSection({
                 <input
                   type="text"
                   value={seasonTitle}
-                  onChange={(e) => setSeasonTitle(e.target.value)}
+                  onChange={(e) => {
+                    setSeasonTitle(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingSeason}
                   maxLength={255}
                 />
@@ -319,7 +409,10 @@ export function SeasonsSection({
                 Описание
                 <textarea
                   value={seasonDescription}
-                  onChange={(e) => setSeasonDescription(e.target.value)}
+                  onChange={(e) => {
+                    setSeasonDescription(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingSeason}
                   rows={4}
                 />
@@ -331,7 +424,10 @@ export function SeasonsSection({
                   type="number"
                   min={0}
                   value={seasonSortOrder}
-                  onChange={(e) => setSeasonSortOrder(e.target.value)}
+                  onChange={(e) => {
+                    setSeasonSortOrder(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingSeason}
                 />
               </label>
