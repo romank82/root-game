@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   createAdminMission,
   getMissionRuntimePolicyByMission,
@@ -30,7 +30,7 @@ type RewardForm = {
   sortOrder: string
 }
 
-type MissionForm = {
+export type MissionForm = {
   chapterId: string
   storyNodeId: string
   geoZoneId: string
@@ -489,6 +489,39 @@ function formToPayload(
   }
 }
 
+// --- Черновик формы миссии --------------------------------------------------
+// Хранится в localStorage по ключу `draft_mission_<id>`. Компонент сам
+// сохраняет изменённую форму, восстанавливает её при повторном открытии
+// миссии и удаляет после успешного сохранения/публикации.
+function saveDraft<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // localStorage недоступен (приватный режим/SSR) — черновик не сохранится.
+  }
+}
+
+function loadDraft<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? null : (JSON.parse(raw) as T)
+  } catch {
+    return null
+  }
+}
+
+function removeDraft(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // localStorage недоступен — чистить нечего.
+  }
+}
+
+function draftKeyFor(id: string): string {
+  return `draft_mission_${id}`
+}
+
 type MissionsSectionProps = {
   admin: AdminUser | null
   canWrite: boolean
@@ -502,6 +535,9 @@ type MissionsSectionProps = {
   minigameProfiles: AdminMinigameProfile[]
   // Внешний выбор миссии (например, из дерева структуры в AdminTree).
   editingId?: string | null
+  // Очистка черновика (draft_mission_<id>) после успешного сохранения
+  // или публикации миссии. Дублирует внутреннюю очистку (идемпотентно).
+  onDraftClear?: (id: string) => void
 }
 
 export function MissionsSection({
@@ -515,6 +551,7 @@ export function MissionsSection({
   arObjects,
   minigameProfiles,
   editingId,
+  onDraftClear,
 }: MissionsSectionProps) {
   const [loadingMissions, setLoadingMissions] = useState(false)
   const [missions, setMissions] = useState<AdminMission[]>([])
@@ -522,6 +559,11 @@ export function MissionsSection({
   const [storyNodes, setStoryNodes] = useState<AdminStoryNode[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [form, setForm] = useState<MissionForm>(emptyForm)
+  const [isDirty, setIsDirty] = useState(false)
+  // Показывает, что черновик уже применён для текущей миссии. Сбрасывается
+  // при выборе другой миссии (selectMission/startNewMission), чтобы для новой
+  // миссии черновик мог восстановиться заново.
+  const isDraftRestoredRef = useRef(false)
   const [submitting, setSubmitting] = useState(false)
   const [missionPolicy, setMissionPolicy] = useState<MissionRuntimePolicy | null>(null)
   const [loadingMissionPolicy, setLoadingMissionPolicy] = useState(false)
@@ -536,6 +578,17 @@ export function MissionsSection({
     () => missions.find((mission) => mission.id === selectedId) ?? null,
     [missions, selectedId],
   )
+
+  // Пользовательское изменение любого поля/списка формы. Помечает форму
+  // «грязной»: только такие изменения попадают в черновик. «Чистые»
+  // пересборки формы из базы (selectMission / сохранение / публикация)
+  // черновик не трогают.
+  function setDraftForm(
+    next: MissionForm | ((current: MissionForm) => MissionForm),
+  ) {
+    setForm(next)
+    setIsDirty(true)
+  }
 
   async function refreshMissions() {
     setLoadingMissions(true)
@@ -711,6 +764,8 @@ export function MissionsSection({
   function selectMission(mission: AdminMission) {
     setSelectedId(mission.id)
     setForm(formFromMission(mission))
+    setIsDirty(false)
+    isDraftRestoredRef.current = false
     onError('')
     onNotice('')
   }
@@ -718,9 +773,46 @@ export function MissionsSection({
   function startNewMission() {
     setSelectedId(null)
     setForm(emptyForm())
+    setIsDirty(false)
+    isDraftRestoredRef.current = false
     onError('')
     onNotice('')
   }
+
+  // Черновик: сохраняем форму в localStorage только после реальных правок
+  // пользователя (isDirty). Чистая форма из базы при открытии/сохранении
+  // черновик НЕ перезаписывает.
+  useEffect(() => {
+    if (selectedId === null || !isDirty) return
+    saveDraft(draftKeyFor(selectedId), form)
+  }, [form, selectedId, isDirty])
+
+  // Восстановление черновика при открытии миссии: данные из localStorage
+  // накладываются поверх формы из базы (merge). Применяется один раз на
+  // выбранную миссию (isDraftRestoredRef); флаг сбрасывается в
+  // selectMission/startNewMission. form в зависимостях — чтобы эффект
+  // срабатывал и тогда, когда selectedId не менялся, но форма была заново
+  // собрана из базы (повторный selectMission той же миссии после обновления
+  // списка) — иначе база молча перезаписала бы восстановленный черновик.
+  useEffect(() => {
+    if (selectedId === null || isDraftRestoredRef.current) return
+    // Черновик восстанавливаем только для миссии, выбранной в дереве.
+    // Если форма показывает не ту миссию (selectedId !== editingId),
+    // восстановление пропускаем, чтобы черновик не попал под чужой ключ.
+    if (
+      editingId !== null &&
+      editingId !== undefined &&
+      selectedId !== editingId
+    )
+      return
+    const restored = loadDraft<MissionForm>(draftKeyFor(selectedId))
+    if (restored === null) return
+    const merged: MissionForm = { ...form, ...restored }
+    setForm(merged)
+    setIsDirty(true)
+    isDraftRestoredRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, form])
 
   // Внешний выбор миссии (editingId из дерева структуры). После загрузки
   // списка открываем нужную миссию в форме, не трогая обычный ручной выбор.
@@ -736,7 +828,7 @@ export function MissionsSection({
     field: keyof RewardForm,
     value: string,
   ) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       rewards: current.rewards.map((reward, rewardIndex) =>
         rewardIndex === index ? { ...reward, [field]: value } : reward,
@@ -745,14 +837,14 @@ export function MissionsSection({
   }
 
   function addReward() {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       rewards: [...current.rewards, emptyReward()],
     }))
   }
 
   function removeReward(index: number) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       rewards: current.rewards.filter(
         (_, rewardIndex) => rewardIndex !== index,
@@ -761,7 +853,7 @@ export function MissionsSection({
   }
 
   function changeAcceptedAnswer(index: number, value: string) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       validationAcceptedAnswers: current.validationAcceptedAnswers.map((a, i) =>
         i === index ? value : a,
@@ -770,14 +862,14 @@ export function MissionsSection({
   }
 
   function addAcceptedAnswer() {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       validationAcceptedAnswers: [...current.validationAcceptedAnswers, ''],
     }))
   }
 
   function removeAcceptedAnswer(index: number) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       validationAcceptedAnswers: current.validationAcceptedAnswers.filter(
         (_, i) => i !== index,
@@ -786,7 +878,7 @@ export function MissionsSection({
   }
 
   function changeCorrectSequence(index: number, value: string) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       validationCorrectSequence: current.validationCorrectSequence.map((s, i) =>
         i === index ? value : s,
@@ -795,14 +887,14 @@ export function MissionsSection({
   }
 
   function addCorrectSequence() {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       validationCorrectSequence: [...current.validationCorrectSequence, ''],
     }))
   }
 
   function removeCorrectSequence(index: number) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       validationCorrectSequence: current.validationCorrectSequence.filter(
         (_, i) => i !== index,
@@ -811,7 +903,7 @@ export function MissionsSection({
   }
 
   function changeContentBlock(index: number, value: string) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       contentBlocks: current.contentBlocks.map((b, i) =>
         i === index ? value : b,
@@ -820,21 +912,21 @@ export function MissionsSection({
   }
 
   function addContentBlock() {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       contentBlocks: [...current.contentBlocks, ''],
     }))
   }
 
   function removeContentBlock(index: number) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       contentBlocks: current.contentBlocks.filter((_, i) => i !== index),
     }))
   }
 
   function changeContentAlphabet(index: number, value: string) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       contentAlphabet: current.contentAlphabet.map((a, i) =>
         i === index ? value : a,
@@ -843,21 +935,21 @@ export function MissionsSection({
   }
 
   function addContentAlphabet() {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       contentAlphabet: [...current.contentAlphabet, ''],
     }))
   }
 
   function removeContentAlphabet(index: number) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       contentAlphabet: current.contentAlphabet.filter((_, i) => i !== index),
     }))
   }
 
   function changeValidationCorrectCombination(index: number, value: string) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       validationCorrectCombination:
         current.validationCorrectCombination.map((c, i) =>
@@ -867,7 +959,7 @@ export function MissionsSection({
   }
 
   function addValidationCorrectCombination() {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       validationCorrectCombination: [
         ...current.validationCorrectCombination,
@@ -877,7 +969,7 @@ export function MissionsSection({
   }
 
   function removeValidationCorrectCombination(index: number) {
-    setForm((current) => ({
+    setDraftForm((current) => ({
       ...current,
       validationCorrectCombination:
         current.validationCorrectCombination.filter((_, i) => i !== index),
@@ -915,6 +1007,9 @@ export function MissionsSection({
 
       setSelectedId(mission.id)
       setForm(formFromMission(mission))
+      removeDraft(draftKeyFor(mission.id))
+      onDraftClear?.(mission.id)
+      setIsDirty(false)
       onNotice(
         selectedMission
           ? 'Изменения сохранены.'
@@ -950,6 +1045,9 @@ export function MissionsSection({
         current.map((entry) => (entry.id === mission.id ? mission : entry)),
       )
       setForm(formFromMission(mission))
+      removeDraft(draftKeyFor(selectedMission.id))
+      onDraftClear?.(selectedMission.id)
+      setIsDirty(false)
       onNotice(
         action === 'publish'
           ? 'Миссия опубликована.'
@@ -1047,7 +1145,7 @@ export function MissionsSection({
                 value={form.chapterId}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({
+                  setDraftForm({
                     ...form,
                     chapterId: event.target.value,
                     unlockAfterMissionId: '',
@@ -1071,7 +1169,7 @@ export function MissionsSection({
                 value={form.storyNodeId}
                 disabled={!canWrite || !form.chapterId}
                 onChange={(event) =>
-                  setForm({ ...form, storyNodeId: event.target.value })
+                  setDraftForm({ ...form, storyNodeId: event.target.value })
                 }
               >
                 <option value="">— Не выбрано —</option>
@@ -1091,7 +1189,7 @@ export function MissionsSection({
                 value={form.geoZoneId}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, geoZoneId: event.target.value })
+                  setDraftForm({ ...form, geoZoneId: event.target.value })
                 }
               >
                 <option value="">— не выбрано —</option>
@@ -1114,7 +1212,7 @@ export function MissionsSection({
                 value={form.arObjectId}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, arObjectId: event.target.value })
+                  setDraftForm({ ...form, arObjectId: event.target.value })
                 }
               >
                 <option value="">— не выбрано —</option>
@@ -1137,7 +1235,7 @@ export function MissionsSection({
                 value={form.minigameProfileId}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, minigameProfileId: event.target.value })
+                  setDraftForm({ ...form, minigameProfileId: event.target.value })
                 }
               >
                 <option value="">— не выбрано —</option>
@@ -1171,7 +1269,7 @@ export function MissionsSection({
                 readOnly
                 placeholder="сгенерируется автоматически"
                 onChange={(event) =>
-                  setForm({ ...form, slug: event.target.value })
+                  setDraftForm({ ...form, slug: event.target.value })
                 }
               />
             </label>
@@ -1190,7 +1288,7 @@ export function MissionsSection({
                       : nextType === 'cipher'
                         ? 'cipher_match'
                         : 'normalized_text_match'
-                  setForm({
+                  setDraftForm({
                     ...form,
                     missionType: nextType,
                     validationValidator: defaultValidator,
@@ -1213,7 +1311,7 @@ export function MissionsSection({
                 value={form.missionCategory}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, missionCategory: event.target.value })
+                  setDraftForm({ ...form, missionCategory: event.target.value })
                 }
               >
                 <option value="solo">solo — один игрок</option>
@@ -1227,7 +1325,7 @@ export function MissionsSection({
                 value={form.missionLayer}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, missionLayer: event.target.value })
+                  setDraftForm({ ...form, missionLayer: event.target.value })
                 }
               >
                 <option value="solo">solo — индивидуальные</option>
@@ -1242,7 +1340,7 @@ export function MissionsSection({
                 value={form.title}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, title: event.target.value })
+                  setDraftForm({ ...form, title: event.target.value })
                 }
               />
             </label>
@@ -1253,7 +1351,7 @@ export function MissionsSection({
                 value={form.description}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, description: event.target.value })
+                  setDraftForm({ ...form, description: event.target.value })
                 }
               />
             </label>
@@ -1265,7 +1363,7 @@ export function MissionsSection({
                 value={form.sortOrder}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, sortOrder: event.target.value })
+                  setDraftForm({ ...form, sortOrder: event.target.value })
                 }
               />
             </label>
@@ -1276,7 +1374,7 @@ export function MissionsSection({
                 value={form.executionTimeLimitSeconds}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, executionTimeLimitSeconds: event.target.value })
+                  setDraftForm({ ...form, executionTimeLimitSeconds: event.target.value })
                 }
               >
                 <option value="">— без лимита —</option>
@@ -1295,7 +1393,7 @@ export function MissionsSection({
                 value={form.reentryCooldownSeconds}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, reentryCooldownSeconds: event.target.value })
+                  setDraftForm({ ...form, reentryCooldownSeconds: event.target.value })
                 }
               >
                 <option value="0">Одноразовая</option>
@@ -1316,7 +1414,7 @@ export function MissionsSection({
                 value={form.unlockAfterMissionId}
                 disabled={!canWrite || !form.chapterId}
                 onChange={(event) =>
-                  setForm({ ...form, unlockAfterMissionId: event.target.value })
+                  setDraftForm({ ...form, unlockAfterMissionId: event.target.value })
                 }
               >
                 <option value="">— без зависимости (доступна сразу) —</option>
@@ -1345,7 +1443,7 @@ export function MissionsSection({
                   value={form.contentLabel}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({ ...form, contentLabel: event.target.value })
+                    setDraftForm({ ...form, contentLabel: event.target.value })
                   }
                 />
               </label>
@@ -1356,7 +1454,7 @@ export function MissionsSection({
                   value={form.contentQuestion}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({ ...form, contentQuestion: event.target.value })
+                    setDraftForm({ ...form, contentQuestion: event.target.value })
                   }
                 />
               </label>
@@ -1367,7 +1465,7 @@ export function MissionsSection({
                   value={form.contentInputPlaceholder}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({
+                    setDraftForm({
                       ...form,
                       contentInputPlaceholder: event.target.value,
                     })
@@ -1381,7 +1479,7 @@ export function MissionsSection({
                   value={form.contentSuccessTitle}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({
+                    setDraftForm({
                       ...form,
                       contentSuccessTitle: event.target.value,
                     })
@@ -1395,7 +1493,7 @@ export function MissionsSection({
                   value={form.contentSuccessText}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({
+                    setDraftForm({
                       ...form,
                       contentSuccessText: event.target.value,
                     })
@@ -1411,7 +1509,7 @@ export function MissionsSection({
                   value={form.contentLabel}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({ ...form, contentLabel: event.target.value })
+                    setDraftForm({ ...form, contentLabel: event.target.value })
                   }
                 />
               </label>
@@ -1422,7 +1520,7 @@ export function MissionsSection({
                   value={form.contentInstruction}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({ ...form, contentInstruction: event.target.value })
+                    setDraftForm({ ...form, contentInstruction: event.target.value })
                   }
                 />
               </label>
@@ -1465,7 +1563,7 @@ export function MissionsSection({
                   value={form.contentLineNumber}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({ ...form, contentLineNumber: event.target.value })
+                    setDraftForm({ ...form, contentLineNumber: event.target.value })
                   }
                 />
               </label>
@@ -1476,7 +1574,7 @@ export function MissionsSection({
                   value={form.contentPlaceholder}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({ ...form, contentPlaceholder: event.target.value })
+                    setDraftForm({ ...form, contentPlaceholder: event.target.value })
                   }
                 />
               </label>
@@ -1487,7 +1585,7 @@ export function MissionsSection({
                   value={form.contentWrongAnswerText}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({
+                    setDraftForm({
                       ...form,
                       contentWrongAnswerText: event.target.value,
                     })
@@ -1502,7 +1600,7 @@ export function MissionsSection({
                 <input
                   value={form.contentLabel}
                   disabled={!canWrite}
-                  onChange={(e) => setForm({ ...form, contentLabel: e.target.value })}
+                  onChange={(e) => setDraftForm({ ...form, contentLabel: e.target.value })}
                 />
               </label>
 
@@ -1511,7 +1609,7 @@ export function MissionsSection({
                 <textarea
                   value={form.contentInstruction}
                   disabled={!canWrite}
-                  onChange={(e) => setForm({ ...form, contentInstruction: e.target.value })}
+                  onChange={(e) => setDraftForm({ ...form, contentInstruction: e.target.value })}
                 />
               </label>
 
@@ -1525,7 +1623,7 @@ export function MissionsSection({
                       max={12}
                       value={form.contentDrumCount}
                       disabled={!canWrite}
-                      onChange={(e) => setForm({ ...form, contentDrumCount: e.target.value })}
+                      onChange={(e) => setDraftForm({ ...form, contentDrumCount: e.target.value })}
                     />
                   </label>
 
@@ -1537,7 +1635,7 @@ export function MissionsSection({
                       max={10}
                       value={form.contentFalseChoicesPerDrum}
                       disabled={!canWrite}
-                      onChange={(e) => setForm({ ...form, contentFalseChoicesPerDrum: e.target.value })}
+                      onChange={(e) => setDraftForm({ ...form, contentFalseChoicesPerDrum: e.target.value })}
                     />
                   </label>
 
@@ -1547,7 +1645,7 @@ export function MissionsSection({
                       value={form.contentCombination}
                       disabled={!canWrite}
                       placeholder="Например: ROOT"
-                      onChange={(e) => setForm({ ...form, contentCombination: e.target.value })}
+                      onChange={(e) => setDraftForm({ ...form, contentCombination: e.target.value })}
                     />
                   </label>
 
@@ -1559,7 +1657,7 @@ export function MissionsSection({
                       max={3600}
                       value={form.contentTimeLimitSeconds}
                       disabled={!canWrite}
-                      onChange={(e) => setForm({ ...form, contentTimeLimitSeconds: e.target.value })}
+                      onChange={(e) => setDraftForm({ ...form, contentTimeLimitSeconds: e.target.value })}
                     />
                   </label>
                 </>
@@ -1570,7 +1668,7 @@ export function MissionsSection({
                 <input
                   value={form.contentSuccessTitle}
                   disabled={!canWrite}
-                  onChange={(e) => setForm({ ...form, contentSuccessTitle: e.target.value })}
+                  onChange={(e) => setDraftForm({ ...form, contentSuccessTitle: e.target.value })}
                 />
               </label>
 
@@ -1579,7 +1677,7 @@ export function MissionsSection({
                 <textarea
                   value={form.contentSuccessText}
                   disabled={!canWrite}
-                  onChange={(e) => setForm({ ...form, contentSuccessText: e.target.value })}
+                  onChange={(e) => setDraftForm({ ...form, contentSuccessText: e.target.value })}
                 />
               </label>
 
@@ -1588,7 +1686,7 @@ export function MissionsSection({
                 <textarea
                   value={form.contentWrongAnswerText}
                   disabled={!canWrite}
-                  onChange={(e) => setForm({ ...form, contentWrongAnswerText: e.target.value })}
+                  onChange={(e) => setDraftForm({ ...form, contentWrongAnswerText: e.target.value })}
                 />
               </label>
 
@@ -1631,7 +1729,7 @@ export function MissionsSection({
                 value={form.content}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, content: event.target.value })
+                  setDraftForm({ ...form, content: event.target.value })
                 }
               />
             </label>
@@ -1650,7 +1748,7 @@ export function MissionsSection({
                   value={form.validationValidator}
                   disabled={!canWrite}
                   onChange={(event) =>
-                    setForm({
+                    setDraftForm({
                       ...form,
                       validationValidator: event.target.value,
                     })
@@ -1783,7 +1881,7 @@ export function MissionsSection({
                 value={form.validationConfig}
                 disabled={!canWrite}
                 onChange={(event) =>
-                  setForm({ ...form, validationConfig: event.target.value })
+                  setDraftForm({ ...form, validationConfig: event.target.value })
                 }
               />
             </label>

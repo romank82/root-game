@@ -605,6 +605,13 @@ function AdminApp() {
           geoZones={geoZones}
           arObjects={arObjects}
           minigameProfiles={minigameProfiles}
+          onDraftClear={(missionId) => {
+            try {
+              localStorage.removeItem(`draft_mission_${missionId}`)
+            } catch {
+              // localStorage недоступен — чистить нечего.
+            }
+          }}
         />
       )}
 

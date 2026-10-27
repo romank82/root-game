@@ -62,6 +62,14 @@ function loadDraft<T>(key: string): T | null {
   }
 }
 
+function removeDraft(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // localStorage недоступен — чистить нечего.
+  }
+}
+
 // Шаг 1 конструĸтора «Структура игры»: дерево иерархии (только просмотр).
 //   Сезон → Глава → (Story Node | Сегмент → Миссия)
 // Загружает пять списков параллельно (Promise.all). Редактирование — следующие шаги.
@@ -163,6 +171,12 @@ export function AdminTree({
     saveDraft(SELECTED_STORAGE_KEY, next)
   }
 
+  // Обязательная очистка черновика формы миссии после успешного
+  // сохранения/публикации (страховка поверх внутренней очистки компонента).
+  function handleMissionDraftClear(id: string) {
+    removeDraft(`draft_mission_${id}`)
+  }
+
   const toggle = (key: string) => {
     const next = new Set(expanded)
     if (next.has(key)) {
@@ -254,6 +268,7 @@ export function AdminTree({
           arObjects={arObjects}
           minigameProfiles={minigameProfiles}
           editingId={selectedItem.id}
+          onDraftClear={handleMissionDraftClear}
         />
       )
     }
