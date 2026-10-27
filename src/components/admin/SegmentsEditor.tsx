@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   archiveSegment,
   createSegment,
@@ -20,6 +20,48 @@ type SegmentsEditorProps = {
   onNotice: (message: string) => void
   // Внешний выбор сегмента (например, из дерева структуры в AdminTree).
   editingId?: string | null
+}
+
+// --- Черновик формы сегмента --------------------------------------------------
+// Хранится в localStorage по ключу `draft_segment_<id>`. Компонент сохраняет
+// изменённые поля формы, восстанавливает их при повторном открытии сегмента
+// и удаляет после успешного сохранения.
+type SegmentDraftForm = {
+  chapterId: string
+  title: string
+  description: string
+  contentJson: string
+  sortOrder: string
+  missions: Array<{ missionId: string; sortOrder: string }>
+}
+
+function saveDraft<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // localStorage недоступен (приватный режим/SSR) — черновик не сохранится.
+  }
+}
+
+function loadDraft<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? null : (JSON.parse(raw) as T)
+  } catch {
+    return null
+  }
+}
+
+function removeDraft(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // localStorage недоступен — чистить нечего.
+  }
+}
+
+function draftKeyFor(id: string): string {
+  return `draft_segment_${id}`
 }
 
 export function SegmentsEditor({
@@ -48,6 +90,10 @@ export function SegmentsEditor({
   const [segmentNotice, setSegmentNotice] = useState<string | null>(null)
   const [publishingSegment, setPublishingSegment] = useState(false)
   const [showCreateSegment, setShowCreateSegment] = useState(false)
+
+  // Черновик: изменённые поля помечаем «грязными» и храним в localStorage.
+  const [isDirty, setIsDirty] = useState(false)
+  const isDraftRestoredRef = useRef(false)
 
   const [missionsForLink, setMissionsForLink] = useState<
     Array<{ id: string; slug: string; title: string; chapterId: string; status: string }>
@@ -102,6 +148,10 @@ export function SegmentsEditor({
       setSegmentNotice(null)
       return
     }
+    // Заполняем форму из базы. Сбрасываем флаг «черновик уже применён»: тогда
+    // restore-эффект ниже сработает повторно (поля изменились) и наложит
+    // черновик поверх свежих данных базы, а не даст базе затереть его.
+    isDraftRestoredRef.current = false
     setSegmentTitle(s.title)
     setSegmentSlug(s.slug)
     setSegmentDescription(s.description ?? '')
@@ -119,6 +169,66 @@ export function SegmentsEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSegmentId, segments])
 
+  // Восстановление черновика при открытии сегмента: данные из localStorage
+  // накладываются поверх формы из базы. Применяется один раз на выбранный
+  // сегмент (isDraftRestoredRef); флаг сбрасывается при выборе другого
+  // сегмента и в fill-эффекте, чтобы повторная пересборка формы из базы
+  // не затирала восстановленный черновик.
+  useEffect(() => {
+    if (selectedSegmentId === null || isDraftRestoredRef.current) return
+    // Черновик восстанавливаем только для сегмента, выбранного в дереве.
+    // При рассинхроне (selectedSegmentId !== editingId) восстановление
+    // пропускаем, чтобы черновик не попал под чужой ключ.
+    if (
+      editingId !== null &&
+      editingId !== undefined &&
+      selectedSegmentId !== editingId
+    )
+      return
+    const restored = loadDraft<SegmentDraftForm>(draftKeyFor(selectedSegmentId))
+    if (restored === null) return
+    setSegmentChapterId(restored.chapterId)
+    setSegmentTitle(restored.title)
+    setSegmentDescription(restored.description)
+    setSegmentContentJson(restored.contentJson)
+    setSegmentSortOrder(restored.sortOrder)
+    setSegmentMissions(restored.missions)
+    setIsDirty(true)
+    isDraftRestoredRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedSegmentId,
+    segmentChapterId,
+    segmentTitle,
+    segmentDescription,
+    segmentContentJson,
+    segmentSortOrder,
+    segmentMissions,
+  ])
+
+  // Сохранение черновика: только после реальных правок (isDirty). Чистая
+  // пересборка формы из базы черновик НЕ перезаписывает.
+  useEffect(() => {
+    if (selectedSegmentId === null || !isDirty) return
+    saveDraft(draftKeyFor(selectedSegmentId), {
+      chapterId: segmentChapterId,
+      title: segmentTitle,
+      description: segmentDescription,
+      contentJson: segmentContentJson,
+      sortOrder: segmentSortOrder,
+      missions: segmentMissions,
+    })
+  }, [
+    selectedSegmentId,
+    segmentChapterId,
+    segmentTitle,
+    segmentDescription,
+    segmentContentJson,
+    segmentSortOrder,
+    segmentMissions,
+    isDirty,
+  ])
+
   useEffect(() => {
     setShowCreateSegment(false)
     setSegmentError(null)
@@ -129,7 +239,11 @@ export function SegmentsEditor({
   useEffect(() => {
     if (editingId === null || editingId === undefined) return
     const segment = segments.find((item) => item.id === editingId)
-    if (segment) setSelectedSegmentId(segment.id)
+    if (segment) {
+      setSelectedSegmentId(segment.id)
+      setIsDirty(false)
+      isDraftRestoredRef.current = false
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, segments])
 
@@ -216,6 +330,7 @@ export function SegmentsEditor({
       setSegments((prev) => [...prev, created])
       setSelectedSegmentId(created.id)
       setShowCreateSegment(false)
+      setIsDirty(false)
       setSegmentNotice('Сегмент создан.')
       await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
@@ -248,6 +363,8 @@ export function SegmentsEditor({
           .map((m) => ({ mission_id: m.missionId.trim(), sort_order: Number(m.sortOrder || 0) })),
       })
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+      removeDraft(draftKeyFor(s.id))
+      setIsDirty(false)
       setSegmentNotice('Сохранено.')
       await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
@@ -261,6 +378,8 @@ export function SegmentsEditor({
     try {
       const updated = await publishSegment(s.id)
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+      removeDraft(draftKeyFor(s.id))
+      setIsDirty(false)
       setSegmentNotice('Сегмент опубликован.')
       await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
@@ -274,6 +393,8 @@ export function SegmentsEditor({
     try {
       const updated = await unpublishSegment(s.id)
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+      removeDraft(draftKeyFor(s.id))
+      setIsDirty(false)
       setSegmentNotice('Сегмент снят с публикации.')
       await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
@@ -287,6 +408,8 @@ export function SegmentsEditor({
     try {
       const updated = await archiveSegment(s.id)
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+      removeDraft(draftKeyFor(s.id))
+      setIsDirty(false)
       setSegmentNotice('Сегмент архивирован.')
       await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
@@ -303,10 +426,12 @@ export function SegmentsEditor({
   }
 
   function addSegmentMissionLink() {
+    setIsDirty(true)
     setSegmentMissions((prev) => [...prev, { missionId: '', sortOrder: '0' }])
   }
 
   function changeSegmentMissionLink(index: number, missionId: string) {
+    setIsDirty(true)
     if (!missionId.trim()) {
       setSegmentMissions((prev) =>
         prev.map((m, i) => (i === index ? { ...m, missionId } : m)),
@@ -327,17 +452,21 @@ export function SegmentsEditor({
   }
 
   function changeSegmentMissionSort(index: number, sortOrder: string) {
+    setIsDirty(true)
     setSegmentMissions((prev) =>
       prev.map((m, i) => (i === index ? { ...m, sortOrder } : m)),
     )
   }
 
   function removeSegmentMissionLink(index: number) {
+    setIsDirty(true)
     setSegmentMissions((prev) => prev.filter((_, i) => i !== index))
   }
 
   function handleShowCreateSegment() {
     setShowCreateSegment(true)
+    setIsDirty(false)
+    isDraftRestoredRef.current = false
     setSegmentTitle('')
     setSegmentSlug('')
     setSegmentDescription('')
@@ -396,7 +525,11 @@ export function SegmentsEditor({
               <button
                 key={segment.id}
                 className={selectedSegmentId === segment.id ? 'is-active' : ''}
-                onClick={() => setSelectedSegmentId(segment.id)}
+                onClick={() => {
+                  setSelectedSegmentId(segment.id)
+                  setIsDirty(false)
+                  isDraftRestoredRef.current = false
+                }}
               >
                 <strong>{segment.title}</strong>
                 <small>{segment.slug}</small>
@@ -454,7 +587,10 @@ export function SegmentsEditor({
                 <input
                   type="text"
                   value={segmentTitle}
-                  onChange={(e) => setSegmentTitle(e.target.value)}
+                  onChange={(e) => {
+                    setSegmentTitle(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite}
                 />
               </label>
@@ -476,6 +612,7 @@ export function SegmentsEditor({
                   onChange={(e) => {
                     setSegmentChapterId(e.target.value)
                     setSegmentMissions([])
+                    setIsDirty(true)
                   }}
                   disabled={!canWrite}
                 >
@@ -494,7 +631,10 @@ export function SegmentsEditor({
                 <textarea
                   rows={3}
                   value={segmentDescription}
-                  onChange={(e) => setSegmentDescription(e.target.value)}
+                  onChange={(e) => {
+                    setSegmentDescription(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite}
                 />
               </label>
@@ -504,7 +644,10 @@ export function SegmentsEditor({
                   type="number"
                   min={0}
                   value={segmentSortOrder}
-                  onChange={(e) => setSegmentSortOrder(e.target.value)}
+                  onChange={(e) => {
+                    setSegmentSortOrder(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite}
                 />
               </label>
@@ -514,7 +657,10 @@ export function SegmentsEditor({
                   rows={8}
                   className="admin-code"
                   value={segmentContentJson}
-                  onChange={(e) => setSegmentContentJson(e.target.value)}
+                  onChange={(e) => {
+                    setSegmentContentJson(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite}
                   spellCheck={false}
                 />

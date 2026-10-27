@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   archiveStoryNode,
   createStoryNode,
@@ -18,6 +18,48 @@ type StoryNodesSectionProps = {
   onNotice: (message: string) => void
   // Внешний выбор узла (например, из дерева структуры в AdminTree).
   editingId?: string | null
+}
+
+// --- Черновик формы сюжетного узла -------------------------------------------
+// Хранится в localStorage по ключу `draft_story_node_<id>`. Компонент
+// сохраняет изменённые поля формы, восстанавливает их при повторном открытии
+// узла и удаляет после успешного сохранения.
+type StoryNodeDraftForm = {
+  chapterId: string
+  title: string
+  body: string
+  presentationType: string
+  content: string
+  sortOrder: string
+}
+
+function saveDraft<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // localStorage недоступен (приватный режим/SSR) — черновик не сохранится.
+  }
+}
+
+function loadDraft<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? null : (JSON.parse(raw) as T)
+  } catch {
+    return null
+  }
+}
+
+function removeDraft(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // localStorage недоступен — чистить нечего.
+  }
+}
+
+function draftKeyFor(id: string): string {
+  return `draft_story_node_${id}`
 }
 
 export function StoryNodesSection({
@@ -50,6 +92,10 @@ export function StoryNodesSection({
     string | null
   >(null)
   const [chapters, setChapters] = useState<AdminChapter[]>([])
+
+  // Черновик: изменённые поля помечаем «грязными» и храним в localStorage.
+  const [isDirty, setIsDirty] = useState(false)
+  const isDraftRestoredRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -89,6 +135,10 @@ export function StoryNodesSection({
   useEffect(() => {
     const node = storyNodes.find((item) => item.id === selectedStoryNodeId)
     if (!node) return
+    // Заполняем форму из базы. Сбрасываем флаг «черновик уже применён»: тогда
+    // restore-эффект ниже сработает повторно (поля изменились) и наложит
+    // черновик поверх свежих данных базы, а не даст базе затереть его.
+    isDraftRestoredRef.current = false
     setStoryNodeChapterId(node.chapterId)
     setStoryNodeSlug(node.slug)
     setStoryNodeTitle(node.title)
@@ -102,6 +152,68 @@ export function StoryNodesSection({
     setStoryNodeSortOrder(String(node.sortOrder))
   }, [selectedStoryNodeId, storyNodes])
 
+  // Восстановление черновика при открытии узла: данные из localStorage
+  // накладываются поверх формы из базы. Применяется один раз на выбранный
+  // узел (isDraftRestoredRef); флаг сбрасывается при выборе другого узла и
+  // в fill-эффекте, чтобы повторная пересборка формы из базы не затирала
+  // восстановленный черновик.
+  useEffect(() => {
+    if (selectedStoryNodeId === null || isDraftRestoredRef.current) return
+    // Черновик восстанавливаем только для узла, выбранного в дереве.
+    // При рассинхроне (selectedStoryNodeId !== editingId) восстановление
+    // пропускаем, чтобы черновик не попал под чужой ключ.
+    if (
+      editingId !== null &&
+      editingId !== undefined &&
+      selectedStoryNodeId !== editingId
+    )
+      return
+    const restored = loadDraft<StoryNodeDraftForm>(
+      draftKeyFor(selectedStoryNodeId),
+    )
+    if (restored === null) return
+    setStoryNodeChapterId(restored.chapterId)
+    setStoryNodeTitle(restored.title)
+    setStoryNodeBody(restored.body)
+    setStoryNodePresentationType(restored.presentationType)
+    setStoryNodeContent(restored.content)
+    setStoryNodeSortOrder(restored.sortOrder)
+    setIsDirty(true)
+    isDraftRestoredRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedStoryNodeId,
+    storyNodeChapterId,
+    storyNodeTitle,
+    storyNodeBody,
+    storyNodePresentationType,
+    storyNodeContent,
+    storyNodeSortOrder,
+  ])
+
+  // Сохранение черновика: только после реальных правок (isDirty). Чистая
+  // пересборка формы из базы черновик НЕ перезаписывает.
+  useEffect(() => {
+    if (selectedStoryNodeId === null || !isDirty) return
+    saveDraft(draftKeyFor(selectedStoryNodeId), {
+      chapterId: storyNodeChapterId,
+      title: storyNodeTitle,
+      body: storyNodeBody,
+      presentationType: storyNodePresentationType,
+      content: storyNodeContent,
+      sortOrder: storyNodeSortOrder,
+    })
+  }, [
+    selectedStoryNodeId,
+    storyNodeChapterId,
+    storyNodeTitle,
+    storyNodeBody,
+    storyNodePresentationType,
+    storyNodeContent,
+    storyNodeSortOrder,
+    isDirty,
+  ])
+
   // Внешний выбор узла (editingId из дерева структуры). Внутренний эффект
   // выше заполнит поля формы из найденного узла.
   useEffect(() => {
@@ -110,6 +222,8 @@ export function StoryNodesSection({
     if (node) {
       setShowCreateStoryNode(false)
       setSelectedStoryNodeId(node.id)
+      setIsDirty(false)
+      isDraftRestoredRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, storyNodes])
@@ -117,6 +231,8 @@ export function StoryNodesSection({
   function handleShowCreateStoryNode() {
     setShowCreateStoryNode(true)
     setSelectedStoryNodeId(null)
+    setIsDirty(false)
+    isDraftRestoredRef.current = false
     setStoryNodeChapterId('')
     setStoryNodeSlug('')
     setStoryNodeTitle('')
@@ -204,6 +320,7 @@ export function StoryNodesSection({
       setStoryNodes((prev) => [...prev, created])
       setShowCreateStoryNode(false)
       setSelectedStoryNodeId(created.id)
+      setIsDirty(false)
       setSavingStoryNodeNotice('Сюжетный узел создан.')
     } catch (err) {
       setSavingStoryNodeError((err as Error).message)
@@ -256,6 +373,8 @@ export function StoryNodesSection({
       setStoryNodes((prev) =>
         prev.map((item) => (item.id === updated.id ? updated : item)),
       )
+      removeDraft(draftKeyFor(node.id))
+      setIsDirty(false)
       setSavingStoryNodeNotice('Сюжетный узел сохранён.')
     } catch (err) {
       setSavingStoryNodeError((err as Error).message)
@@ -276,6 +395,8 @@ async function handlePublishStoryNode() {
       setStoryNodes((prev) =>
         prev.map((item) => (item.id === updated.id ? updated : item)),
       )
+      removeDraft(draftKeyFor(node.id))
+      setIsDirty(false)
       setSavingStoryNodeNotice('Сюжетный узел опубликован.')
     } catch (err) {
       setSavingStoryNodeError((err as Error).message)
@@ -296,6 +417,8 @@ async function handlePublishStoryNode() {
       setStoryNodes((prev) =>
         prev.map((item) => (item.id === updated.id ? updated : item)),
       )
+      removeDraft(draftKeyFor(node.id))
+      setIsDirty(false)
       setSavingStoryNodeNotice('Сюжетный узел архивирован.')
     } catch (err) {
       setSavingStoryNodeError((err as Error).message)
@@ -348,6 +471,8 @@ async function handlePublishStoryNode() {
               onClick={() => {
                 setSelectedStoryNodeId(node.id)
                 setShowCreateStoryNode(false)
+                setIsDirty(false)
+                isDraftRestoredRef.current = false
               }}
             >
               <span className={`admin-status admin-status-${node.status}`}>
@@ -398,7 +523,10 @@ async function handlePublishStoryNode() {
                 Глава *
                 <select
                   value={storyNodeChapterId}
-                  onChange={(e) => setStoryNodeChapterId(e.target.value)}
+                  onChange={(e) => {
+                    setStoryNodeChapterId(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingStoryNode}
                 >
                   <option value="">— выберите главу —</option>
@@ -415,7 +543,10 @@ async function handlePublishStoryNode() {
                 <input
                   type="text"
                   value={storyNodeTitle}
-                  onChange={(e) => setStoryNodeTitle(e.target.value)}
+                  onChange={(e) => {
+                    setStoryNodeTitle(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingStoryNode}
                   maxLength={255}
                 />
@@ -438,7 +569,10 @@ async function handlePublishStoryNode() {
                 Текст (body) *
                 <textarea
                   value={storyNodeBody}
-                  onChange={(e) => setStoryNodeBody(e.target.value)}
+                  onChange={(e) => {
+                    setStoryNodeBody(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingStoryNode}
                   rows={6}
                 />
@@ -449,7 +583,10 @@ async function handlePublishStoryNode() {
                 <input
                   type="text"
                   value={storyNodePresentationType}
-                  onChange={(e) => setStoryNodePresentationType(e.target.value)}
+                  onChange={(e) => {
+                    setStoryNodePresentationType(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingStoryNode}
                   maxLength={32}
                 />
@@ -461,7 +598,10 @@ async function handlePublishStoryNode() {
                   type="number"
                   min={0}
                   value={storyNodeSortOrder}
-                  onChange={(e) => setStoryNodeSortOrder(e.target.value)}
+                  onChange={(e) => {
+                    setStoryNodeSortOrder(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingStoryNode}
                 />
               </label>
@@ -470,7 +610,10 @@ async function handlePublishStoryNode() {
                 Content (JSON)
                 <textarea
                   value={storyNodeContent}
-                  onChange={(e) => setStoryNodeContent(e.target.value)}
+                  onChange={(e) => {
+                    setStoryNodeContent(e.target.value)
+                    setIsDirty(true)
+                  }}
                   disabled={!canWrite || savingStoryNode}
                   rows={5}
                   placeholder="{}"
