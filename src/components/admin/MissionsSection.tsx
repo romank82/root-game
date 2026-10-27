@@ -500,6 +500,8 @@ type MissionsSectionProps = {
   geoZones: AdminGeoZone[]
   arObjects: AdminARObject[]
   minigameProfiles: AdminMinigameProfile[]
+  // Внешний выбор миссии (например, из дерева структуры в AdminTree).
+  editingId?: string | null
 }
 
 export function MissionsSection({
@@ -512,6 +514,7 @@ export function MissionsSection({
   geoZones,
   arObjects,
   minigameProfiles,
+  editingId,
 }: MissionsSectionProps) {
   const [loadingMissions, setLoadingMissions] = useState(false)
   const [missions, setMissions] = useState<AdminMission[]>([])
@@ -718,6 +721,15 @@ export function MissionsSection({
     onError('')
     onNotice('')
   }
+
+  // Внешний выбор миссии (editingId из дерева структуры). После загрузки
+  // списка открываем нужную миссию в форме, не трогая обычный ручной выбор.
+  useEffect(() => {
+    if (editingId === null || editingId === undefined) return
+    const mission = missions.find((m) => m.id === editingId)
+    if (mission) selectMission(mission)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, missions])
 
   function changeReward(
     index: number,
@@ -954,8 +966,13 @@ export function MissionsSection({
     }
   }
 
+  // Внешний выбор из дерева (editingId задан) — список миссий не показываем,
+  // открываем сразу форму выбранной миссии.
+  const showMissionList = editingId === null || editingId === undefined
+
   return (
     <div className="admin-layout">
+      {showMissionList && (
       <aside className="admin-sidebar">
           <button
             className="admin-primary"
@@ -997,6 +1014,7 @@ export function MissionsSection({
             )}
           </div>
         </aside>
+      )}
       <section className="admin-editor">
         <div className="admin-editor-title">
             <div>

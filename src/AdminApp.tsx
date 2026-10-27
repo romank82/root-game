@@ -30,6 +30,7 @@ import { SeasonsSection } from './components/admin/SeasonsSection'
 import { ChaptersSection } from './components/admin/ChaptersSection'
 import { StoryNodesSection } from './components/admin/StoryNodesSection'
 import { CascadeSection } from './components/admin/CascadeSection'
+import { AdminTree } from './components/admin/AdminTree'
 import { MonitoringSection } from './components/admin/MonitoringSection'
 import { WithdrawalsSection } from './components/admin/WithdrawalsSection'
 
@@ -38,6 +39,7 @@ import { WithdrawalsSection } from './components/admin/WithdrawalsSection'
 // Список используется для фолбэка старой вкладки из localStorage.
 const ADMIN_SECTIONS = [
   'missions',
+  'structure',
   'settings',
   'admins',
   'keys',
@@ -466,6 +468,7 @@ function AdminApp() {
           <p className="admin-kicker">CHIMERA PROTOCOL / CONTENT CONTROL</p>
           <h1>
             {section === 'missions' && 'Миссии'}
+            {section === 'structure' && 'Структура игры'}
             {section === 'content' && 'Контент'}
             {section === 'settings' && 'Настройки'}
             {section === 'admins' && 'Администраторы'}
@@ -486,6 +489,12 @@ function AdminApp() {
               onClick={() => setSection('missions')}
             >
               Миссии
+            </button>
+            <button
+              className={section === 'structure' ? 'is-active' : ''}
+              onClick={() => setSection('structure')}
+            >
+              Структура игры
             </button>
             <button
               className={section === 'content' ? 'is-active' : ''}
@@ -587,6 +596,20 @@ function AdminApp() {
 
       {section === 'missions' && (
         <MissionsSection
+          admin={admin}
+          canWrite={canWrite}
+          onError={setError}
+          onNotice={setNotice}
+          keyItems={keyItems}
+          loadingKeyItems={loadingKeyItems}
+          geoZones={geoZones}
+          arObjects={arObjects}
+          minigameProfiles={minigameProfiles}
+        />
+      )}
+
+      {section === 'structure' && (
+        <AdminTree
           admin={admin}
           canWrite={canWrite}
           onError={setError}

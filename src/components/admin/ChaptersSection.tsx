@@ -16,6 +16,8 @@ type ChaptersSectionProps = {
   canWrite: boolean
   onError: (message: string) => void
   onNotice: (message: string) => void
+  // Внешний выбор главы (например, из дерева структуры в AdminTree).
+  editingId?: string | null
 }
 
 export function ChaptersSection({
@@ -23,6 +25,7 @@ export function ChaptersSection({
   canWrite,
   onError: _onError,
   onNotice: _onNotice,
+  editingId,
 }: ChaptersSectionProps) {
   const [chapters, setChapters] = useState<AdminChapter[]>([])
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null)
@@ -84,6 +87,18 @@ export function ChaptersSection({
     setChapterDescription(chapter.description ?? '')
     setChapterSortOrder(String(chapter.sortOrder))
   }, [selectedChapterId, chapters])
+
+  // Внешний выбор главы (editingId из дерева структуры). Внутренний эффект
+  // выше заполнит поля формы из найденной главы.
+  useEffect(() => {
+    if (editingId === null || editingId === undefined) return
+    const chapter = chapters.find((c) => c.id === editingId)
+    if (chapter) {
+      setShowCreateChapter(false)
+      setSelectedChapterId(chapter.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, chapters])
 
   function handleShowCreateChapter() {
     setShowCreateChapter(true)
