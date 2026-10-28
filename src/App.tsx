@@ -18,6 +18,8 @@ import { MapScreen } from './components/screens/MapScreen'
 // TEMP: dev-only camera test screen — удалить в Sprint 8.6.g.
 import { CameraTestScreen } from './components/screens/CameraTestScreen'
 import { CipherScreen } from './components/screens/CipherScreen'
+import { TeamScreen } from './components/screens/TeamScreen'
+import { TeamSessionScreen } from './components/screens/TeamSessionScreen'
 
 function App() {
   const {
@@ -189,6 +191,12 @@ function App() {
         <ProfileScreen onScreenChange={setScreen} />
       )}
 
+      {screen === 'team' && <TeamScreen onScreenChange={setScreen} />}
+
+      {screen === 'team-session' && (
+        <TeamSessionScreen onScreenChange={setScreen} missions={missions} />
+      )}
+
       {screen === 'transfer' && (
         <TransferScreen
           rootBalance={echo}
@@ -207,6 +215,15 @@ function App() {
 
       {accepted && screen !== 'briefing' && (
         <MobileNavigation screen={screen} onScreenChange={setScreen} />
+      )}
+
+      {accepted && screen === 'terminal' && (
+        <button
+          className="primary-button"
+          onClick={() => setScreen('team-session')}
+        >
+          КОМАНДНАЯ МИССИЯ
+        </button>
       )}
 
       {accepted && screen !== 'briefing' && (
