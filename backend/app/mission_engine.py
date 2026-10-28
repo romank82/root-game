@@ -61,6 +61,14 @@ ENTRY_ITEM_EVENT_TYPE = "consumed"
 # CMS-поле для этого параметра (сейчас — фиксированная механика).
 CANCEL_DEADLINE_SECONDS = 180
 
+# Возврат платы при отказе в окне cancel_deadline_at: credit-проводка ROOT
+# (тот же per-run reference_id, что и debit при accept) и возврат ключей.
+ENTRY_REFUND_REFERENCE_TYPE = "mission_entry_refund"
+# event_type ограничен CheckConstraint ck_inventory_events_type
+# ('reserved','released','consumed','credited') — для возврата ключей
+# используем 'credited' (модель/миграцию не меняем).
+ENTRY_ITEM_REFUND_EVENT_TYPE = "credited"
+
 # Sprint 8.17.14: алфавит cipher живёт в minigame_handlers.py (одна точка истины).
 # Оставлен re-export для обратной совместимости с текущими тестами/импортами.
 CIPHER_ALPHABET = CIPHER_ALPHABET  # noqa: PLW0127 (re-export)
@@ -1957,9 +1965,141 @@ def process_qr_scan(
                     "content": mission.content,
                 },
             }
+
+
+def _has_entry_refund(session: Session, player_mission: PlayerMission) -> bool:
+    """True, если для текущего захода уже создана credit-проводка возврата.
+
+    Используется для идемпотентного ответа при повторном expire
+    (status уже 'expired' — сам refund при этом не выполняется).
+    """
+    return (
+        session.scalar(
+            select(WalletTransaction.id).where(
+                WalletTransaction.reference_type == ENTRY_REFUND_REFERENCE_TYPE,
+                WalletTransaction.reference_id
+                == f"{player_mission.id}_entry_{player_mission.entry_count}",
+            )
+        )
+        is not None
+    )
+
+
+def _refund_mission_entry(
+    session: Session,
+    *,
+    player_id: str,
+    mission: Mission,
+    player_mission: PlayerMission,
+) -> bool:
+    """Вернуть плату за отказ в окне cancel_deadline_at (ROOT + ключи).
+
+    ROOT: credit-проводка (reference_type='mission_entry_refund') с тем же
+    per-run reference_id, что и debit при accept. Ключи: зеркалим ровно те
+    списания (InventoryEvent event_type='consumed' по этому reference_id) —
+    каждый возврат фиксируется событием event_type='credited' (тип ограничен
+    CheckConstraint ck_inventory_events_type; 'returned' в схеме нет).
+
+    Идемпотентность:
+    - вызывается только из expire_mission для status == 'in_progress'
+      (после перевода в 'expired' повторный вызов не дойдёт до refund);
+    - ledger-уровень: unique (wallet_id, reference_type, reference_id) у
+      WalletTransaction и (player_item_id, event_type, reference_type,
+      reference_id) у InventoryEvent исключают двойной возврат.
+
+    Возвращает True, если создана хотя бы одна проводка/событие.
+    """
+    policy = _get_published_runtime_policy(session, mission.id)
+    if policy is None:
+        # Legacy-миссия без policy: при accept списаний не было — нечего возвращать.
+        return False
+
+    entry_reference_id = f"{player_mission.id}_entry_{player_mission.entry_count}"
+    metadata: dict = {
+        "missionId": mission.id,
+        "missionSlug": mission.slug,
+        "policyId": policy.id,
+        "policyVersion": policy.version,
+    }
+
+    refunded = False
+    root_debit = policy.entry_root_atomic
+
+    # 1. ROOT: credit-проводка — зеркало debit из _apply_entry_debit.
+    if root_debit > 0:
+        wallet = _get_root_wallet_for_update(session, player_id)
+        existing_refund = session.scalar(
+            select(WalletTransaction.id).where(
+                WalletTransaction.wallet_id == wallet.id,
+                WalletTransaction.reference_type == ENTRY_REFUND_REFERENCE_TYPE,
+                WalletTransaction.reference_id == entry_reference_id,
+            )
+        )
+        if existing_refund is None:
+            wallet.available_balance += root_debit
+            session.add(
+                WalletTransaction(
+                    id=_new_id("wallet-transaction"),
+                    wallet_id=wallet.id,
+                    amount=root_debit,
+                    balance_after=wallet.available_balance,
+                    transaction_type="credit",
+                    reason="Mission entry refund (cancel window)",
+                    reference_type=ENTRY_REFUND_REFERENCE_TYPE,
+                    reference_id=entry_reference_id,
+                    metadata_json=metadata,
+                )
+            )
+            refunded = True
+
+    # 2. Ключи: возвращаем ровно то, что реально списано при accept
+    #    (event_type='consumed', тот же reference_id). Не-расходуемые ключи
+    #    при accept не списывались — их событий в выборке нет.
+    consumed_events = session.scalars(
+        select(InventoryEvent).where(
+            InventoryEvent.event_type == ENTRY_ITEM_EVENT_TYPE,
+            InventoryEvent.reference_type == ENTRY_ITEM_REFERENCE_TYPE,
+            InventoryEvent.reference_id == entry_reference_id,
+        )
+    ).all()
+    for event in consumed_events:
+        player_item = session.get(PlayerItem, event.player_item_id)
+        if player_item is None:
+            continue
+        existing_return = session.scalar(
+            select(InventoryEvent.id).where(
+                InventoryEvent.player_item_id == player_item.id,
+                InventoryEvent.event_type == ENTRY_ITEM_REFUND_EVENT_TYPE,
+                InventoryEvent.reference_type == ENTRY_ITEM_REFERENCE_TYPE,
+                InventoryEvent.reference_id == entry_reference_id,
+            )
+        )
+        if existing_return is not None:
+            continue
+        quantity = abs(event.quantity_delta)
+        player_item.quantity += quantity
+        session.add(
+            InventoryEvent(
+                id=_new_id("inventory-event"),
+                player_item_id=player_item.id,
+                mission_run_id=event.mission_run_id,
+                event_type=ENTRY_ITEM_REFUND_EVENT_TYPE,
+                quantity_delta=quantity,
+                reference_type=ENTRY_ITEM_REFERENCE_TYPE,
+                reference_id=entry_reference_id,
+                metadata_json=dict(event.metadata_json or {}),
+            )
+        )
+        refunded = True
+
+    return refunded
+
+
 def expire_mission(player_id: str, mission_id: str) -> dict[str, Any]:
     """
     Пометить активную миссию как просроченную (ручной expire по клику игрока).
+    Если отказ происходит до cancel_deadline_at — вернуть плату
+    (ROOT + расходуемые ключи); после — провал без возврата.
     Если у миссии cooldown > 0 — установить available_again_at.
     """
     with SessionLocal() as session:
@@ -1984,6 +2124,7 @@ def expire_mission(player_id: str, mission_id: str) -> dict[str, Any]:
                     return {
                         "expired": True,
                         "status": "expired",
+                        "refunded": _has_entry_refund(session, player_mission),
                         "availableAgainAt": (
                             ensure_utc(player_mission.available_again_at).isoformat()
                             if player_mission.available_again_at
@@ -1996,6 +2137,19 @@ def expire_mission(player_id: str, mission_id: str) -> dict[str, Any]:
                 )
 
             now = _utcnow()
+
+            # Таймер на отказ: отказ до cancel_deadline_at → возврат платы
+            # (ROOT + расходуемые ключи); после — провал без возврата.
+            refunded = False
+            cancel_deadline = ensure_utc(player_mission.cancel_deadline_at)
+            if cancel_deadline is not None and cancel_deadline > now:
+                refunded = _refund_mission_entry(
+                    session,
+                    player_id=player_id,
+                    mission=mission,
+                    player_mission=player_mission,
+                )
+
             player_mission.status = "expired"
             if mission.reentry_cooldown_seconds and mission.reentry_cooldown_seconds > 0:
                 player_mission.available_again_at = now + timedelta(
@@ -2007,6 +2161,7 @@ def expire_mission(player_id: str, mission_id: str) -> dict[str, Any]:
             return {
                 "expired": True,
                 "status": "expired",
+                "refunded": refunded,
                 "availableAgainAt": (
                     ensure_utc(player_mission.available_again_at).isoformat()
                     if player_mission.available_again_at
