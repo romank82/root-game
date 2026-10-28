@@ -20,6 +20,10 @@ type SegmentsEditorProps = {
   onNotice: (message: string) => void
   // Внешний выбор сегмента (например, из дерева структуры в AdminTree).
   editingId?: string | null
+  // Режим создания сегмента из дерева структуры: предвыбранная глава
+  // (chapterId). Если задан и editingId не передан — открываем форму нового
+  // сегмента с предзаполненным chapterId.
+  initialChapterId?: string | null
 }
 
 // --- Черновик формы сегмента --------------------------------------------------
@@ -70,6 +74,7 @@ export function SegmentsEditor({
   onError: _onError,
   onNotice: _onNotice,
   editingId,
+  initialChapterId,
 }: SegmentsEditorProps) {
   const [segments, setSegments] = useState<AdminSegment[]>([])
   const [loadingSegments, setLoadingSegments] = useState(false)
@@ -462,6 +467,16 @@ export function SegmentsEditor({
     setIsDirty(true)
     setSegmentMissions((prev) => prev.filter((_, i) => i !== index))
   }
+
+  // Режим создания из дерева структуры: editingId не задан, а initialChapterId
+  // предвыбирает главу для нового сегмента. Открываем форму создания.
+  useEffect(() => {
+    if (editingId !== null && editingId !== undefined) return
+    if (initialChapterId === null || initialChapterId === undefined) return
+    handleShowCreateSegment()
+    setSegmentChapterId(initialChapterId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, initialChapterId])
 
   function handleShowCreateSegment() {
     setShowCreateSegment(true)

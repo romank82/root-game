@@ -217,15 +217,6 @@ function App() {
         <MobileNavigation screen={screen} onScreenChange={setScreen} />
       )}
 
-      {accepted && screen === 'terminal' && (
-        <button
-          className="primary-button"
-          onClick={() => setScreen('team-session')}
-        >
-          КОМАНДНАЯ МИССИЯ
-        </button>
-      )}
-
       {accepted && screen !== 'briefing' && (
         <button className="exit-button" onClick={stopSession}>
           ОСТАНОВИТЬ СЕССИЮ

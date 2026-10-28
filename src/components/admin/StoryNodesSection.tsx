@@ -18,6 +18,10 @@ type StoryNodesSectionProps = {
   onNotice: (message: string) => void
   // Внешний выбор узла (например, из дерева структуры в AdminTree).
   editingId?: string | null
+  // Режим создания узла из дерева структуры: предвыбранная глава (chapterId).
+  // Если задан и editingId не передан — открываем форму нового узла
+  // с предзаполненным chapterId.
+  initialChapterId?: string | null
 }
 
 // --- Черновик формы сюжетного узла -------------------------------------------
@@ -68,6 +72,7 @@ export function StoryNodesSection({
   onError: _onError,
   onNotice: _onNotice,
   editingId,
+  initialChapterId,
 }: StoryNodesSectionProps) {
   const [storyNodes, setStoryNodes] = useState<AdminStoryNode[]>([])
   const [selectedStoryNodeId, setSelectedStoryNodeId] = useState<string | null>(
@@ -227,6 +232,16 @@ export function StoryNodesSection({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, storyNodes])
+
+  // Режим создания из дерева структуры: editingId не задан, а initialChapterId
+  // предвыбирает главу для нового узла. Открываем форму создания.
+  useEffect(() => {
+    if (editingId !== null && editingId !== undefined) return
+    if (initialChapterId === null || initialChapterId === undefined) return
+    handleShowCreateStoryNode()
+    setStoryNodeChapterId(initialChapterId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, initialChapterId])
 
   function handleShowCreateStoryNode() {
     setShowCreateStoryNode(true)

@@ -971,6 +971,26 @@ export async function markTeamSessionReady(
   return response.json() as Promise<EngineTeamSession>
 }
 
+export async function joinTeamSession(
+  sessionId: string,
+): Promise<EngineTeamSession> {
+  const response = await apiFetch(
+    `/api/v1/engine/team-missions/sessions/${sessionId}/join`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeamSession>
+}
+
 export async function submitTeamSession(
   sessionId: string,
   answer?: string | null,

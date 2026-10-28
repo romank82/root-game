@@ -83,11 +83,10 @@ export function TerminalScreen({
   }, [missions])
 
   // Ordering and player-visible status come from authenticated bootstrap.
-  // Показываем в Контуре все миссии, кроме team (у team отдельный флоу).
   // Sprint 8.13: раньше фильтр был === 'text_answer' и отсекал cipher/code_repair.
-  const textMissions = missions.filter(
-    (mission) => mission.missionType !== 'team',
-  )
+  // Командные миссии (missionType === 'team') НЕ вырезаем: папка «КОМАНДНЫЕ»
+  // группирует их по missionLayer === 'team' (как solo/story).
+  const textMissions = missions
 
   // Sprint 8.14 (fix): миссия с cooldown (availableAgainAt) — всегда
   // в активном списке, независимо от статуса (completed или expired).

@@ -18,6 +18,10 @@ type ChaptersSectionProps = {
   onNotice: (message: string) => void
   // Внешний выбор главы (например, из дерева структуры в AdminTree).
   editingId?: string | null
+  // Режим создания главы из дерева структуры: предвыбранный сезон (seasonId).
+  // Если задан и editingId не передан — открываем форму новой главы
+  // с предзаполненным seasonId.
+  initialSeasonId?: string | null
 }
 
 // --- Черновик формы главы ------------------------------------------------------
@@ -66,6 +70,7 @@ export function ChaptersSection({
   onError: _onError,
   onNotice: _onNotice,
   editingId,
+  initialSeasonId,
 }: ChaptersSectionProps) {
   const [chapters, setChapters] = useState<AdminChapter[]>([])
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null)
@@ -191,6 +196,16 @@ export function ChaptersSection({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, chapters])
+
+  // Режим создания из дерева структуры: editingId не задан, а initialSeasonId
+  // предвыбирает сезон для новой главы. Открываем форму создания.
+  useEffect(() => {
+    if (editingId !== null && editingId !== undefined) return
+    if (initialSeasonId === null || initialSeasonId === undefined) return
+    handleShowCreateChapter()
+    setChapterSeasonId(initialSeasonId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, initialSeasonId])
 
   function handleShowCreateChapter() {
     setShowCreateChapter(true)
