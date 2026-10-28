@@ -1350,6 +1350,14 @@ class PlayerMission(TimestampMixin, Base):
         nullable=True,
     )
 
+    # Время, до которого можно отказаться от миссии с возвратом платы
+    # (3 минуты после взятия). None = окно отказа не задано.
+    # Заполняется при первом accept: started_at + 180 секунд.
+    cancel_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     # Момент, раньше которого миссию нельзя взять повторно (после провала/завершения).
     # None = либо миссия одноразовая (не возвращается), либо ещё не была завершена.
     available_again_at: Mapped[datetime | None] = mapped_column(

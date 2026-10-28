@@ -55,6 +55,12 @@ ENTRY_DEBIT_REFERENCE_TYPE = "mission_entry_debit"
 ENTRY_ITEM_REFERENCE_TYPE = "mission_entry"
 ENTRY_ITEM_EVENT_TYPE = "consumed"
 
+# Таймер на отказ: окно (в секундах), в течение которого игрок может
+# отказаться от взятой миссии с возвратом платы (3 минуты после взятия).
+# TODO (CMS-first): вынести в System Settings / Mission, когда появится
+# CMS-поле для этого параметра (сейчас — фиксированная механика).
+CANCEL_DEADLINE_SECONDS = 180
+
 # Sprint 8.17.14: алфавит cipher живёт в minigame_handlers.py (одна точка истины).
 # Оставлен re-export для обратной совместимости с текущими тестами/импортами.
 CIPHER_ALPHABET = CIPHER_ALPHABET  # noqa: PLW0127 (re-export)
@@ -1647,6 +1653,11 @@ def _accept_mission_once(
                 player_mission.deadline_at = started + timedelta(
                     seconds=mission.execution_time_limit_seconds,
                 )
+            # Таймер на отказ: до cancel_deadline_at игрок может отказаться
+            # от миссии с возвратом платы (3 минуты после взятия).
+            player_mission.cancel_deadline_at = started + timedelta(
+                seconds=CANCEL_DEADLINE_SECONDS,
+            )
         # Sprint 8.14 (fix): новый заход (НЕ идемпотентный повторный accept)
         # инкрементирует entry_count → per-run reference_id входа
         # "_entry_<entry_count>" будет уникальным для каждого взятия миссии.
