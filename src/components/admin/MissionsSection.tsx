@@ -66,6 +66,12 @@ export type MissionForm = {
   validationAcceptedAnswers: string[]
   validationCorrectSequence: string[]
   validationCorrectCombination: string[]
+  // Поля командного конфига (missionType === 'team'). validation_config
+  // собирается из них в formToPayload (geo_team_contract); остальные настройки
+  // (цена входа, свежесть, дедлайн, попытки, fallback) берутся из других
+  // полей формы / значений по умолчанию.
+  teamMinMembers: string
+  teamMaxMembers: string
   sortOrder: string
   rewards: RewardForm[]
 }
@@ -115,6 +121,8 @@ const emptyForm = (): MissionForm => ({
   validationAcceptedAnswers: [''],
   validationCorrectSequence: [''],
   validationCorrectCombination: [''],
+  teamMinMembers: '2',
+  teamMaxMembers: '4',
   sortOrder: '0',
   rewards: [emptyReward()],
 })
@@ -123,12 +131,50 @@ function prettyJson(value: Record<string, unknown>): string {
   return JSON.stringify(value, null, 2)
 }
 
+// --- Хелперы чтения validation_config команды --------------------------------
+// validation_config лежит в mission.validationConfig (Record<string, unknown>).
+// Возвращают значения по умолчанию, если путь отсутствует или неверного типа.
+
+function isTeamConfigObject(
+  value: unknown,
+): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function getNestedNumber(
+  root: Record<string, unknown>,
+  path: string[],
+  fallback: number,
+): number {
+  let current: unknown = root
+  for (const key of path) {
+    if (!isTeamConfigObject(current)) return fallback
+    current = current[key]
+  }
+  if (typeof current !== 'number' || !Number.isFinite(current)) return fallback
+  return current
+}
+
+function getMissionValidationConfig(
+  mission: AdminMission,
+): Record<string, unknown> {
+  if (
+    mission.validationConfig !== null &&
+    typeof mission.validationConfig === 'object' &&
+    !Array.isArray(mission.validationConfig)
+  ) {
+    return mission.validationConfig as Record<string, unknown>
+  }
+  return {}
+}
+
 function formFromMission(mission: AdminMission): MissionForm {
   const isTextAnswer = mission.missionType === 'text_answer'
   const isCodeRepair = mission.missionType === 'code_repair'
   const isCipher = mission.missionType === 'cipher'
+  const isTeam = mission.missionType === 'team'
   const hasContentObject =
-    (isTextAnswer || isCodeRepair || isCipher) &&
+    (isTextAnswer || isCodeRepair || isCipher || isTeam) &&
     mission.content !== null &&
     typeof mission.content === 'object'
   const ui =
@@ -242,7 +288,7 @@ function formFromMission(mission: AdminMission): MissionForm {
     title: mission.title,
     description: mission.description ?? '',
     content:
-      isTextAnswer || isCodeRepair || isCipher
+      isTextAnswer || isCodeRepair || isCipher || isTeam
         ? '{}'
         : prettyJson(mission.content),
     contentLabel: uiEntry('label'),
@@ -251,13 +297,17 @@ function formFromMission(mission: AdminMission): MissionForm {
     contentSuccessTitle: uiEntry('successTitle'),
     contentSuccessText: uiEntry('successText'),
     contentInstruction:
-      isCodeRepair || isCipher ? uiEntry('instruction') : '',
+      isCodeRepair || isCipher || isTeam ? uiEntry('instruction') : '',
     contentBlocks:
       isCodeRepair && cleanBlocks.length > 0 ? cleanBlocks : [''],
     contentLineNumber: isCodeRepair ? uiEntry('lineNumber') : '',
     contentPlaceholder: isCodeRepair ? uiEntry('placeholder') : '',
     contentWrongAnswerText:
-      isCodeRepair || isCipher ? uiEntry('wrongAnswerText') : '',
+      isTeam
+        ? (uiEntry('failureText') || uiEntry('wrongAnswerText'))
+        : isCodeRepair || isCipher
+          ? uiEntry('wrongAnswerText')
+          : '',
     contentDrumCount:
       isCipher && ui.drumCount !== undefined ? String(ui.drumCount) : '4',
     contentAlphabet: isCipher ? cleanCipherAlphabet : cipherAlphabetFallback,
@@ -277,6 +327,20 @@ function formFromMission(mission: AdminMission): MissionForm {
     validationAcceptedAnswers,
     validationCorrectSequence,
     validationCorrectCombination,
+    teamMinMembers: String(
+      getNestedNumber(
+        getMissionValidationConfig(mission),
+        ['team', 'minMembers'],
+        2,
+      ),
+    ),
+    teamMaxMembers: String(
+      getNestedNumber(
+        getMissionValidationConfig(mission),
+        ['team', 'maxMembers'],
+        4,
+      ),
+    ),
     sortOrder: String(mission.sortOrder),
     rewards: mission.rewards.map((reward) => ({
       rewardType: reward.rewardType,
@@ -335,6 +399,10 @@ function formToPayload(
   form: MissionForm,
   keyItems: KeyItem[],
   storyNodes: AdminStoryNode[],
+  geoZones: AdminGeoZone[],
+  // Цена входа из блока «Взятие миссии» (policyFee) — используется в
+  // валидации командной миссии (validationConfig.economy.entryFeeRootAtomic).
+  entryFeeRootAtomic: number,
 ): AdminMissionPayload {
   const rewards = form.rewards.map((reward) => ({
     reward_type: reward.rewardType.trim(),
@@ -401,6 +469,19 @@ function formToPayload(
         wrongAnswerText: form.contentWrongAnswerText.trim(),
       },
     }
+  } else if (form.missionType === 'team') {
+    // Контракт team-контента (content_contract.team): content.ui допускает
+    // label, instruction, successTitle, failureText (успех/провал команды).
+    // Валидатор-поля и cipher-параметры для команды не применяются.
+    content = {
+      schemaVersion: 1,
+      ui: {
+        label: form.contentLabel.trim(),
+        instruction: form.contentInstruction.trim(),
+        successTitle: form.contentSuccessTitle.trim(),
+        failureText: form.contentWrongAnswerText.trim(),
+      },
+    }
   } else {
     content = parseObject(form.content, 'Content')
   }
@@ -411,7 +492,10 @@ function formToPayload(
   const isStructuredContent =
     form.missionType === 'text_answer' ||
     form.missionType === 'code_repair' ||
-    form.missionType === 'cipher'
+    form.missionType === 'cipher' ||
+    // Командная миссия тоже использует структурированные поля контента:
+    // Заголовок, Инструкция, Текст при успехе/провале (content.ui).
+    form.missionType === 'team'
   if (rewardPreview !== '' && isStructuredContent) {
     const ui = content.ui
     if (typeof ui === 'object' && ui !== null && !Array.isArray(ui)) {
@@ -419,10 +503,80 @@ function formToPayload(
     }
   }
 
-  const isStructuredValidation = isStructuredContent
+  const isStructuredValidation =
+    form.missionType === 'text_answer' ||
+    form.missionType === 'code_repair' ||
+    form.missionType === 'cipher'
+  // team НЕ попадает в isStructuredValidation: validation-config для команды
+  // собирается не из validator-полей, а из JSON (гео-конфиг команды, см.
+  // admin_missions._validate_team_mission_config).
 
   let validation_config: Record<string, unknown>
-  if (isStructuredValidation) {
+  if (form.missionType === 'team') {
+    // Командный конфиг собирается из структурированных полей формы
+    // (geo_team_contract.validate_team_mission_validation_config).
+    // zoneId — slug выбранной геозоны (движок ищет GeoZone по slug).
+    const selectedZone = geoZones.find((z) => z.id === form.geoZoneId) ?? null
+    if (!selectedZone) {
+      throw new Error('Для командной миссии выберите геозону.')
+    }
+    const minMembers = parseInt(form.teamMinMembers, 10)
+    const maxMembers = parseInt(form.teamMaxMembers, 10)
+    if (!Number.isFinite(minMembers) || minMembers < 2) {
+      throw new Error('Мин. состав команды — целое ≥ 2.')
+    }
+    if (!Number.isFinite(maxMembers) || maxMembers < 2 || maxMembers < minMembers) {
+      throw new Error(
+        'Макс. состав команды — целое ≥ 2 и не меньше минимального.',
+      )
+    }
+    // Остальные настройки — из других полей формы или фиксированные дефолты
+    // контракта: цена входа = policyFee («Цена входа (ROOT)»), попытки = 3,
+    // свежесть = 120 c, дедлайн = 300 c, fallback выключен.
+    const entryFee =
+      Number.isFinite(entryFeeRootAtomic) && entryFeeRootAtomic >= 0
+        ? entryFeeRootAtomic
+        : 0
+    const maxAttempts = 3
+    const proofFreshness = 120
+    const deadlineSeconds = 300
+    // rewardMultipliers: 1.0 * первый, далее невозрастающие (0.5^n).
+    const rewardMultipliers = Array.from(
+      { length: maxAttempts },
+      (_, index) => Math.pow(0.5, index),
+    )
+    validation_config = {
+      schemaVersion: 1,
+      team: {
+        matchmakingMode: 'local_matchmaking',
+        minMembers,
+        maxMembers,
+      },
+      economy: {
+        entryFeeRootAtomic: entryFee,
+        requiredItems: [],
+      },
+      attempts: {
+        maxAttempts,
+        rewardMultipliers,
+      },
+      geo: {
+        zoneId: selectedZone.slug,
+        proofFreshnessSeconds: proofFreshness,
+        pairwiseProximityMeters: 40,
+        periodicCheckPolicy: { mode: 'none', intervalSeconds: 0 },
+      },
+      activation: {
+        challengeType: 'cipher',
+        deadlineSeconds,
+        qrMode: 'protected_qr_v1',
+      },
+      fallback: {
+        enabled: false,
+        quotaPerPlayer: 0,
+      },
+    }
+  } else if (isStructuredValidation) {
     if (form.validationValidator === 'ordered_blocks_match') {
       validation_config = {
         validator: 'ordered_blocks_match',
@@ -1027,7 +1181,14 @@ export function MissionsSection({
     setSubmitting(true)
 
     try {
-      const payload = formToPayload(form, keyItems, storyNodes)
+      const fee = Number.parseInt(policyFee, 10)
+      const payload = formToPayload(
+        form,
+        keyItems,
+        storyNodes,
+        geoZones,
+        Number.isFinite(fee) && fee >= 0 ? fee : 0,
+      )
 
       if (!payload.chapter_id || !payload.title) {
         throw new Error('Заполните chapter ID и название миссии.')
@@ -1305,7 +1466,12 @@ export function MissionsSection({
                   .filter(
                     (p) =>
                       p.status === 'published' &&
-                      p.gameType === form.missionType,
+                      // Командная миссия — всегда шифр (geo_team_contract:
+                      // activation.challengeType === 'cipher'), поэтому для
+                      // missionType 'team' показываем cipher-профили.
+                      (form.missionType === 'team'
+                        ? p.gameType === 'cipher'
+                        : p.gameType === form.missionType),
                   )
                   .map((p) => (
                     <option key={p.id} value={p.id}>
@@ -1313,6 +1479,11 @@ export function MissionsSection({
                     </option>
                   ))}
               </select>
+              {form.missionType === 'team' && (
+                <small className="admin-muted">
+                  Для командной миссии используется профиль шифра (cipher).
+                </small>
+              )}
             </label>
 
             <label>
@@ -1342,9 +1513,13 @@ export function MissionsSection({
                       : nextType === 'cipher'
                         ? 'cipher_match'
                         : 'normalized_text_match'
+                  // Бэкенд требует согласованность: слой team ⟺ тип team
+                  // (admin_missions.py). При выборе команды синхронизируем слой.
                   setDraftForm({
                     ...form,
                     missionType: nextType,
+                    missionLayer:
+                      nextType === 'team' ? 'team' : form.missionLayer,
                     validationValidator: defaultValidator,
                   })
                 }}
@@ -1356,6 +1531,7 @@ export function MissionsSection({
                   code_repair — восстановить код
                 </option>
                 <option value="cipher">cipher — кодовый замок</option>
+                <option value="team">team — командная миссия</option>
               </select>
             </label>
 
@@ -1378,9 +1554,18 @@ export function MissionsSection({
               <select
                 value={form.missionLayer}
                 disabled={!canWrite}
-                onChange={(event) =>
-                  setDraftForm({ ...form, missionLayer: event.target.value })
-                }
+                onChange={(event) => {
+                  const nextLayer = event.target.value
+                  // Бэкенд требует согласованность: слой team ⟺ тип team
+                  // (admin_missions.py). При выборе командного слоя
+                  // синхронизируем тип.
+                  setDraftForm({
+                    ...form,
+                    missionLayer: nextLayer,
+                    missionType:
+                      nextLayer === 'team' ? 'team' : form.missionType,
+                  })
+                }}
               >
                 <option value="solo">solo — индивидуальные</option>
                 <option value="team">team — командные</option>
@@ -1489,7 +1674,53 @@ export function MissionsSection({
               </small>
             </label>
         </div>
-        {form.missionType === 'text_answer' ? (
+        {form.missionType === 'team' ? (
+            <>
+              <label className="admin-span-2">
+                Заголовок (командная миссия)
+                <input
+                  value={form.contentLabel}
+                  disabled={!canWrite}
+                  onChange={(e) =>
+                    setDraftForm({ ...form, contentLabel: e.target.value })
+                  }
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Инструкция
+                <textarea
+                  value={form.contentInstruction}
+                  disabled={!canWrite}
+                  onChange={(e) =>
+                    setDraftForm({ ...form, contentInstruction: e.target.value })
+                  }
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Заголовок при успехе
+                <input
+                  value={form.contentSuccessTitle}
+                  disabled={!canWrite}
+                  onChange={(e) =>
+                    setDraftForm({ ...form, contentSuccessTitle: e.target.value })
+                  }
+                />
+              </label>
+
+              <label className="admin-span-2">
+                Текст при провале (failureText)
+                <textarea
+                  value={form.contentWrongAnswerText}
+                  disabled={!canWrite}
+                  onChange={(e) =>
+                    setDraftForm({ ...form, contentWrongAnswerText: e.target.value })
+                  }
+                />
+              </label>
+            </>
+          ) : form.missionType === 'text_answer' ? (
             <>
               <label className="admin-span-2">
                 Текст на кнопке (label)
@@ -1788,9 +2019,46 @@ export function MissionsSection({
               />
             </label>
           )}
-        {form.missionType === 'text_answer' ||
-          form.missionType === 'code_repair' ||
-          form.missionType === 'cipher' ? (
+        {form.missionType === 'team' ? (
+            <section className="admin-validation-config">
+              <div className="admin-section-heading">
+                <h3>Состав команды</h3>
+                <p className="admin-muted">
+                  Зона берётся из выбранной геозоны (по её slug). Остальные
+                  настройки (цена входа, попытки, свежесть, дедлайн) — из
+                  блока «Взятие миссии» и значений по умолчанию.
+                </p>
+              </div>
+
+              <label className="admin-field">
+                <span>Мин. состав команды</span>
+                <input
+                  type="number"
+                  min={2}
+                  value={form.teamMinMembers}
+                  disabled={!canWrite}
+                  onChange={(e) =>
+                    setDraftForm({ ...form, teamMinMembers: e.target.value })
+                  }
+                />
+              </label>
+
+              <label className="admin-field">
+                <span>Макс. состав команды</span>
+                <input
+                  type="number"
+                  min={2}
+                  value={form.teamMaxMembers}
+                  disabled={!canWrite}
+                  onChange={(e) =>
+                    setDraftForm({ ...form, teamMaxMembers: e.target.value })
+                  }
+                />
+              </label>
+            </section>
+          ) : form.missionType === 'text_answer' ||
+            form.missionType === 'code_repair' ||
+            form.missionType === 'cipher' ? (
             <section className="admin-validation-config">
               <div className="admin-section-heading">
                 <h3>Правила проверки ответа</h3>

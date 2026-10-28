@@ -14,8 +14,12 @@ from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
 from app.fallback_shop import _read_setting
 from app.geo_team_runtime_models import MissionRuntimePolicy
-from app.models import AdminUser, Item, Mission
+from app.minigame_handlers import CIPHER_ALPHABET
+from app.mission_categories import MISSION_CATEGORY_TEAM
+from app.models import AdminUser, Item, MinigameProfile, Mission
 from app.runtime_policy_contract import (
+    CIPHER_CHALLENGE_TYPE,
+    SCHEMA_VERSION_ONE,
     RuntimePolicyValidationError,
     validate_reward_policy,
     validate_runtime_policy,
@@ -167,6 +171,47 @@ def _policy_arguments_from_policy(
         fallback_policy_json=policy.fallback_policy_json,
         feature_flags_json=policy.feature_flags_json,
     )
+
+
+def _resolve_team_challenge_policy(
+    session: Session,
+    mission: Mission,
+    submitted: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Собрать challenge policy команды из профиля мини-игры миссии.
+
+    Team-миссии обязаны нести cipher challenge (контракт отклоняет пустое
+    значение). Настройки сложности берутся из MinigameProfile (drumCount,
+    falseChoicesPerDrum), алфавит — фиксированный cipher-алфавит игровых
+    handler'ов. Явно переданный (непустой) challenge имеет приоритет.
+
+    Возвращает None, если валидного профиля нет — тогда контракт даст
+    прежнюю ошибку «challengePolicyJson required for team».
+    """
+    if submitted:
+        return submitted
+    if mission.mission_category != MISSION_CATEGORY_TEAM:
+        return submitted  # solo/race/co-op: challenge опционален, трогать нечего
+    profile_id = mission.minigame_profile_id
+    if not profile_id:
+        return None
+    profile = session.get(MinigameProfile, profile_id)
+    if (
+        profile is None
+        or profile.status != "published"
+        or profile.game_type != "cipher"
+    ):
+        return None
+    settings = profile.settings or {}
+    return {
+        "schemaVersion": SCHEMA_VERSION_ONE,
+        "challengeType": CIPHER_CHALLENGE_TYPE,
+        "drumCount": settings.get("drumCount", 4),
+        "alphabet": list(CIPHER_ALPHABET),
+        "falseChoicesPerDrum": settings.get("falseChoicesPerDrum", 2),
+    }
+
+
 def _validate_policy_via_contract(
     mission: Mission,
     *,
@@ -343,7 +388,14 @@ def create_admin_mission_runtime_policy(
             max_attempts=payload.max_attempts,
             repeatability_policy=payload.repeatability_policy,
             required_items_json=payload.required_items_json,
-            challenge_policy_json=payload.challenge_policy_json,
+            challenge_policy_json=(
+                _resolve_team_challenge_policy(
+                    session,
+                    mission,
+                    payload.challenge_policy_json,
+                )
+                or {}
+            ),
             reward_policy_json=payload.reward_policy_json,
             fallback_policy_json=payload.fallback_policy_json,
             feature_flags_json=payload.feature_flags_json,
@@ -631,6 +683,15 @@ def upsert_mission_runtime_policy(
             raise HTTPException(status_code=404, detail="Миссия не найдена.")
 
         stored_challenge = payload.challenge_policy_json or {}
+        # Team-миссия обязана нести cipher challenge. Если он не передан
+        # (пустой), берём настройки из профиля мини-игры миссии
+        # (minigame_profile_id) — контракт по-прежнему валидирует результат.
+        stored_challenge = (
+            _resolve_team_challenge_policy(
+                session, mission, stored_challenge or None
+            )
+            or {}
+        )
 
         # Sprint 8.14 (шаг 4): скрытый reward-блок собирается из System
         # Settings missions.default_attempt_reward_multipliers
