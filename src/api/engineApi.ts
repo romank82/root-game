@@ -740,3 +740,256 @@ export async function listMyWithdrawals(
 
   return response.json() as Promise<WithdrawalsListResponse>
 }
+
+// ============================================================================
+// Teams (этап 6.4) и командные сессии (этап 7.1) — player-facing endpoints.
+// Контракты соответствуют сериализаторам бэкенда: _serialize_team
+// (teams_service.py) и _serialize_team_session (team_missions_service.py):
+// поля team — camelCase, у сессии часть полей snake_case (mission_id,
+// started_at) — это реальный контракт сервера.
+// ============================================================================
+
+export type EngineTeamStatus = 'active' | 'disbanded'
+export type EngineTeamJoinPolicy = 'open' | 'by_request' | 'invite_only'
+export type EngineTeamMemberRole = 'leader' | 'member'
+
+export type EngineTeam = {
+  id: string
+  name: string
+  description: string | null
+  emblemUrl: string | null
+  status: EngineTeamStatus
+  joinPolicy: EngineTeamJoinPolicy
+  maxMembers: number | null
+  memberCount: number
+  leader: {
+    id: string
+    displayName: string | null
+  }
+  members: Array<{
+    id: string
+    role: EngineTeamMemberRole
+    joinedAt: string | null
+  }>
+}
+
+export type EngineTeamSessionStatus =
+  | 'collecting'
+  | 'ready_to_start'
+  | 'active'
+  | 'succeeded'
+  | 'failed'
+  | 'expired'
+  | 'cancelled_before_start'
+
+export type EngineTeamSessionMyStatus =
+  | 'joined'
+  | 'ready'
+  | 'left'
+  | 'removed'
+  | 'settled'
+
+export type EngineTeamSession = {
+  id: string
+  mission_id: string
+  missionTitle: string | null
+  status: EngineTeamSessionStatus
+  started_at: string | null
+  createdAt: string | null
+  memberCount: number
+  myStatus: EngineTeamSessionMyStatus | null
+  myReadyAt: string | null
+}
+
+export type EngineTeamAwarded = {
+  root: number
+  items: Array<{
+    id: string
+    code: string
+    title: string
+    quantity: number
+  }>
+  storyNodeIds: string[]
+}
+
+export type EngineTeamSessionSubmitResult = {
+  sessionId: string
+  missionRunId: string
+  status: string
+  terminalAt: string
+  awarded: EngineTeamAwarded
+}
+
+export type CreateTeamPayload = {
+  name: string
+  description?: string | null
+  emblem_url?: string | null
+  join_policy?: EngineTeamJoinPolicy
+  max_members?: number | null
+}
+
+export async function createTeam(
+  name: string,
+  description?: string | null,
+  joinPolicy?: EngineTeamJoinPolicy,
+  maxMembers?: number | null,
+): Promise<EngineTeam> {
+  const response = await apiFetch('/api/v1/engine/teams', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    // Контракт бэкенда (TeamCreatePayload): поля snake_case.
+    body: JSON.stringify({
+      name,
+      description: description ?? null,
+      emblem_url: null,
+      join_policy: joinPolicy ?? 'by_request',
+      max_members: maxMembers ?? null,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeam>
+}
+
+export async function getMyTeam(): Promise<EngineTeam | null> {
+  const response = await apiFetch('/api/v1/engine/teams/me')
+
+  // Бэкенд отвечает 404 «Вы не состоите в команде.» — трактуем как null,
+  // чтобы вызывающий код отличал «нет команды» от настоящей ошибки.
+  if (response.status === 404) {
+    return null
+  }
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeam>
+}
+
+export async function getTeam(teamId: string): Promise<EngineTeam> {
+  const response = await apiFetch(`/api/v1/engine/teams/${teamId}`)
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeam>
+}
+
+export async function joinTeam(teamId: string): Promise<EngineTeam> {
+  const response = await apiFetch(`/api/v1/engine/teams/${teamId}/join`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeam>
+}
+
+
+export async function leaveTeam(teamId: string): Promise<void> {
+  const response = await apiFetch(`/api/v1/engine/teams/${teamId}/leave`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+}
+
+export async function disbandTeam(teamId: string): Promise<void> {
+  const response = await apiFetch(`/api/v1/engine/teams/${teamId}/disband`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+}
+
+export async function getTeamSessions(): Promise<{
+  sessions: EngineTeamSession[]
+}> {
+  const response = await apiFetch(
+    '/api/v1/engine/team-missions/sessions/me',
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<{ sessions: EngineTeamSession[] }>
+}
+
+export async function createTeamSession(
+  missionId: string,
+): Promise<EngineTeamSession> {
+  const response = await apiFetch('/api/v1/engine/team-missions/sessions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    // Контракт бэкенда (TeamSessionCreatePayload): mission_id (snake_case).
+    body: JSON.stringify({ mission_id: missionId }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeamSession>
+}
+
+export async function markTeamSessionReady(
+  sessionId: string,
+): Promise<EngineTeamSession> {
+  const response = await apiFetch(
+    `/api/v1/engine/team-missions/sessions/${sessionId}/ready`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeamSession>
+}
+
+export async function submitTeamSession(
+  sessionId: string,
+  answer?: string | null,
+): Promise<EngineTeamSessionSubmitResult> {
+  const response = await apiFetch(
+    `/api/v1/engine/team-missions/sessions/${sessionId}/submit`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ answer: answer ?? null }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeamSessionSubmitResult>
+}
+
