@@ -7,11 +7,19 @@ import type {
 import type { ApiStatus, Screen } from '../../types/game'
 import { Sidebar } from '../Sidebar'
 import { CooldownCountdown } from '../CooldownCountdown'
+import { MissionTimer } from '../MissionTimer'
+import { MissionModal } from '../MissionModal'
 import { missionText } from '../../utils/missionHelpers'
 import {
   MISSION_LAYER_COLORS,
   MISSION_LAYER_ORDER as LAYER_ORDER,
 } from '../../constants/missionLayerColors'
+
+// Окно отказа с возвратом платы (3 минуты после взятия миссии).
+// Зеркало CANCEL_DEADLINE_SECONDS = 180 на бэкенде (mission_engine.py):
+// cancel_deadline_at = started_at + 180с. Бэкенд пока не отдаёт
+// cancelDeadlineAt в bootstrap — считаем на клиенте из startedAt.
+const CANCEL_REFUSE_WINDOW_MS = 3 * 60 * 1000
 
 interface TerminalScreenProps {
   echo: number
@@ -58,14 +66,13 @@ export function TerminalScreen({
   rootBalance,
   inventory,
   onScreenChange,
-  onSubmitMission,
   onAcceptMission,
   onExpireMission,
 }: TerminalScreenProps) {
-  const [answers, setAnswers] = useState<Record<string, string>>({})
-  const [submissionError, setSubmissionError] = useState<string | null>(null)
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
   const [acceptError, setAcceptError] = useState<string | null>(null)
+  const [selectedMission, setSelectedMission] =
+    useState<EngineMission | null>(null)
   const [showArchive, setShowArchive] = useState(false)
   const [openLayer, setOpenLayer] = useState<'story' | 'team' | 'solo'>('story')
 
@@ -132,27 +139,15 @@ export function TerminalScreen({
     },
   }
 
-  async function submitAnswer(mission: EngineMission) {
-    const answer = answers[mission.id] ?? ''
-    const response = await onSubmitMission(mission.id, { answer })
-
-    if (!response) {
-      setSubmissionError('СЕРВЕР НЕДОСТУПЕН. ПРОВЕРЬТЕ ПОДКЛЮЧЕНИЕ.')
-      return
-    }
-
-    if (response.accepted) {
-      setAnswers((current) => ({ ...current, [mission.id]: '' }))
-      setSubmissionError(null)
-      return
-    }
-
-    setSubmissionError(
-      response.message ?? 'ОТВЕТ НЕ ПРИНЯТ. ПРОВЕРЬТЕ ДАННЫЕ И ПОВТОРИТЕ.',
-    )
-  }
-
   async function handleAccept(mission: EngineMission) {
+    // Командные миссии берутся через отдельный флоу: сбор команды + сессия
+    // (экран TeamSessionScreen). acceptEngineMission для них не вызывается.
+    if (mission.missionType === 'team') {
+      setSelectedMission(null)
+      onScreenChange('team-session')
+      return
+    }
+
     setAcceptError(null)
     setAcceptingId(mission.id)
     const result = await onAcceptMission(mission.id)
@@ -202,6 +197,14 @@ export function TerminalScreen({
         return null
       })
       .filter((label): label is string => label !== null)
+
+    // Окно отказа с возвратом платы: cancel_deadline_at = started_at + 3 мин.
+    // (бэкенд пока не отдаёт его в bootstrap — вычисляем на клиенте).
+    const cancelDeadlineAt = mission.startedAt
+      ? new Date(
+          new Date(mission.startedAt).getTime() + CANCEL_REFUSE_WINDOW_MS,
+        ).toISOString()
+      : null
 
     return (
       <article className="puzzle" key={mission.id}>
@@ -268,6 +271,39 @@ export function TerminalScreen({
             <button onClick={() => onScreenChange('map')}>
               ОТКРЫТЬ КАРТУ
             </button>
+
+            {cancelDeadlineAt && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <MissionTimer
+                  mode="cancel"
+                  deadlineAt={cancelDeadlineAt}
+                  label="до конца отказа с возвратом"
+                />
+                <button
+                  type="button"
+                  style={{
+                    background: '#00ff88',
+                    color: '#000',
+                    border: 'none',
+                    padding: '8px 14px',
+                    borderRadius: 6,
+                    fontWeight: 'bold',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => void onExpireMission(mission.id)}
+                >
+                  ОТКАЗАТЬСЯ
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -299,38 +335,8 @@ export function TerminalScreen({
             )}
 
             <div className="accept-row">
-              <button
-                onClick={() => void handleAccept(mission)}
-                disabled={acceptingId === mission.id}
-              >
-                {acceptingId === mission.id
-                  ? 'ПОЛУЧЕНИЕ GPS…'
-                  : 'ВЗЯТЬ МИССИЮ'}
-              </button>
-            </div>
-            <div className="answer-row">
-              <input
-                value={answers[mission.id] ?? ''}
-                onChange={(event) => {
-                  const value = event.target.value
-                  setAnswers((current) => ({
-                    ...current,
-                    [mission.id]: value,
-                  }))
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    void submitAnswer(mission)
-                  }
-                }}
-                placeholder={missionText(
-                  mission,
-                  'inputPlaceholder',
-                  'Введите ответ...',
-                )}
-              />
-              <button onClick={() => void submitAnswer(mission)}>
-                ПРОВЕРИТЬ
+              <button onClick={() => setSelectedMission(mission)}>
+                ПРОСМОТР
               </button>
             </div>
           </>
@@ -361,10 +367,6 @@ export function TerminalScreen({
             сервер.
           </p>
         </div>
-
-        {submissionError && (
-          <p className="repair-error">{submissionError}</p>
-        )}
 
         {acceptError && (
           <p className="repair-error">{acceptError}</p>
@@ -454,6 +456,16 @@ export function TerminalScreen({
           </section>
         )}
       </div>
+
+      {selectedMission && (
+        <MissionModal
+          mission={selectedMission}
+          onClose={() => setSelectedMission(null)}
+          onAccept={() => void handleAccept(selectedMission)}
+          isAccepting={acceptingId === selectedMission.id}
+          error={acceptError}
+        />
+      )}
     </section>
   )
 }

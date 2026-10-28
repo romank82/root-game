@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react'
 
 interface MissionTimerProps {
   deadlineAt: string | null
+  // Режим отсчёта:
+  // 'deadline' — общий дедлайн выполнения миссии (по умолчанию);
+  // 'cancel' — окно отказа (cancel_deadline_at): после истечения отказ
+  //   больше не возвращает плату, текст меняется на «ВРЕМЯ НА ОТКАЗ ИСТЕКЛО».
+  mode?: 'deadline' | 'cancel'
   // Опциональная подпись (например, «до конца задания»).
   label?: string
   // Опциональный обработчик: если задан и время вышло — таймер кликабелен.
@@ -21,7 +26,12 @@ function formatRemaining(ms: number): string {
   return `${pad(m)}:${pad(s)}`
 }
 
-export function MissionTimer({ deadlineAt, label, onClick }: MissionTimerProps) {
+export function MissionTimer({
+  deadlineAt,
+  mode = 'deadline',
+  label,
+  onClick,
+}: MissionTimerProps) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -47,6 +57,12 @@ export function MissionTimer({ deadlineAt, label, onClick }: MissionTimerProps) 
 
   const isClickable = isExpired && onClick !== undefined
 
+  // В режиме 'cancel' — отдельный текст: после истечения окна отказ
+  // уже не возвращает плату.
+  const expiredLabel =
+    mode === 'cancel' ? 'ВРЕМЯ НА ОТКАЗ ИСТЕКЛО' : 'ВРЕМЯ ВЫШЛО'
+  const actionLabel = mode === 'cancel' ? 'отказаться' : 'убрать'
+
   return (
     <div
       className={`${className}${isClickable ? ' mission-timer-clickable' : ''}`}
@@ -56,9 +72,9 @@ export function MissionTimer({ deadlineAt, label, onClick }: MissionTimerProps) 
     >
       <span className="mission-timer-icon">⏱</span>
       <span className="mission-timer-value">
-        {isExpired ? 'ВРЕМЯ ВЫШЛО' : formatRemaining(remaining)}
+        {isExpired ? expiredLabel : formatRemaining(remaining)}
       </span>
-      {isClickable && <span className="mission-timer-action">убрать</span>}
+      {isClickable && <span className="mission-timer-action">{actionLabel}</span>}
       {label && <span className="mission-timer-label">{label}</span>}
     </div>
   )
