@@ -54,6 +54,7 @@ from app.teams_service import (
 from app.team_missions_service import (
     activate_session_entrypoint,
     create_team_session_entrypoint,
+    join_team_session,
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
     submit_answer_entrypoint,
@@ -1525,6 +1526,22 @@ def create_team_session_route(
 ):
     try:
         return create_team_session_entrypoint(player_id, payload.mission_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/team-missions/sessions/{session_id}/join")
+def join_team_session_route(
+    request: Request,
+    session_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return join_team_session(player_id, session_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

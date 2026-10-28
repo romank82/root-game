@@ -17,6 +17,7 @@ from app.mission_engine import MissionEngineError
 from app.team_missions_service import (
     activate_session_entrypoint,
     create_team_session_entrypoint,
+    join_team_session,
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
     submit_answer_entrypoint,
@@ -318,17 +319,18 @@ class TeamMissionsServiceTests(unittest.TestCase):
         leader_id: str,
         member_id: str,
     ) -> tuple[str, str, str]:
-        """Команда (лидер+участник) + командная миссия с уникальным ключом.
+        """Сессия двух игроков (создатель + присоединившийся) с командной
+        миссией и уникальным ключом.
 
         Возвращает (mission_id, session_id, item_id). Сессия создаётся через
-        7.1.b — оба игрока в ней status='joined', конфиг валиден.
+        7.1.b, участник входит через join_team_session — оба status='joined'.
         """
-        self._make_team(leader_id, [member_id])
         config = valid_team_config()
         item_id = f"item-{uuid.uuid4().hex}"
         config["economy"]["requiredItems"] = [{"itemId": item_id, "quantity": 1}]
         mission_id = self._make_team_mission(validation_config=config)
         session_id = create_team_session_entrypoint(leader_id, mission_id)["id"]
+        join_team_session(member_id, session_id)
         return mission_id, session_id, item_id
 
     def _seed_item(self, item_id: str) -> None:
@@ -420,15 +422,6 @@ class TeamMissionsServiceTests(unittest.TestCase):
                 )
             )
             member.status = status
-
-    def _set_team_member_status(self, player_id: str, status: str) -> None:
-        from app.models import TeamMember
-
-        with self.SessionLocal.begin() as session:
-            team_member = session.scalar(
-                select(TeamMember).where(TeamMember.player_id == player_id)
-            )
-            team_member.status = status
 
     def _root_balance(self, player_id: str) -> int:
         from app.models import Wallet
@@ -541,13 +534,69 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self.assertEqual(created, sorted(created, reverse=True))
 
 
-    def test_create_session_by_leader_succeeds(self) -> None:
-        leader = self._make_player()
-        member = self._make_player()
-        self._make_team(leader, [member])
+    def test_create_session_by_any_player_succeeds(self) -> None:
+        player_id = self._make_player()
         mission_id = self._make_team_mission()
 
-        result = create_team_session_entrypoint(leader, mission_id)
+        result = create_team_session_entrypoint(player_id, mission_id)
+
+        self.assertEqual(result["status"], "collecting")
+        self.assertEqual(result["mission_id"], mission_id)
+        # Сессия стартует с одним участником — создателем.
+        self.assertEqual(result["memberCount"], 1)
+        self.assertEqual(result["myStatus"], "joined")
+
+        from app.geo_team_runtime_models import TeamSessionMember
+
+        with self.SessionLocal.begin() as session:
+            rows = session.scalars(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == result["id"],
+                )
+            ).all()
+        self.assertEqual([row.player_id for row in rows], [player_id])
+
+    def test_create_session_unknown_mission_returns_404(self) -> None:
+        player_id = self._make_player()
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(player_id, f"mission-{uuid.uuid4().hex}")
+
+        self.assertEqual(captured.exception.status_code, 404)
+
+    def test_create_session_wrong_mission_type_returns_409(self) -> None:
+        player_id = self._make_player()
+        mission_id = self._make_team_mission(mission_type="solo")
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(player_id, mission_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Эта миссия не командная.")
+
+    def test_create_session_second_active_blocked_returns_409(self) -> None:
+        player_id = self._make_player()
+        mission_id = self._make_team_mission()
+        create_team_session_entrypoint(player_id, mission_id)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            create_team_session_entrypoint(player_id, mission_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "У вас уже есть активная командная сессия.",
+        )
+
+    # ---- 7.1.b-2: join_team_session -------------------------------------
+
+    def test_join_session_succeeds(self) -> None:
+        creator = self._make_player()
+        member = self._make_player()
+        mission_id = self._make_team_mission()
+        session_id = create_team_session_entrypoint(creator, mission_id)["id"]
+
+        result = join_team_session(member, session_id)
 
         self.assertEqual(result["status"], "collecting")
         self.assertEqual(result["mission_id"], mission_id)
@@ -559,101 +608,75 @@ class TeamMissionsServiceTests(unittest.TestCase):
         with self.SessionLocal.begin() as session:
             rows = session.scalars(
                 select(TeamSessionMember).where(
-                    TeamSessionMember.team_session_id == result["id"],
+                    TeamSessionMember.team_session_id == session_id,
                 )
             ).all()
-        self.assertEqual(len(rows), 2)
-        self.assertEqual({row.player_id for row in rows}, {leader, member})
+        self.assertEqual({row.player_id for row in rows}, {creator, member})
 
-    def test_create_session_requires_leader(self) -> None:
-        leader = self._make_player()
-        member = self._make_player()
-        self._make_team(leader, [member])
-        mission_id = self._make_team_mission()
-
-        with self.assertRaises(MissionEngineError) as captured:
-            create_team_session_entrypoint(member, mission_id)
-
-        self.assertEqual(captured.exception.status_code, 403)
-        self.assertEqual(
-            captured.exception.detail,
-            "Создать командную сессию может только лидер.",
-        )
-
-    def test_create_session_requires_team(self) -> None:
+    def test_join_session_unknown_session_returns_404(self) -> None:
         player_id = self._make_player()
-        mission_id = self._make_team_mission()
 
         with self.assertRaises(MissionEngineError) as captured:
-            create_team_session_entrypoint(player_id, mission_id)
-
-        self.assertEqual(captured.exception.status_code, 409)
-        self.assertEqual(captured.exception.detail, "Вы не состоите в команде.")
-
-    def test_create_session_unknown_mission_returns_404(self) -> None:
-        player_id = self._make_player()
-        self._make_team(player_id)
-
-        with self.assertRaises(MissionEngineError) as captured:
-            create_team_session_entrypoint(player_id, f"mission-{uuid.uuid4().hex}")
+            join_team_session(player_id, f"session-{uuid.uuid4().hex}")
 
         self.assertEqual(captured.exception.status_code, 404)
+        self.assertEqual(captured.exception.detail, "Командная сессия не найдена.")
 
-    def test_create_session_wrong_mission_type_returns_409(self) -> None:
-        player_id = self._make_player()
-        self._make_team(player_id)
-        mission_id = self._make_team_mission(mission_type="solo")
+    def test_join_session_not_collecting_returns_409(self) -> None:
+        owner = self._make_player()
+        joiner = self._make_player()
+        session_id = self._make_session(owner, status="active")
 
         with self.assertRaises(MissionEngineError) as captured:
-            create_team_session_entrypoint(player_id, mission_id)
+            join_team_session(joiner, session_id)
 
         self.assertEqual(captured.exception.status_code, 409)
-        self.assertEqual(captured.exception.detail, "Эта миссия не командная.")
+        self.assertEqual(captured.exception.detail, "Сессия уже не в сборе.")
 
-    def test_create_session_second_active_blocked_returns_409(self) -> None:
-        leader = self._make_player()
-        member = self._make_player()
-        self._make_team(leader, [member])
+    def test_join_session_already_member_returns_409(self) -> None:
+        creator = self._make_player()
         mission_id = self._make_team_mission()
-        create_team_session_entrypoint(leader, mission_id)
+        session_id = create_team_session_entrypoint(creator, mission_id)["id"]
 
         with self.assertRaises(MissionEngineError) as captured:
-            create_team_session_entrypoint(leader, mission_id)
+            join_team_session(creator, session_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(captured.exception.detail, "Вы уже участник этой сессии.")
+
+    def test_join_session_other_active_session_returns_409(self) -> None:
+        creator_a = self._make_player()
+        creator_b = self._make_player()
+        joiner = self._make_player()
+        session_a = create_team_session_entrypoint(
+            creator_a, self._make_team_mission()
+        )["id"]
+        session_b = create_team_session_entrypoint(
+            creator_b, self._make_team_mission()
+        )["id"]
+        join_team_session(joiner, session_a)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            join_team_session(joiner, session_b)
 
         self.assertEqual(captured.exception.status_code, 409)
         self.assertEqual(
             captured.exception.detail,
-            "У команды уже есть активная командная миссия.",
+            "У вас уже есть активная командная сессия.",
         )
 
-    def test_create_session_below_min_members_returns_409(self) -> None:
-        leader = self._make_player()
+    def test_join_session_full_returns_409(self) -> None:
+        creator = self._make_player()
         member = self._make_player()
-        self._make_team(leader, [member])
+        late = self._make_player()
         config = valid_team_config()
-        config["team"]["minMembers"] = 3  # активных всего 2
+        config["team"]["maxMembers"] = 2
         mission_id = self._make_team_mission(validation_config=config)
+        session_id = create_team_session_entrypoint(creator, mission_id)["id"]
+        join_team_session(member, session_id)
 
         with self.assertRaises(MissionEngineError) as captured:
-            create_team_session_entrypoint(leader, mission_id)
-
-        self.assertEqual(captured.exception.status_code, 409)
-        self.assertEqual(
-            captured.exception.detail,
-            "Недостаточно участников для этой миссии.",
-        )
-
-    def test_create_session_above_max_members_returns_409(self) -> None:
-        leader = self._make_player()
-        member_a = self._make_player()
-        member_b = self._make_player()
-        self._make_team(leader, [member_a, member_b])
-        config = valid_team_config()
-        config["team"]["maxMembers"] = 2  # активных 3
-        mission_id = self._make_team_mission(validation_config=config)
-
-        with self.assertRaises(MissionEngineError) as captured:
-            create_team_session_entrypoint(leader, mission_id)
+            join_team_session(late, session_id)
 
         self.assertEqual(captured.exception.status_code, 409)
         self.assertEqual(
@@ -953,26 +976,29 @@ class TeamMissionsServiceTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "ready_to_start")
 
-    def test_ready_after_leaving_team_returns_409(self) -> None:
+    def test_ready_after_leaving_session_returns_409(self) -> None:
         leader = self._make_player()
         member = self._make_player()
-        _, session_id, _ = self._make_ready_fixture(leader, member)
-        self._set_team_member_status(leader, "left")
+        _, session_id, item_id = self._make_ready_fixture(leader, member)
+        self._seed_item(item_id)
+        self._seed_root_wallet(leader, 100)
+        self._seed_key(leader, item_id, 1)
+        self._set_member_status(session_id, leader, "left")
 
         with self.assertRaises(MissionEngineError) as captured:
             mark_ready_entrypoint(leader, session_id)
 
         self.assertEqual(captured.exception.status_code, 409)
-        self.assertEqual(captured.exception.detail, "Вы больше не в команде.")
+        self.assertEqual(captured.exception.detail, "Вы вышли из сессии.")
 
 
     # ---- 7.1.e: activate ------------------------------------------------
-    def test_activate_by_leader_succeeds(self) -> None:
-        leader = self._make_player()
+    def test_activate_by_creator_succeeds(self) -> None:
+        creator = self._make_player()
         member = self._make_player()
-        session_id, _ = self._make_activation_fixture(leader, member)
+        session_id, _ = self._make_activation_fixture(creator, member)
 
-        result = activate_session_entrypoint(leader, session_id)
+        result = activate_session_entrypoint(creator, session_id)
 
         self.assertEqual(result["status"], "active")
         self.assertIsNotNone(result["started_at"])
@@ -984,18 +1010,15 @@ class TeamMissionsServiceTests(unittest.TestCase):
             self.assertEqual(team_session.status, "active")
             self.assertIsNotNone(team_session.started_at)
 
-    def test_activate_by_non_leader_returns_403(self) -> None:
-        leader = self._make_player()
+    def test_activate_by_member_succeeds(self) -> None:
+        creator = self._make_player()
         member = self._make_player()
-        session_id, _ = self._make_activation_fixture(leader, member)
+        session_id, _ = self._make_activation_fixture(creator, member)
 
-        with self.assertRaises(MissionEngineError) as captured:
-            activate_session_entrypoint(member, session_id)
+        # Лидера больше нет: сессию может активировать любой участник.
+        result = activate_session_entrypoint(member, session_id)
 
-        self.assertEqual(captured.exception.status_code, 403)
-        self.assertEqual(
-            captured.exception.detail, "Активировать сессию может только лидер."
-        )
+        self.assertEqual(result["status"], "active")
 
     def test_activate_not_ready_to_start_returns_409(self) -> None:
         leader = self._make_player()
@@ -1346,6 +1369,7 @@ class OpenAPIContractTests(unittest.TestCase):
         for expected in (
             "/api/v1/engine/team-missions/sessions",
             "/api/v1/engine/team-missions/sessions/me",
+            "/api/v1/engine/team-missions/sessions/{session_id}/join",
             "/api/v1/engine/team-missions/sessions/{session_id}/ready",
             "/api/v1/engine/team-missions/sessions/{session_id}/location",
             "/api/v1/engine/team-missions/sessions/{session_id}/activate",

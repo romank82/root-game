@@ -2,13 +2,17 @@
 
 7.1.a — list_my_team_sessions_entrypoint: чтение активных командных сессий
         игрока (только SELECT, сортировка createdAt DESC);
-7.1.b — create_team_session_entrypoint: создание командной сессии лидером
-        активной команды. Все переменные игры (minMembers/maxMembers и др.)
-        берутся из validation_config миссии, не из кода.
+7.1.b — create_team_session_entrypoint: создание временной командной сессии
+        любым игроком (без постоянной Team и без лидера). Все переменные
+        игры (minMembers/maxMembers и др.) берутся из validation_config.
+7.1.b-2 — join_team_session: присоединение игрока к сессии в состоянии
+        сбора (создание MissionRun + TeamSessionMember, лимит состава из
+        effective_config_snapshot).
 7.1.c — mark_ready_entrypoint: подтверждение готовности участника со
         списанием entryFee и расходуемых ключей (ядро _apply_entry_debit,
-        правила из validation_config.economy) и автопереход сессии
-        collecting → ready_to_start, когда готовы все активные участники.
+        правила из validation_config.economy); когда готовы все активные
+        участники — сессия переходит в ready_to_start, а при свежих
+        гео-proof у всех — авто-старт в active (без лидера).
 
 Модуль повторяет паттерн teams_service.py: чистые функции без FastAPI,
 короткие транзакции через SessionLocal(), entrypoint-обёртки для HTTP-слоя,
@@ -162,18 +166,20 @@ def _create_team_session(
     player_id: str,
     mission_id: str,
 ) -> dict:
-    """Создать командную сессию. Только лидер активной команды.
+    """Создать временную командную сессию. Может любой игрок (без Team).
 
-    Все правила и количества берутся из validation_config миссии (код не
-    хардкодит экономику). 7.1.b не списывает entryFee/ключи (7.1.c), не
-    проверяет гео (7.1.d) и не переводит сессию из 'collecting'.
+    Сессия стартует с одним участником — создателем (status='joined');
+    состав расширяется join-session эндпоинтом (следующий шаг). Все правила
+    и количества берутся из validation_config миссии (код не хардкодит
+    экономику). 7.1.b не списывает entryFee/ключи (7.1.c), не проверяет
+    гео (7.1.d) и не переводит сессию из 'collecting'.
     """
     from app.geo_team_contract import (
         GeoTeamConfigurationError,
         validate_team_mission_validation_config,
     )
     from app.geo_team_runtime_models import MissionRun, TeamSession, TeamSessionMember
-    from app.models import GamePlayer, Mission, Team, TeamMember
+    from app.models import GamePlayer, Mission
 
     # 1. Player существует и активен (паттерн _ensure_player из teams_service).
     player = session.get(GamePlayer, player_id)
@@ -195,56 +201,20 @@ def _create_team_session(
     except GeoTeamConfigurationError:
         raise _mission_error(409, "Конфигурация командной миссии невалидна.")
 
-    # 4. Активная команда игрока (Team + TeamMember.status == 'active').
-    team_row = session.execute(
-        select(Team, TeamMember)
-        .join(TeamMember, TeamMember.team_id == Team.id)
-        .where(
-            TeamMember.player_id == player_id,
-            TeamMember.status == MEMBER_STATUS_ACTIVE,
-            Team.status == TEAM_STATUS_ACTIVE,
-        )
-    ).first()
-    if team_row is None:
-        raise _mission_error(409, "Вы не состоите в команде.")
-    team = team_row[0]
-
-    # 5. Игрок — лидер команды.
-    if team.leader_id != player_id:
-        raise _mission_error(403, "Создать командную сессию может только лидер.")
-
-    # Активные участники команды (состав для шагов 6-7 и создания members).
-    active_members = session.scalars(
-        select(TeamMember).where(
-            TeamMember.team_id == team.id,
-            TeamMember.status == MEMBER_STATUS_ACTIVE,
-        )
-    ).all()
-
-    # 6. У команды нет активной TeamSession. У TeamSession нет team_id —
-    # состав сессии определяется через TeamSessionMember.
+    # 4. Сессия — временное объединение игроков без привязки к постоянной
+    # Team (в TeamSession нет team_id): создатель не обязан быть лидером
+    # или состоять в команде. Ограничение — одна активная сессия на игрока.
     active_session_id = session.scalar(
         select(TeamSession.id)
         .join(TeamSessionMember, TeamSessionMember.team_session_id == TeamSession.id)
         .where(
-            TeamSessionMember.player_id.in_(
-                [member.player_id for member in active_members]
-            ),
+            TeamSessionMember.player_id == player_id,
             TeamSession.status.in_(ACTIVE_SESSION_STATUSES),
         )
         .limit(1)
     )
     if active_session_id is not None:
-        raise _mission_error(409, "У команды уже есть активная командная миссия.")
-
-    # 7. Размер команды — строго из конфига миссии (не из кода).
-    min_members = config["team"]["minMembers"]
-    max_members = config["team"]["maxMembers"]
-    active_count = len(active_members)
-    if active_count < min_members:
-        raise _mission_error(409, "Недостаточно участников для этой миссии.")
-    if active_count > max_members:
-        raise _mission_error(409, "Слишком много участников для этой миссии.")
+        raise _mission_error(409, "У вас уже есть активная командная сессия.")
 
 
     # Создание (одна транзакция): TeamSession + per-player MissionRun +
@@ -261,30 +231,63 @@ def _create_team_session(
     session.add(team_session)
     session.flush()
 
-    for member in active_members:
-        mission_run = MissionRun(
-            id=_new_id("mission-run"),
-            player_id=member.player_id,
-            mission_id=mission.id,
+    mission_run = MissionRun(
+        id=_new_id("mission-run"),
+        player_id=player_id,
+        mission_id=mission.id,
+        team_session_id=team_session.id,
+        status=MISSION_RUN_STATUS_ACTIVE,
+        effective_config_snapshot=deepcopy(config),
+    )
+    session.add(mission_run)
+    session.flush()
+    session.add(
+        TeamSessionMember(
+            id=_new_id("tsm"),
             team_session_id=team_session.id,
-            status=MISSION_RUN_STATUS_ACTIVE,
-            effective_config_snapshot=deepcopy(config),
+            player_id=player_id,
+            mission_run_id=mission_run.id,
+            status="joined",
+            ready_at=None,
         )
-        session.add(mission_run)
-        session.flush()
-        session.add(
-            TeamSessionMember(
-                id=_new_id("tsm"),
-                team_session_id=team_session.id,
-                player_id=member.player_id,
-                mission_run_id=mission_run.id,
-                status="joined",
-                ready_at=None,
-            )
-        )
+    )
 
     session.flush()
     return _serialize_team_session(session, team_session, player_id)
+
+
+def _all_ready_members_have_fresh_geo_proof(
+    session: Session,
+    members,
+    config: dict,
+) -> bool:
+    """Свежий verified LocationProof у всех переданных участников (зона миссии).
+
+    Единая точка проверки гео-присутствия для авто-старта (_mark_ready) и
+    fallback-активации (_activate_session). Только SELECT, без записи.
+    proofFreshnessSeconds уже «зашит» в expires_at proof при его создании.
+    """
+    from app.geo_team_runtime_models import LocationProof
+
+    zone_id = config["geo"]["zoneId"]
+    now = _utcnow()
+
+    for member_row in members:
+        latest_proof = session.scalar(
+            select(LocationProof)
+            .where(
+                LocationProof.player_id == member_row.player_id,
+                LocationProof.status == LOCATION_PROOF_STATUS_VERIFIED,
+                LocationProof.zone_id == zone_id,
+                LocationProof.expires_at > now,
+            )
+            .order_by(LocationProof.issued_at.desc())
+            .limit(1)
+        )
+        if latest_proof is None:
+            return False
+
+    return True
 
 
 def _mark_ready(
@@ -299,14 +302,15 @@ def _mark_ready(
     (policy=None, команда читает validation_config): идемпотентно по
     reference_id=team_session.id и atomic в одной транзакции со сменой
     статусов ниже. Когда все активные участники ('joined'/'ready') стали
-    'ready' — сессия переходит collecting → ready_to_start.
+    'ready' — сессия переходит collecting → ready_to_start, а при свежих
+    гео-proof у всех — авто-старт в active (без лидера).
     """
     from app.geo_team_contract import (
         GeoTeamConfigurationError,
         validate_team_mission_validation_config,
     )
     from app.geo_team_runtime_models import TeamSession, TeamSessionMember
-    from app.models import GamePlayer, Mission, TeamMember
+    from app.models import GamePlayer, Mission
 
     # 1. Player существует и активен (паттерн _ensure_player из teams_service).
     player = session.get(GamePlayer, player_id)
@@ -340,28 +344,18 @@ def _mark_ready(
             raise _mission_error(409, "Вы вышли из сессии.")
         raise _mission_error(409, "Членство в сессии неактивно.")
 
-    # 5. Игрок всё ещё активный член команды.
-    team_member = session.scalar(
-        select(TeamMember).where(
-            TeamMember.player_id == player_id,
-            TeamMember.status == MEMBER_STATUS_ACTIVE,
-        )
-    )
-    if team_member is None:
-        raise _mission_error(409, "Вы больше не в команде.")
-
-    # 6. Миссия существует и опубликована.
+    # 5. Миссия существует и опубликована.
     mission = session.get(Mission, team_session.mission_id)
     if mission is None or mission.status != "published":
         raise _mission_error(409, "Миссия недоступна.")
 
-    # 7. Валидный validation_config (правила экономики берутся из него).
+    # 6. Валидный validation_config (правила экономики берутся из него).
     try:
         config = validate_team_mission_validation_config(mission.validation_config)
     except GeoTeamConfigurationError:
         raise _mission_error(409, "Конфигурация командной миссии невалидна.")
 
-    # 8. Списание entryFeeRootAtomic и ключей — в той же транзакции, что и
+    # 7. Списание entryFeeRootAtomic и ключей — в той же транзакции, что и
     #    изменения статусов ниже (SessionLocal.begin() коммитит в конце).
     from app.mission_engine import _apply_entry_debit
 
@@ -375,12 +369,13 @@ def _mark_ready(
         mission_run_id=member.mission_run_id,
     )
 
-    # 9. Участник отметился готовым.
+    # 8. Участник отметился готовым.
     member.status = "ready"
     member.ready_at = datetime.now(timezone.utc)
 
-    # 10. Все активные участники в 'ready' → сессия готова к старту.
-    #     Участники статусов left/removed/settled не учитываются.
+    # 9. Все активные участники в 'ready' → сессия готова к старту, а при
+    #    свежих гео-proof у всех — авто-старт в active (без лидера).
+    #    Участники статусов left/removed/settled не учитываются.
     session.flush()  # зафиксировать 'ready' текущего участника до выборки
     active_members = session.scalars(
         select(TeamSessionMember).where(
@@ -392,6 +387,14 @@ def _mark_ready(
         member_row.status == "ready" for member_row in active_members
     ):
         team_session.status = "ready_to_start"
+
+        if _all_ready_members_have_fresh_geo_proof(
+            session,
+            active_members,
+            config,
+        ):
+            team_session.status = "active"
+            team_session.started_at = _utcnow()
 
     return _serialize_team_session(session, team_session, player_id)
 
@@ -410,6 +413,105 @@ def mark_ready_entrypoint(player_id: str, session_id: str) -> dict:
 
     with SessionLocal.begin() as session:
         return _mark_ready(session, player_id, session_id)
+
+
+def _join_team_session(
+    session: Session,
+    player_id: str,
+    session_id: str,
+) -> dict:
+    """Присоединить игрока к временной командной сессии (status='collecting')."""
+    from app.geo_team_runtime_models import (
+        MissionRun,
+        TeamSession,
+        TeamSessionMember,
+    )
+    from app.models import GamePlayer
+
+    # 1. Player существует и активен (паттерн _ensure_player).
+    player = session.get(GamePlayer, player_id)
+    if player is None:
+        raise _mission_error(404, "Игрок не найден.")
+    if player.status != "active":
+        raise _mission_error(403, "Игровой профиль неактивен.")
+
+    # 2. Сессия существует и в состоянии сбора (присоединиться позже нельзя).
+    team_session = session.get(TeamSession, session_id)
+    if team_session is None:
+        raise _mission_error(404, "Командная сессия не найдена.")
+    if team_session.status != "collecting":
+        raise _mission_error(409, "Сессия уже не в сборе.")
+
+    # 3. Игрок ещё не участник ЭТОЙ сессии.
+    existing = session.scalar(
+        select(TeamSessionMember).where(
+            TeamSessionMember.team_session_id == team_session.id,
+            TeamSessionMember.player_id == player_id,
+        )
+    )
+    if existing is not None:
+        raise _mission_error(409, "Вы уже участник этой сессии.")
+
+    # 4. Игрок не задействован в другой активной командной сессии.
+    active_session_id = session.scalar(
+        select(TeamSession.id)
+        .join(TeamSessionMember, TeamSessionMember.team_session_id == TeamSession.id)
+        .where(
+            TeamSessionMember.player_id == player_id,
+            TeamSession.status.in_(ACTIVE_SESSION_STATUSES),
+        )
+        .limit(1)
+    )
+    if active_session_id is not None:
+        raise _mission_error(409, "У вас уже есть активная командная сессия.")
+
+    # 5. Лимит состава — из effective_config_snapshot сессии (не из кода).
+    config = team_session.effective_config_snapshot or {}
+    max_members = (config.get("team") or {}).get("maxMembers")
+    if max_members is not None:
+        active_members = session.scalars(
+            select(TeamSessionMember).where(
+                TeamSessionMember.team_session_id == team_session.id,
+                TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
+            )
+        ).all()
+        if len(active_members) >= max_members:
+            raise _mission_error(409, "Слишком много участников для этой миссии.")
+
+    # 6. Создание (одна транзакция): MissionRun + TeamSessionMember.
+    #    team_session_members.mission_run_id в БД NOT NULL — MissionRun
+    #    создаётся вместе с членством.
+    mission_run = MissionRun(
+        id=_new_id("mission-run"),
+        player_id=player_id,
+        mission_id=team_session.mission_id,
+        team_session_id=team_session.id,
+        status=MISSION_RUN_STATUS_ACTIVE,
+        effective_config_snapshot=deepcopy(config),
+    )
+    session.add(mission_run)
+    session.flush()
+    session.add(
+        TeamSessionMember(
+            id=_new_id("tsm"),
+            team_session_id=team_session.id,
+            player_id=player_id,
+            mission_run_id=mission_run.id,
+            status="joined",
+            ready_at=None,
+        )
+    )
+    session.flush()
+
+    return _serialize_team_session(session, team_session, player_id)
+
+
+def join_team_session(player_id: str, session_id: str) -> dict:
+    """Точка вызова из HTTP-слоя: присоединиться к сессии (одна транзакция)."""
+    from app.db import SessionLocal
+
+    with SessionLocal.begin() as session:
+        return _join_team_session(session, player_id, session_id)
 
 
 def _is_inside_zone(
@@ -453,7 +555,7 @@ def _submit_location(
     )
     from app.geo_team_runtime_models import TeamSession, TeamSessionMember
 
-    from app.models import GamePlayer, GeoZone, Mission, TeamMember
+    from app.models import GamePlayer, GeoZone, Mission
 
 
 # 1. Player exists and active.
@@ -489,18 +591,7 @@ def _submit_location(
     if member.status not in ACTIVE_MEMBER_STATUSES:
         raise _mission_error(409, "Вы больше не в сессии.")
 
-    # 5. Player is still an active team member.
-    team_member = session.scalar(
-        select(TeamMember).where(
-            TeamMember.player_id == player_id,
-            TeamMember.status == MEMBER_STATUS_ACTIVE,
-        )
-    )
-    if team_member is None:
-        raise _mission_error(409, "Вы больше не в команде.")
-
-
-# 6. Mission exists anda published..
+    # 5. Mission exists and is published.
     mission = session.get(Mission, team_session.mission_id)
     if mission is None or mission.status != "published":
         raise _mission_error(409, "Миссия недоступна.")
@@ -583,20 +674,18 @@ def _activate_session(
     player_id: str,
     session_id: str,
 ) -> dict:
-    """Лидер активирует сессию ready_to_start → active.
+    """Активировать сессию ready_to_start → active (fallback-эндпоинт).
 
-    Проверяет: все участники 'ready', у каждого свежий verified proof.
+    Основной путь — авто-старт в _mark_ready. Здесь может активировать
+    любой активный участник сессии (лидера больше нет). Проверяет: все
+    участники 'ready', у каждого свежий verified proof.
     """
     from app.geo_team_contract import (
         GeoTeamConfigurationError,
         validate_team_mission_validation_config,
     )
-    from app.geo_team_runtime_models import (
-        LocationProof,
-        TeamSession,
-        TeamSessionMember,
-    )
-    from app.models import GamePlayer, Mission, Team, TeamMember
+    from app.geo_team_runtime_models import TeamSession, TeamSessionMember
+    from app.models import GamePlayer, Mission
 
     # 1. Player существует и активен (паттерн _ensure_player).
     player = session.get(GamePlayer, player_id)
@@ -623,64 +712,39 @@ def _activate_session(
     if member is None or member.status not in ACTIVE_MEMBER_STATUSES:
         raise _mission_error(404, "Вы не участник этой сессии.")
 
-    # 4. Игрок — лидер команды (Team.leader_id == player_id.
-    team_row = session.execute(
-        select(Team, TeamMember)
-        .join(TeamMember, TeamMember.team_id == Team.id)
-        .where(
-            TeamMember.player_id == player_id,
-            TeamMember.status == MEMBER_STATUS_ACTIVE,
-            Team.status == TEAM_STATUS_ACTIVE,
-        )
-    ).first()
-    if team_row is None or team_row[0].leader_id != player_id:
-        raise _mission_error(403, "Активировать сессию может только лидер.")
-
-    # 5. Миссия существует и опубликована.
+    # 4. Миссия существует и опубликована.
     mission = session.get(Mission, team_session.mission_id)
 
     if mission is None or mission.status != "published":
         raise _mission_error(409, "Миссия недоступна.")
 
-    # 6. Валидный validation_config (переиспользовать проверку из _create_team_session).
+    # 5. Валидный validation_config (переиспользовать проверку из _create_team_session).
     try:
         config = validate_team_mission_validation_config(mission.validation_config)
     except GeoTeamConfigurationError:
         raise _mission_error(409, "Конфигурация командной миссии невалидна.")
 
     # Проверка свежих verified proof'ов у всех 'ready'-участников.
-    zone_id = config["geo"]["zoneId"]
-    freshness = config["geo"]["proofFreshnessSeconds"]
-    now = _utcnow()
     ready_members = session.scalars(
         select(TeamSessionMember).where(
             TeamSessionMember.team_session_id == team_session.id,
             TeamSessionMember.status == "ready",
         )
     ).all()
-    for ready_member in ready_members:
-
-        latest_proof = session.scalar(
-            select(LocationProof)
-            .where(
-                LocationProof.player_id == ready_member.player_id,
-                LocationProof.status == LOCATION_PROOF_STATUS_VERIFIED,
-                LocationProof.zone_id == zone_id,
-                LocationProof.expires_at > now,
-            )
-            .order_by(LocationProof.issued_at.desc())
-            .limit(1)
+    if not _all_ready_members_have_fresh_geo_proof(
+        session,
+        ready_members,
+        config,
+    ):
+        raise _mission_error(
+            409,
+            "Не у всех участников свежая отметка присутствия.",
         )
-        if latest_proof is None:
-            raise _mission_error(
-                409,
-                "Не у всех участников свежая отметка присутствия.",
-            )
 
     # Активация сессии.
 
     team_session.status = "active"
-    team_session.started_at = now
+    team_session.started_at = _utcnow()
     session.flush()
 
     return _serialize_team_session(session, team_session, player_id)
@@ -688,7 +752,7 @@ def _activate_session(
 
 
 def activate_session_entrypoint(player_id: str, session_id: str) -> dict:
-    """Точка вызова из HTTP-слоя: активировать сессию лидером (одна транзакция)."""
+    """Точка вызова из HTTP-слоя: активировать сессию (одна транзакция)."""
     from app.db import SessionLocal
 
     with SessionLocal.begin() as session:
