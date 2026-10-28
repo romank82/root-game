@@ -535,6 +535,14 @@ type MissionsSectionProps = {
   minigameProfiles: AdminMinigameProfile[]
   // Внешний выбор миссии (например, из дерева структуры в AdminTree).
   editingId?: string | null
+  // Режим создания миссии из дерева структуры: предвыбранная глава (chapterId).
+  // Если задан и editingId не передан — открываем форму новой миссии с
+  // предзаполненным chapterId.
+  initialChapterId?: string | null
+  // Режим создания миссии из дерева структуры на уровне сезона: предвыбранный
+  // сезон (seasonId). Миссия не привязана к сегменту; глава остаётся пустой —
+  // её выбирает администратор (список глав фильтруется по выбранному сезону).
+  initialSeasonId?: string | null
   // Очистка черновика (draft_mission_<id>) после успешного сохранения
   // или публикации миссии. Дублирует внутреннюю очистку (идемпотентно).
   onDraftClear?: (id: string) => void
@@ -551,6 +559,8 @@ export function MissionsSection({
   arObjects,
   minigameProfiles,
   editingId,
+  initialChapterId,
+  initialSeasonId,
   onDraftClear,
 }: MissionsSectionProps) {
   const [loadingMissions, setLoadingMissions] = useState(false)
@@ -560,6 +570,9 @@ export function MissionsSection({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [form, setForm] = useState<MissionForm>(emptyForm)
   const [isDirty, setIsDirty] = useState(false)
+  // Режим создания из дерева на уровне сезона: фильтрует список глав
+  // в форме (глава выбирается вручную, к сегменту миссия не привязана).
+  const [seasonFilter, setSeasonFilter] = useState<string | null>(null)
   // Показывает, что черновик уже применён для текущей миссии. Сбрасывается
   // при выборе другой миссии (selectMission/startNewMission), чтобы для новой
   // миссии черновик мог восстановиться заново.
@@ -822,6 +835,38 @@ export function MissionsSection({
     if (mission) selectMission(mission)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, missions])
+
+  // Режим создания из дерева структуры: editingId не задан, а initialChapterId
+  // предвыбирает главу для новой миссии. Открываем форму с чистым полем
+  // mission_type=text_answer и chapterId = initialChapterId.
+  useEffect(() => {
+    if (editingId !== null && editingId !== undefined) return
+    if (initialChapterId === null || initialChapterId === undefined) return
+    setSelectedId(null)
+    setForm({ ...emptyForm(), chapterId: initialChapterId })
+    setIsDirty(false)
+    isDraftRestoredRef.current = false
+    setSeasonFilter(null)
+    onError('')
+    onNotice('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, initialChapterId])
+
+  // Режим создания миссии на уровне сезона: editingId не задан, а
+  // initialSeasonId предвыбирает сезон. Миссия не привязана к сегменту;
+  // глава остаётся пустой, но список глав в форме фильтруется по сезону.
+  useEffect(() => {
+    if (editingId !== null && editingId !== undefined) return
+    if (initialSeasonId === null || initialSeasonId === undefined) return
+    setSelectedId(null)
+    setForm(emptyForm())
+    setIsDirty(false)
+    isDraftRestoredRef.current = false
+    setSeasonFilter(initialSeasonId)
+    onError('')
+    onNotice('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId, initialSeasonId])
 
   function changeReward(
     index: number,
@@ -1155,12 +1200,21 @@ export function MissionsSection({
                 <option value="">— Выберите главу —</option>
                 {chapters
                   .filter((c) => c.status !== 'archived')
+                  .filter((c) =>
+                    seasonFilter === null ? true : c.seasonId === seasonFilter,
+                  )
                   .map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.title} ({c.slug})
                     </option>
                   ))}
               </select>
+              {seasonFilter !== null && (
+                <small className="admin-muted">
+                  Создание на уровне сезона: выбрана глава из этого сезона, к
+                  сегменту миссия не привязывается.
+                </small>
+              )}
             </label>
 
             <label>

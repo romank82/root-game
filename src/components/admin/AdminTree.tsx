@@ -26,6 +26,17 @@ import {
 type SelectedType = 'season' | 'chapter' | 'storyNode' | 'segment' | 'mission'
 type SelectedItem = { type: SelectedType; id: string }
 
+// Контекст создания сущности из дерева структуры: тип + родительский узел.
+// Родитель зависит от типа: глава -> season.id; сегмент/storyNode -> chapter.id;
+// миссия -> segment.id (сюжетная) либо chapter.id/season.id (командная и
+// индивидуальная, создаются на уровне главы/сезона без привязки к сегменту).
+// parentKind уточняет, из какого уровня создаётся миссия (для springboard).
+type CreateContext = {
+  type: SelectedType
+  parentId: string
+  parentKind?: 'season' | 'chapter' | 'segment'
+} | null
+
 const SELECTED_STORAGE_KEY = 'admin_tree_selected'
 const EXPANDED_STORAGE_KEY = 'admin_tree_expanded'
 
@@ -128,6 +139,9 @@ export function AdminTree({
     }
     return null
   })
+  // Режим создания сущности (кнопки «+» в узлах дерева). Когда задан,
+  // правая панель рендерит секцию создания вместо формы выбранного элемента.
+  const [createContext, setCreateContext] = useState<CreateContext>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -167,8 +181,20 @@ export function AdminTree({
 
   function selectItem(type: SelectedType, id: string) {
     const next: SelectedItem = { type, id }
+    // Клик по узлу закрывает режим создания: панель снова показывает форму
+    // выбранного элемента.
+    setCreateContext(null)
     setSelectedItem(next)
     saveDraft(SELECTED_STORAGE_KEY, next)
+  }
+
+  // Переход в режим создания сущности внутри выбранного родителя.
+  function startCreate(
+    type: SelectedType,
+    parentId: string,
+    parentKind?: 'season' | 'chapter' | 'segment',
+  ) {
+    setCreateContext({ type, parentId, parentKind })
   }
 
   // Обязательная очистка черновика формы миссии после успешного
@@ -240,10 +266,159 @@ export function AdminTree({
     mission: 'Миссия',
   }
 
+  // Правая панель. Режим создания (кнопки «+» в узлах дерева) имеет
+  // приоритет: показываем форму создания с предзаполненной привязкой
+  // к родителю, а поверх — кнопку «Отмена».
+  function renderCreatePanel() {
+    if (createContext === null) return null
+    const cancelButton = (
+      <button
+        type="button"
+        className="admin-secondary"
+        style={{ marginBottom: '0.75rem' }}
+        onClick={() => setCreateContext(null)}
+      >
+        ← Отмена
+      </button>
+    )
+
+    if (createContext.type === 'chapter') {
+      return (
+        <div>
+          {cancelButton}
+          <ChaptersSection
+            admin={admin}
+            canWrite={canWrite}
+            onError={onError}
+            onNotice={onNotice}
+            editingId={null}
+            initialSeasonId={createContext.parentId}
+          />
+        </div>
+      )
+    }
+    if (createContext.type === 'segment') {
+      return (
+        <div>
+          {cancelButton}
+          <SegmentsEditor
+            admin={admin}
+            canWrite={canWrite}
+            onError={onError}
+            onNotice={onNotice}
+            editingId={null}
+            initialChapterId={createContext.parentId}
+          />
+        </div>
+      )
+    }
+    if (createContext.type === 'storyNode') {
+      return (
+        <div>
+          {cancelButton}
+          <StoryNodesSection
+            admin={admin}
+            canWrite={canWrite}
+            onError={onError}
+            onNotice={onNotice}
+            editingId={null}
+            initialChapterId={createContext.parentId}
+          />
+        </div>
+      )
+    }
+    if (createContext.type === 'mission') {
+      // Миссия может создаваться на трёх уровнях дерева:
+      // - из сегмента (сюжетная): предзаполняем chapterId главы сегмента;
+      // - из главы (командная/индивидуальная): предзаполняем chapterId главы;
+      // - из сезона: предзаполняем seasonId, глава остаётся пустой — её
+      //   выбирает администратор в форме (model требует chapter_id).
+      if (createContext.parentKind === 'chapter') {
+        return (
+          <div>
+            {cancelButton}
+            <MissionsSection
+              admin={admin}
+              canWrite={canWrite}
+              onError={onError}
+              onNotice={onNotice}
+              keyItems={keyItems}
+              loadingKeyItems={loadingKeyItems}
+              geoZones={geoZones}
+              arObjects={arObjects}
+              minigameProfiles={minigameProfiles}
+              editingId={null}
+              initialChapterId={createContext.parentId}
+              onDraftClear={handleMissionDraftClear}
+            />
+          </div>
+        )
+      }
+      if (createContext.parentKind === 'season') {
+        return (
+          <div>
+            {cancelButton}
+            <MissionsSection
+              admin={admin}
+              canWrite={canWrite}
+              onError={onError}
+              onNotice={onNotice}
+              keyItems={keyItems}
+              loadingKeyItems={loadingKeyItems}
+              geoZones={geoZones}
+              arObjects={arObjects}
+              minigameProfiles={minigameProfiles}
+              editingId={null}
+              initialSeasonId={createContext.parentId}
+              onDraftClear={handleMissionDraftClear}
+            />
+          </div>
+        )
+      }
+      // default: создание из сегмента (сюжетная миссия).
+      const segment = segments.find((s) => s.id === createContext.parentId) ?? null
+      return (
+        <div>
+          {cancelButton}
+          <MissionsSection
+            admin={admin}
+            canWrite={canWrite}
+            onError={onError}
+            onNotice={onNotice}
+            keyItems={keyItems}
+            loadingKeyItems={loadingKeyItems}
+            geoZones={geoZones}
+            arObjects={arObjects}
+            minigameProfiles={minigameProfiles}
+            editingId={null}
+            initialChapterId={segment?.chapterId ?? null}
+            onDraftClear={handleMissionDraftClear}
+          />
+        </div>
+      )
+    }
+    // season: корневой уровень, просто открываем секцию сезонов.
+    return (
+      <div>
+        {cancelButton}
+        <SeasonsSection
+          admin={admin}
+          canWrite={canWrite}
+          onError={onError}
+          onNotice={onNotice}
+          editingId={null}
+        />
+      </div>
+    )
+  }
+
   // Правая панель. Существующие секции (SeasonsSection, ChaptersSection и т.д.)
   // пока не умеют принимать editingId/selectedId пропсом, поэтому здесь
   // заглушка-карточка. Настоящие формы подключим следующим шагом.
   function renderDetailPanel() {
+    if (createContext !== null) {
+      return renderCreatePanel()
+    }
     if (selectedItem === null) {
       return (
         <div>
@@ -356,30 +531,74 @@ export function AdminTree({
           )}
 
         <ul className="admin-mission-list">
+          {canWrite && (
+            <li>
+              <button
+                type="button"
+                className="admin-primary"
+                style={{ width: '100%' }}
+                onClick={() => startCreate('season', '')}
+              >
+                + Создать сезон
+              </button>
+            </li>
+          )}
           {bySort(seasons).map((season) => {
             const seasonKey = `season:${season.id}`
             const seasonOpen = expanded.has(seasonKey)
             const seasonChapters = chaptersOf(season)
             return (
               <li key={seasonKey}>
-                <button
-                  className={`admin-mission-row ${
-                    selectedItem?.type === 'season' &&
-                    selectedItem.id === season.id
-                      ? 'is-active'
-                      : ''
-                  }`}
-                  onClick={() => {
-                    selectItem('season', season.id)
-                    toggle(seasonKey)
-                  }}
-                >
-                  <span className={`admin-status admin-status-${season.status}`}>
-                    {season.status}
-                  </span>
-                  <strong>{seasonOpen ? '▾ ' : '▸ '}{season.title}</strong>
-                  <small>{season.slug} · sortOrder {season.sortOrder}</small>
-                </button>
+                <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'flex-start' }}>
+                  <button
+                    className={`admin-mission-row ${
+                      selectedItem?.type === 'season' &&
+                      selectedItem.id === season.id
+                        ? 'is-active'
+                        : ''
+                    }`}
+                    style={{ flex: 1, minWidth: 0 }}
+                    onClick={() => {
+                      selectItem('season', season.id)
+                      toggle(seasonKey)
+                    }}
+                  >
+                    <span className={`admin-status admin-status-${season.status}`}>
+                      {season.status}
+                    </span>
+                    <strong>{seasonOpen ? '▾ ' : '▸ '}{season.title}</strong>
+                    <small>{season.slug} · sortOrder {season.sortOrder}</small>
+                  </button>
+                  {canWrite && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.25rem',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="admin-secondary"
+                        title="Создать главу в сезоне"
+                        onClick={() => startCreate('chapter', season.id)}
+                      >
+                        + Глава
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-secondary"
+                        title="Создать миссию на уровне сезона (без сегмента, главу выбрать в форме)"
+                        onClick={() =>
+                          startCreate('mission', season.id, 'season')
+                        }
+                      >
+                        + Миссия
+                      </button>
+                    </div>
+                  )}
+                </div>
 
                 {seasonOpen && (
                   <ul className="admin-mission-list">
@@ -395,6 +614,7 @@ export function AdminTree({
                       const chapterSegments = segmentsOf(chapter)
                       return (
                         <li key={chapterKey}>
+                          <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'flex-start' }}>
                           <button
                             className={`admin-mission-row ${
                               selectedItem?.type === 'chapter' &&
@@ -402,6 +622,7 @@ export function AdminTree({
                                 ? 'is-active'
                                 : ''
                             }`}
+                            style={{ flex: 1, minWidth: 0 }}
                             onClick={() => {
                               selectItem('chapter', chapter.id)
                               toggle(chapterKey)
@@ -420,6 +641,48 @@ export function AdminTree({
                               {chapter.slug} · sortOrder {chapter.sortOrder}
                             </small>
                           </button>
+                          {canWrite && (
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.25rem',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="admin-secondary"
+                                title="Создать сегмент в главе"
+                                onClick={() =>
+                                  startCreate('segment', chapter.id)
+                                }
+                              >
+                                + Сегм
+                              </button>
+                              <button
+                                type="button"
+                                className="admin-secondary"
+                                title="Создать Story Node в главе"
+                                onClick={() =>
+                                  startCreate('storyNode', chapter.id)
+                                }
+                              >
+                                + Узел
+                              </button>
+                              <button
+                                type="button"
+                                className="admin-secondary"
+                                title="Создать миссию на уровне главы (без сегмента)"
+                                onClick={() =>
+                                  startCreate('mission', chapter.id, 'chapter')
+                                }
+                              >
+                                + Миссия
+                              </button>
+                            </div>
+                          )}
+                          </div>
 
                           {chapterOpen && (
                             <ul className="admin-mission-list">
@@ -477,6 +740,7 @@ export function AdminTree({
                                 const segmentMissions = linkedMissionsOf(segment)
                                 return (
                                   <li key={segmentKey}>
+                                    <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'flex-start' }}>
                                     <button
                                       className={`admin-mission-row ${
                                         selectedItem?.type === 'segment' &&
@@ -484,6 +748,7 @@ export function AdminTree({
                                           ? 'is-active'
                                           : ''
                                       }`}
+                                      style={{ flex: 1, minWidth: 0 }}
                                       onClick={() => {
                                         selectItem('segment', segment.id)
                                         toggle(segmentKey)
@@ -503,6 +768,20 @@ export function AdminTree({
                                         {segment.sortOrder}
                                       </small>
                                     </button>
+                                    {canWrite && (
+                                      <button
+                                        type="button"
+                                        className="admin-secondary"
+                                        style={{ flexShrink: 0 }}
+                                        title="Создать миссию в сегменте"
+                                        onClick={() =>
+                                          startCreate('mission', segment.id)
+                                        }
+                                      >
+                                        + Миссия
+                                      </button>
+                                    )}
+                                    </div>
 
                                     {segmentOpen && (
                                       <ul className="admin-mission-list">
