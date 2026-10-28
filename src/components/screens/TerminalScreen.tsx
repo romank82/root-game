@@ -140,14 +140,6 @@ export function TerminalScreen({
   }
 
   async function handleAccept(mission: EngineMission) {
-    // Командные миссии берутся через отдельный флоу: сбор команды + сессия
-    // (экран TeamSessionScreen). acceptEngineMission для них не вызывается.
-    if (mission.missionType === 'team') {
-      setSelectedMission(null)
-      onScreenChange('team-session')
-      return
-    }
-
     setAcceptError(null)
     setAcceptingId(mission.id)
     const result = await onAcceptMission(mission.id)
@@ -268,6 +260,15 @@ export function TerminalScreen({
             <p className="in-progress-hint">
               Миссия активна. Зона поиска уже на карте.
             </p>
+            {mission.missionType === 'team' && (
+              <p className="team-member-count">
+                {mission.sessionMemberCount ?? 0}/{mission.maxMembers ?? 0}
+                {' — '}
+                {((mission.sessionMemberCount ?? 0) < (mission.maxMembers ?? 0))
+                  ? 'Ждём игроков...'
+                  : 'Команда собрана!'}
+              </p>
+            )}
             <button onClick={() => onScreenChange('map')}>
               ОТКРЫТЬ КАРТУ
             </button>

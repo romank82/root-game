@@ -28,10 +28,6 @@ export function MissionModal({
 
   const requiredItems = mission.requiredItems ?? []
 
-  // Командные миссии берутся через отдельный флоу (сбор команды + сессия):
-  // кнопка ведёт на экран TeamSessionScreen, accept не вызывается.
-  const isTeamMission = mission.missionType === 'team'
-
   const rewardLabels = (mission.rewards ?? [])
     .map((reward) => {
       if (reward.type === 'currency' && typeof reward.amount === 'number') {
@@ -171,9 +167,7 @@ export function MissionModal({
           >
             {isAccepting
               ? 'ПОЛУЧЕНИЕ GPS…'
-              : isTeamMission
-                ? 'СОБРАТЬ КОМАНДУ'
-                : 'ВЗЯТЬ МИССИЮ'}
+              : 'ВЗЯТЬ МИССИЮ'}
           </button>
 
           <button

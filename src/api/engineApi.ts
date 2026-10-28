@@ -71,6 +71,13 @@ export type EngineMission = {
   // Sprint 8.x: публичные награды миссии из MissionReward (currency ROOT /
   // item / story_node) для блока «Возможные награды» в карточке.
   rewards?: EngineReward[]
+  // Командные миссии (7.1): X/Y-счётчик состава в карточке активной
+  // миссии. sessionMemberCount — активные участники командной сессии игрока
+  // на эту миссию; maxMembers — лимит состава (validationConfig.team.maxMembers
+  // на бэкенде). Для индивидуальных миссий — 0 / null; отсутствуют у старых
+  // ответов → опциональны.
+  sessionMemberCount?: number
+  maxMembers?: number
 }
 
 export type EngineAcceptMissionResponse = {

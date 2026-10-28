@@ -5,7 +5,6 @@ export type Screen =
   | 'inventory'
   | 'profile'
   | 'transfer'
-  | 'team'
   | 'team-session'
   | 'scanner'
   | 'shop'

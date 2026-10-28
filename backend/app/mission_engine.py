@@ -6,7 +6,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,8 @@ from app.models import (
     PlayerMission,
     Segment,
     StoryNode,
+    TeamSession,
+    TeamSessionMember,
     Wallet,
     WalletTransaction,
 )
@@ -68,6 +70,13 @@ ENTRY_REFUND_REFERENCE_TYPE = "mission_entry_refund"
 # ('reserved','released','consumed','credited') — для возврата ключей
 # используем 'credited' (модель/миграцию не меняем).
 ENTRY_ITEM_REFUND_EVENT_TYPE = "credited"
+
+# Статусы активных командных сессий и активных участников (этап 7.1) —
+# зеркала констант из team_missions_service (без кросс-импорта; тот же
+# паттерн, что там для teams_service). Используются для sessionMemberCount
+# в bootstrap.
+TEAM_SESSION_ACTIVE_STATUSES = frozenset({"collecting", "ready_to_start", "active"})
+TEAM_MEMBER_ACTIVE_STATUSES = frozenset({"joined", "ready"})
 
 # Sprint 8.17.14: алфавит cipher живёт в minigame_handlers.py (одна точка истины).
 # Оставлен re-export для обратной совместимости с текущими тестами/импортами.
@@ -509,6 +518,22 @@ def _collect_ar_object_types(
     return by_mission_id, by_segment_id
 
 
+def _team_max_members_from_config(mission: Mission) -> int | None:
+    """Лимит состава командной миссии из validation_config.team.maxMembers.
+
+    Для не-командных миссий и отсутствующего/некорректного конфига — None
+    (фронт трактует как отсутствие данных, Y=0). validation_config целиком
+    в bootstrap не попадает — наружу уходит только это число.
+    """
+    if mission.mission_type != "team":
+        return None
+    team = (mission.validation_config or {}).get("team") or {}
+    max_members = team.get("maxMembers")
+    if isinstance(max_members, bool) or not isinstance(max_members, int):
+        return None
+    return max_members
+
+
 def _build_bootstrap(session: Session, player_id: str) -> dict:
     """
     Возвращает только публичные данные для клиента.
@@ -635,6 +660,49 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
             ).all()
         }
 
+    # Командные миссии (7.1): счётчик участников активной командной сессии
+    # игрока на миссию (sessionMemberCount). Батчем, без N+1: сначала сессии
+    # игрока в активных статусах, затем количество активных участников по
+    # каждой. У индивидуальных миссий и без активной сессии — 0.
+    player_team_sessions = session.scalars(
+        select(TeamSession)
+        .join(TeamSessionMember, TeamSessionMember.team_session_id == TeamSession.id)
+        .where(
+            TeamSessionMember.player_id == player_id,
+            TeamSession.status.in_(TEAM_SESSION_ACTIVE_STATUSES),
+        )
+    ).all()
+
+    team_member_count_by_session: dict[str, int] = {}
+    if player_team_sessions:
+        player_team_session_ids = [
+            team_session_row.id for team_session_row in player_team_sessions
+        ]
+        count_rows = session.execute(
+            select(
+                TeamSessionMember.team_session_id,
+                func.count(TeamSessionMember.id),
+            )
+            .where(
+                TeamSessionMember.team_session_id.in_(player_team_session_ids),
+                TeamSessionMember.status.in_(TEAM_MEMBER_ACTIVE_STATUSES),
+            )
+            .group_by(TeamSessionMember.team_session_id)
+        ).all()
+        team_member_count_by_session = {
+            team_session_row_id: member_count
+            for team_session_row_id, member_count in count_rows
+        }
+
+    session_member_count_by_mission: dict[str, int] = {}
+    for player_team_session in player_team_sessions:
+        # setdefault: если у игрока вдруг несколько сессий на одну миссию —
+        # берём первую активную.
+        session_member_count_by_mission.setdefault(
+            player_team_session.mission_id,
+            team_member_count_by_session.get(player_team_session.id, 0),
+        )
+
     return {
         "player": {
             "id": player.id,
@@ -738,6 +806,17 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                     if progress[mission.id].available_again_at
                     else None
                 ),
+                # Командные миссии (7.1): X/Y-счётчик состава в карточке.
+                # sessionMemberCount — активные участники командной сессии
+                # игрока на эту миссию; maxMembers — лимит состава из
+                # validation_config.team.maxMembers. Для индивидуальных миссий
+                # — 0 и null (validation_config наружу не отдаётся).
+                "sessionMemberCount": (
+                    session_member_count_by_mission.get(mission.id, 0)
+                    if mission.mission_type == "team"
+                    else 0
+                ),
+                "maxMembers": _team_max_members_from_config(mission),
             }
             for mission in missions
         ],
@@ -1789,6 +1868,31 @@ def submit_mission(
     ) from last_error
 
 
+def _serialize_team_accept_response(
+    mission: Mission,
+    team_session: dict[str, Any],
+) -> dict[str, Any]:
+    """Ответ accept для командной миссии (7.1) в формате EngineAcceptMissionResponse.
+
+    Командный accept создаёт TeamSession (см. accept_mission), поэтому spawn
+    отсутствует осознанно: командный маршрут использует TeamSession +
+    location-proofs, а не spawn-точку. Игровой фронт при accept не читает
+    тело ответа — актуальное состояние приходит из bootstrap.
+    """
+    return {
+        "accepted": True,
+        "mission": {
+            "id": mission.id,
+            "slug": mission.slug,
+            "title": mission.title,
+            "missionType": mission.mission_type,
+        },
+        "spawn": None,
+        "status": team_session.get("status"),
+        "startedAt": team_session.get("started_at"),
+    }
+
+
 def accept_mission(
     player_id: str,
     mission_id: str,
@@ -1799,9 +1903,36 @@ def accept_mission(
     """
     Игрок берёт миссию: генерируется spawn-точка в радиусе от его GPS.
 
-    Идемпотентно: повторный вызов для in_progress миссии возвращает
-    уже существующий spawn без регенерации.
+    Командные миссии (7.1): accept создаёт командную сессию (TeamSession +
+    MissionRun + TeamSessionMember) через _create_team_session, как отдельный
+    team API, а не обычный solo MissionRun. Повторный командный accept → 409
+    «У вас уже есть активная командная сессия.»; повторный solo accept для
+    in_progress — возврат существующего spawn без регенерации.
     """
+    # Probe-чтение (тип миссии) держим в отдельной короткой сессии: авто-begin
+    # до `with session.begin():` в _accept_mission_once/_create_team_session
+    # ломается ошибкой «A transaction is already begun».
+    with SessionLocal() as probe_session:
+        mission = probe_session.get(Mission, mission_id)
+        is_team_mission = (
+            mission is not None
+            and mission.mission_type == "team"
+        )
+
+    if is_team_mission:
+        # Lazy импорт: team_missions_service лениво импортирует этот модуль
+        # внутри функций — top-level импорт сюда дал бы цикл (как player_events).
+        from app.team_missions_service import _create_team_session
+
+        with SessionLocal() as session:
+            with session.begin():
+                team_session = _create_team_session(
+                    session,
+                    player_id,
+                    mission_id,
+                )
+        return _serialize_team_accept_response(mission, team_session)
+
     with SessionLocal() as session:
         return _accept_mission_once(
             session,
