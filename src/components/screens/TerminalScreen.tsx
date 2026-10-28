@@ -4,6 +4,7 @@ import type {
   EngineMission,
   MissionSubmission,
 } from '../../api/engineApi'
+import { leaveTeamSession } from '../../api/engineApi'
 import type { ApiStatus, Screen } from '../../types/game'
 import { Sidebar } from '../Sidebar'
 import { CooldownCountdown } from '../CooldownCountdown'
@@ -20,6 +21,19 @@ import {
 // cancel_deadline_at = started_at + 180с. Бэкенд пока не отдаёт
 // cancelDeadlineAt в bootstrap — считаем на клиенте из startedAt.
 const CANCEL_REFUSE_WINDOW_MS = 3 * 60 * 1000
+
+// Парсинг timestamp как UTC-мгновения (поля bootstrap вида startedAt /
+// sessionCreatedAt). Бэкенд шлёт ISO с суффиксом "+00:00"/Z (ensure_utc),
+// но если строка придёт без таймзоны, JS Date.parse интерпретировал бы её
+// как ЛОКАЛЬНОЕ время, и дедлайн сместился бы в прошлое (таймер «истёк»).
+// Наивные строки трактуем как UTC (приписываем 'Z'), невалидные → null.
+function parseUtcTimestamp(value: string | null | undefined): number | null {
+  if (!value) return null
+  const hasTimezoneSuffix = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value)
+  const normalized = hasTimezoneSuffix ? value : `${value}Z`
+  const ms = Date.parse(normalized)
+  return Number.isFinite(ms) ? ms : null
+}
 
 interface TerminalScreenProps {
   echo: number
@@ -71,6 +85,11 @@ export function TerminalScreen({
 }: TerminalScreenProps) {
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
   const [acceptError, setAcceptError] = useState<string | null>(null)
+  // Командные сессии, из которых игрок вышел (для «исчезновения» карточки
+  // без полного bootstrap-refresh; следующий свежий bootstrap придёт из App).
+  const [leftTeamSessionIds, setLeftTeamSessionIds] = useState<string[]>([])
+  // Уведомление о результате отказа от командной сессии.
+  const [teamLeaveNote, setTeamLeaveNote] = useState<string | null>(null)
   const [selectedMission, setSelectedMission] =
     useState<EngineMission | null>(null)
   const [showArchive, setShowArchive] = useState(false)
@@ -152,6 +171,27 @@ export function TerminalScreen({
     onScreenChange('map')
   }
 
+  // Отказ от командной сессии: leave_team_session возвращает плату в окне
+  // 3 минут с момента создания (refunded), затем карточка сессии исчезает.
+  async function handleLeaveTeamMission(mission: EngineMission) {
+    try {
+      const result = await leaveTeamSession(mission.id)
+      if (result.left) {
+        setTeamLeaveNote(
+          result.refunded
+            ? 'Плата возвращена'
+            : 'Вы вышли из командной сессии',
+        )
+        // Оптимистично скрываем блок сессии (bootstrap обновится в App).
+        setLeftTeamSessionIds((ids) => [...ids, mission.id])
+      }
+    } catch (err) {
+      setTeamLeaveNote(
+        err instanceof Error ? err.message : 'Не удалось выйти из сессии.',
+      )
+    }
+  }
+
   function renderMissionCard(mission: EngineMission) {
     const isCompleted = mission.status === 'completed'
     const isExpired = mission.status === 'expired'
@@ -197,6 +237,16 @@ export function TerminalScreen({
           new Date(mission.startedAt).getTime() + CANCEL_REFUSE_WINDOW_MS,
         ).toISOString()
       : null
+
+    // Окно отказа для командной сессии: аналог solo-окна, но от времени
+    // создания сессии (createdAt + 3 мин); бэкенд отдаёт sessionCreatedAt.
+    // Парсим строго как UTC: без суффикса таймзоны JS принял бы строку за
+    // локальное время, и дедлайн «истёк» сразу после создания сессии.
+    const sessionCreatedUtcMs = parseUtcTimestamp(mission.sessionCreatedAt)
+    const teamCancelDeadlineAt =
+      sessionCreatedUtcMs !== null
+        ? new Date(sessionCreatedUtcMs + CANCEL_REFUSE_WINDOW_MS).toISOString()
+        : null
 
     return (
       <article className="puzzle" key={mission.id}>
@@ -306,6 +356,53 @@ export function TerminalScreen({
               </div>
             )}
           </div>
+        ) : mission.missionType === 'team' &&
+          mission.sessionStatus &&
+          !leftTeamSessionIds.includes(mission.id) ? (
+          <div className="accept-row">
+            <p className="team-member-count">
+              {mission.sessionMemberCount ?? 0}/{mission.maxMembers ?? 0}
+              {' — '}
+              {((mission.sessionMemberCount ?? 0) < (mission.maxMembers ?? 0))
+                ? 'Ждём игроков...'
+                : 'Команда собрана!'}
+            </p>
+
+            {mission.sessionStatus === 'active' ? (
+              <p className="in-progress-hint">Игра идёт</p>
+            ) : teamCancelDeadlineAt ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <MissionTimer
+                  mode="cancel"
+                  deadlineAt={teamCancelDeadlineAt}
+                  label="до конца отказа с возвратом"
+                />
+                <button
+                  type="button"
+                  style={{
+                    background: '#00ff88',
+                    color: '#000',
+                    border: 'none',
+                    padding: '8px 14px',
+                    borderRadius: 6,
+                    fontWeight: 'bold',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => void handleLeaveTeamMission(mission)}
+                >
+                  ОТКАЗАТЬСЯ
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : (
           <>
             {typeof mission.entryRoot === 'number' && mission.entryRoot > 0 && (
@@ -371,6 +468,18 @@ export function TerminalScreen({
 
         {acceptError && (
           <p className="repair-error">{acceptError}</p>
+        )}
+
+        {teamLeaveNote && (
+          <p
+            style={{
+              margin: '0 0 12px',
+              color: '#65e9ae',
+              fontSize: 13,
+            }}
+          >
+            {teamLeaveNote}
+          </p>
         )}
 
         {activeMissions.length === 0 ? (

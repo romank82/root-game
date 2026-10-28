@@ -660,10 +660,11 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
             ).all()
         }
 
-    # Командные миссии (7.1): счётчик участников активной командной сессии
-    # игрока на миссию (sessionMemberCount). Батчем, без N+1: сначала сессии
-    # игрока в активных статусах, затем количество активных участников по
-    # каждой. У индивидуальных миссий и без активной сессии — 0.
+    # Командные миссии (7.1): счётчик участников, статус и время создания активной
+    # командной сессии игрока на миссию (sessionMemberCount / sessionStatus /
+    # sessionCreatedAt). Батчем, без N+1: сначала сессии игрока в активных
+    # статусах, затем количество активных участников по каждой. У
+    # индивидуальных миссий и без активной сессии — 0 / null.
     player_team_sessions = session.scalars(
         select(TeamSession)
         .join(TeamSessionMember, TeamSessionMember.team_session_id == TeamSession.id)
@@ -695,12 +696,26 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
         }
 
     session_member_count_by_mission: dict[str, int] = {}
+    session_status_by_mission: dict[str, str] = {}
+    session_created_at_by_mission: dict[str, str] = {}
     for player_team_session in player_team_sessions:
         # setdefault: если у игрока вдруг несколько сессий на одну миссию —
         # берём первую активную.
         session_member_count_by_mission.setdefault(
             player_team_session.mission_id,
             team_member_count_by_session.get(player_team_session.id, 0),
+        )
+        session_status_by_mission.setdefault(
+            player_team_session.mission_id,
+            player_team_session.status,
+        )
+        session_created_at_by_mission.setdefault(
+            player_team_session.mission_id,
+            (
+                ensure_utc(player_team_session.created_at).isoformat()
+                if player_team_session.created_at
+                else None
+            ),
         )
 
     return {
@@ -817,6 +832,21 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                     else 0
                 ),
                 "maxMembers": _team_max_members_from_config(mission),
+                # sessionStatus / sessionCreatedAt (7.1): статус активной
+                # командной сессии игрока ('collecting' | 'ready_to_start' |
+                # 'active') и время её создания — клиент строит по нему окно
+                # отказа (createdAt + 3 мин), как solo по startedAt. Для
+                # индивидуальных миссий и без сессии — null.
+                "sessionStatus": (
+                    session_status_by_mission.get(mission.id)
+                    if mission.mission_type == "team"
+                    else None
+                ),
+                "sessionCreatedAt": (
+                    session_created_at_by_mission.get(mission.id)
+                    if mission.mission_type == "team"
+                    else None
+                ),
             }
             for mission in missions
         ],

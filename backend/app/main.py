@@ -55,6 +55,7 @@ from app.team_missions_service import (
     activate_session_entrypoint,
     create_team_session_entrypoint,
     join_team_session,
+    leave_team_session,
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
     submit_answer_entrypoint,
@@ -1558,6 +1559,23 @@ def mark_ready_route(
 ):
     try:
         return mark_ready_entrypoint(player_id, session_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/team-missions/sessions/{session_id}/leave")
+def leave_team_session_route(
+    request: Request,
+    session_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Выйти из командной сессии в сборе; возвращает {left, refunded}."""
+    try:
+        return leave_team_session(player_id, session_id)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

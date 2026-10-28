@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.country_policy import is_feature_restricted
+from app.datetime_utils import ensure_utc
 from app.geo_country import resolve_country_or_none
 
 # Активные командные сессии — в этих статусах игрок задействован в миссии.
@@ -38,6 +39,12 @@ ACTIVE_SESSION_STATUSES = frozenset({"collecting", "ready_to_start", "active"})
 
 # Активные участники сессии (членство ещё действует, не left/removed/settled).
 ACTIVE_MEMBER_STATUSES = frozenset({"joined", "ready"})
+
+# Окно отказа с возвратом платы для командной сессии (3 минуты с момента её
+# создания) — зеркало CANCEL_DEADLINE_SECONDS = 180 из mission_engine.py
+# (для solo это cancel_deadline_at; для сессий отдельного поля нет, считаем
+# от created_at).
+TEAM_CANCEL_REFUND_SECONDS = 180
 
 # Зеркала констант команд (без кросс-импорта teams_service).
 TEAM_STATUS_ACTIVE = "active"
@@ -512,6 +519,250 @@ def join_team_session(player_id: str, session_id: str) -> dict:
 
     with SessionLocal.begin() as session:
         return _join_team_session(session, player_id, session_id)
+
+
+def _refund_team_entry(
+    session: Session,
+    *,
+    player_id: str,
+    mission: Mission,
+    config: dict,
+    team_session_id: str,
+    mission_run_id: str | None,
+) -> bool:
+    """Возврат платы участнику командной сессии (зеркало _refund_mission_entry).
+
+    При mark_ready списание выполнял _apply_entry_debit с reference_id =
+    team_session.id (ROOT: WalletTransaction 'mission_entry_debit'; ключи:
+    InventoryEvent 'consumed'). Возврат зеркалит ровно эти записи для ЭТОГО
+    игрока: credit-проводка 'mission_entry_refund' с тем же reference_id и
+    события 'credited'. Если игрок не платил (debit по его кошельку не найден)
+    — ничего не возвращаем. Идемпотентность — unique-индексы ledger.
+    """
+    from app.models import InventoryEvent, PlayerItem, WalletTransaction
+    from app.mission_engine import (
+        ENTRY_DEBIT_REFERENCE_TYPE,
+        ENTRY_ITEM_EVENT_TYPE,
+        ENTRY_ITEM_REFERENCE_TYPE,
+        ENTRY_ITEM_REFUND_EVENT_TYPE,
+        ENTRY_REFUND_REFERENCE_TYPE,
+        _get_root_wallet_for_update,
+    )
+
+    refunded = False
+    economy = config.get("economy") or {}
+    root_debit = economy.get("entryFeeRootAtomic", 0) or 0
+
+    # 1. ROOT: credit-проводка — только если этот игрок реально заплатил.
+    if root_debit > 0:
+        wallet = _get_root_wallet_for_update(session, player_id)
+        paid = session.scalar(
+            select(WalletTransaction.id).where(
+                WalletTransaction.wallet_id == wallet.id,
+                WalletTransaction.reference_type == ENTRY_DEBIT_REFERENCE_TYPE,
+                WalletTransaction.reference_id == team_session_id,
+            )
+        )
+        existing_refund = session.scalar(
+            select(WalletTransaction.id).where(
+                WalletTransaction.wallet_id == wallet.id,
+                WalletTransaction.reference_type == ENTRY_REFUND_REFERENCE_TYPE,
+                WalletTransaction.reference_id == team_session_id,
+            )
+        )
+        if paid is not None and existing_refund is None:
+            wallet.available_balance += root_debit
+            session.add(
+                WalletTransaction(
+                    id=_new_id("wallet-transaction"),
+                    wallet_id=wallet.id,
+                    amount=root_debit,
+                    balance_after=wallet.available_balance,
+                    transaction_type="credit",
+                    reason="Team session leave refund (cancel window)",
+                    reference_type=ENTRY_REFUND_REFERENCE_TYPE,
+                    reference_id=team_session_id,
+                    metadata_json={
+                        "missionId": mission.id,
+                        "missionSlug": mission.slug,
+                        "missionRunId": mission_run_id,
+                    },
+                )
+            )
+            refunded = True
+
+    # 2. Ключи: возвращаем ровно то, что реально списано у этого игрока
+    #    по сессии (event_type='consumed', reference_id=team_session.id).
+    consumed_events = session.scalars(
+        select(InventoryEvent)
+        .join(PlayerItem, PlayerItem.id == InventoryEvent.player_item_id)
+        .where(
+            PlayerItem.player_id == player_id,
+            InventoryEvent.event_type == ENTRY_ITEM_EVENT_TYPE,
+            InventoryEvent.reference_type == ENTRY_ITEM_REFERENCE_TYPE,
+            InventoryEvent.reference_id == team_session_id,
+        )
+    ).all()
+    for event in consumed_events:
+        player_item = session.get(PlayerItem, event.player_item_id)
+        if player_item is None:
+            continue
+        existing_return = session.scalar(
+            select(InventoryEvent.id).where(
+                InventoryEvent.player_item_id == player_item.id,
+                InventoryEvent.event_type == ENTRY_ITEM_REFUND_EVENT_TYPE,
+                InventoryEvent.reference_type == ENTRY_ITEM_REFERENCE_TYPE,
+                InventoryEvent.reference_id == team_session_id,
+            )
+        )
+        if existing_return is not None:
+            continue
+        quantity = abs(event.quantity_delta)
+        player_item.quantity += quantity
+        session.add(
+            InventoryEvent(
+                id=_new_id("inventory-event"),
+                player_item_id=player_item.id,
+                mission_run_id=event.mission_run_id,
+                event_type=ENTRY_ITEM_REFUND_EVENT_TYPE,
+                quantity_delta=quantity,
+                reference_type=ENTRY_ITEM_REFERENCE_TYPE,
+                reference_id=team_session_id,
+                metadata_json=dict(event.metadata_json or {}),
+            )
+        )
+        refunded = True
+
+    return refunded
+
+
+def _leave_team_session(
+    session: Session,
+    player_id: str,
+    session_id: str,
+) -> dict:
+    """Выход игрока из командной сессии в сборе (7.1.e).
+
+    Разрешён только в статусах 'collecting' / 'ready_to_start'; из активной
+    игры ('active') выйти нельзя (409). Если с момента создания сессии прошло
+    меньше TEAM_CANCEL_REFUND_SECONDS — участнику возвращается плата (зеркало
+    expire_mission: credit-проводка с тем же reference_id, что и debit при
+    mark_ready). Участник помечается 'left'; если активных участников не
+    осталось — сессия и её MissionRun переводятся в терминальный
+    'cancelled_before_start' (физическое удаление запрещено правилами игры:
+    история и FK-целостность сохраняются; с точки зрения игрока сессия
+    исчезает — активных сессий у него больше нет).
+
+    session_id: id сессии ИЛИ id миссии (фронт карточки знает только миссию;
+    тогда ищется активная сессия игрока на эту миссию).
+    """
+    from app.geo_team_runtime_models import MissionRun, TeamSession, TeamSessionMember
+    from app.models import GamePlayer, Mission
+
+    # 1. Игрок существует и активен.
+    player = session.get(GamePlayer, player_id)
+    if player is None:
+        raise _mission_error(404, "Игрок не найден.")
+    if player.status != "active":
+        raise _mission_error(403, "Игровой профиль неактивен.")
+
+    # 2. Сессия: по id сессии, либо (фолбэк) активная сессия игрока на миссию.
+    team_session = session.get(TeamSession, session_id)
+    if team_session is None:
+        team_session = session.scalar(
+            select(TeamSession)
+            .join(
+                TeamSessionMember,
+                TeamSessionMember.team_session_id == TeamSession.id,
+            )
+            .where(
+                TeamSession.mission_id == session_id,
+                TeamSessionMember.player_id == player_id,
+                TeamSession.status.in_(ACTIVE_SESSION_STATUSES),
+            )
+            .limit(1)
+        )
+    if team_session is None:
+        raise _mission_error(404, "Командная сессия не найдена.")
+    if team_session.status == "active":
+        raise _mission_error(409, "Нельзя выйти из активной командной игры.")
+    if team_session.status not in ("collecting", "ready_to_start"):
+        raise _mission_error(409, "Сессия уже не в сборе.")
+
+    # 3. Участник этой сессии (активный).
+    member = session.scalar(
+        select(TeamSessionMember).where(
+            TeamSessionMember.team_session_id == team_session.id,
+            TeamSessionMember.player_id == player_id,
+        )
+    )
+    if member is None:
+        raise _mission_error(404, "Вы не участник этой сессии.")
+    if member.status not in ACTIVE_MEMBER_STATUSES:
+        raise _mission_error(409, "Членство в сессии неактивно.")
+
+    # 4. Возврат платы в окне TEAM_CANCEL_REFUND_SECONDS с момента создания.
+    refunded = False
+    now = _utcnow()
+    created_at = ensure_utc(team_session.created_at)
+    cancel_window_end = (
+        created_at + timedelta(seconds=TEAM_CANCEL_REFUND_SECONDS)
+        if created_at is not None
+        else None
+    )
+    mission = session.get(Mission, team_session.mission_id)
+    if (
+        cancel_window_end is not None
+        and now < cancel_window_end
+        and mission is not None
+    ):
+        config = team_session.effective_config_snapshot or {}
+        refunded = _refund_team_entry(
+            session,
+            player_id=player_id,
+            mission=mission,
+            config=config,
+            team_session_id=team_session.id,
+            mission_run_id=member.mission_run_id,
+        )
+
+    # 5. Участник вышел.
+    member.status = "left"
+    member.left_at = now
+    # SessionLocal(autoflush=False): зафиксировать 'left' до выборки
+    # оставшихся участников (паттерн _mark_ready), иначе COUNT увидит
+    # старого 'joined' и сессия не закроется.
+    session.flush()
+
+    # 6. Активных участников не осталось — сессия закрывается терминально
+    #    (история сохраняется, активных сессий у игроков больше нет).
+    remaining = session.scalars(
+        select(TeamSessionMember).where(
+            TeamSessionMember.team_session_id == team_session.id,
+            TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
+        )
+    ).all()
+    if not remaining:
+        team_session.status = "cancelled_before_start"
+        team_session.terminal_at = now
+        for run in session.scalars(
+            select(MissionRun).where(
+                MissionRun.team_session_id == team_session.id,
+            )
+        ).all():
+            run.status = "cancelled_before_start"
+            run.terminal_at = now
+
+    session.flush()
+    return {"left": True, "refunded": refunded}
+
+
+def leave_team_session(player_id: str, session_id: str) -> dict:
+    """Точка вызова из HTTP-слоя: выйти из командной сессии (одна транзакция)."""
+    from app.db import SessionLocal
+
+    with SessionLocal.begin() as session:
+        return _leave_team_session(session, player_id, session_id)
 
 
 def _is_inside_zone(

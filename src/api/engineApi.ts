@@ -78,6 +78,12 @@ export type EngineMission = {
   // ответов → опциональны.
   sessionMemberCount?: number
   maxMembers?: number
+  // sessionStatus — статус активной командной сессии игрока на эту миссию
+  // ('collecting' | 'ready_to_start' | 'active'); sessionCreatedAt — время её
+  // создания (клиент строит по нему окно отказа createdAt + 3 мин, как solo
+  // по startedAt). Для индивидуальных миссий и без сессии — null.
+  sessionStatus?: string | null
+  sessionCreatedAt?: string | null
 }
 
 export type EngineAcceptMissionResponse = {
@@ -996,6 +1002,21 @@ export async function joinTeamSession(
   }
 
   return response.json() as Promise<EngineTeamSession>
+}
+
+export async function leaveTeamSession(
+  sessionId: string,
+): Promise<{ left: boolean; refunded: boolean }> {
+  const response = await apiFetch(
+    `/api/v1/engine/team-missions/sessions/${sessionId}/leave`,
+    { method: 'POST' },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<{ left: boolean; refunded: boolean }>
 }
 
 export async function submitTeamSession(
