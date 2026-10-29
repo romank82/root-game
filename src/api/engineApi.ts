@@ -802,6 +802,11 @@ export type EngineTeamSessionMyStatus =
   | 'removed'
   | 'settled'
 
+// Sprint 8.x-3: статус текущей cipher-волны командной мини-игры (тот же набор
+// значений отдаёт бэкенд и в EngineTeamSession.waveStatus, и в
+// EngineTeamWaveSubmitResult.waveStatus).
+export type EngineTeamWaveStatus = 'playing' | 'passed' | 'failed'
+
 export type EngineTeamSession = {
   id: string
   mission_id: string
@@ -812,6 +817,21 @@ export type EngineTeamSession = {
   memberCount: number
   myStatus: EngineTeamSessionMyStatus | null
   myReadyAt: string | null
+  // Sprint 8.x-3: игровое состояние волн командной мини-игры для
+  // TeamSessionScreen. Бэкенд отдаёт всегда (поля с server_default в БД,
+  // миграция c8a4e2b6f9d3) → поля required.
+  currentWave: number
+  maxWaves: number
+  waveStatus: EngineTeamWaveStatus
+  wavePlayedCount: number
+  myWavePlayed: boolean
+  // cipher-сессия текущей волны для мини-игры (барабаны + правильный код +
+  // лимит времени, ключи в camelCase — стиль фронта). null после финализации.
+  cipherSession: {
+    correctCode: string[]
+    drums: string[][]
+    timeLimitSeconds: number | null
+  } | null
 }
 
 export type EngineTeamAwarded = {
@@ -823,6 +843,21 @@ export type EngineTeamAwarded = {
     quantity: number
   }>
   storyNodeIds: string[]
+}
+
+// Sprint 8.x-2b: ответ POST submit-wave. Успех и провал волны (неверная
+// комбинация) приходят в одной форме. message — только при accepted:false;
+// missionRunId/awarded — только при accepted:true.
+export type EngineTeamWaveSubmitResult = {
+  sessionId: string
+  waveStatus: EngineTeamWaveStatus
+  currentWave: number
+  maxWaves: number
+  sessionStatus: EngineTeamSessionStatus
+  accepted: boolean
+  message?: string
+  missionRunId?: string
+  awarded?: EngineTeamAwarded
 }
 
 export type CreateTeamPayload = {
@@ -1009,5 +1044,31 @@ export async function leaveTeamSession(
   }
 
   return response.json() as Promise<{ left: boolean; refunded: boolean }>
+}
+
+// Sprint 8.x-2b: ответ игрока на cipher-волну командной мини-игры. Контракт
+// бэкенда: POST /api/v1/engine/team-missions/sessions/{sessionId}/submit-wave,
+// body { sequence }. Вызывается только в TeamSessionScreen (шаг 8.x-4b-2).
+export async function submitTeamWave(
+  sessionId: string,
+  sequence: string[],
+): Promise<EngineTeamWaveSubmitResult> {
+  const response = await apiFetch(
+    `/api/v1/engine/team-missions/sessions/${sessionId}/submit-wave`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      // Контракт бэкенда (submit_wave_route): ключ "sequence" (camelCase).
+      body: JSON.stringify({ sequence }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeamWaveSubmitResult>
 }
 

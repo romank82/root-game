@@ -92,6 +92,46 @@ export function TeamSessionScreen({
     }
   }, [missions, presetMissionId])
 
+  // Sprint 8.x-4b-1: polling игрового состояния, пока сессия в статусе
+  // 'active' (идёт мини-игра). Обновляет весь session-объект — новые поля
+  // 8.x-3 (currentWave/maxWaves/waveStatus/wavePlayedCount/myWavePlayed/
+  // cipherSession) уже лежат в типе EngineTeamSession. Вне 'active' и без
+  // сессии опрос не нужен. UI мини-игры — шаг 8.x-4b-2.
+  const sessionId = session?.id ?? null
+  const sessionActive = session?.status === 'active'
+
+  useEffect(() => {
+    if (!sessionId || !sessionActive) return
+
+    let cancelled = false
+    let warnedOnce = false
+
+    async function poll() {
+      try {
+        const result = await getTeamSessions()
+        if (cancelled) return
+        // Подхватываем и финализацию (succeeded/failed): сессия уходит из
+        // ответа либо меняет status → setSession завершит этот эффект.
+        setSession((result.sessions[0] ?? null) as EngineTeamSession | null)
+      } catch {
+        // Не спамить консоль каждые 3 сек: один warning, дальше пропускаем
+        // опрос, последнее известное состояние остаётся в стейте.
+        if (!cancelled && !warnedOnce) {
+          warnedOnce = true
+          console.warn('Не удалось обновить состояние командной сессии')
+        }
+      }
+    }
+
+    void poll()
+    const interval = window.setInterval(() => void poll(), 3000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [sessionId, sessionActive])
+
   async function handleCreate() {
     setError(null)
     setNotice(null)
