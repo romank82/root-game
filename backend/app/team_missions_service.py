@@ -920,6 +920,30 @@ def submit_location_entrypoint(
         )
 
 
+def _generate_cipher_session_for_wave(
+    session: Session,
+    team_session,
+) -> dict:
+    """Sprint 8.x-2b-1: сгенерировать cipher-сессию для текущей волны.
+
+    Ключи результата — ровно как у CipherHandler.generate_session
+    (НЕ переименовывать): correct_code, drums, timeLimitSeconds.
+    """
+    from app.mission_engine import _resolve_minigame_settings
+    from app.minigame_handlers import get_handler
+    from app.models import Mission
+
+    mission = session.get(Mission, team_session.mission_id)
+    if mission is None or mission.status != "published":
+        raise _mission_error(409, "Миссия недоступна.")
+
+    settings = _resolve_minigame_settings(session, mission)
+    handler = get_handler("cipher")
+    if handler is None:
+        raise _mission_error(409, "Мини-игра не поддерживается.")
+    return handler.generate_session(settings)
+
+
 def _activate_session(
     session: Session,
     player_id: str,
@@ -993,13 +1017,174 @@ def _activate_session(
         )
 
     # Активация сессии.
-
     team_session.status = "active"
     team_session.started_at = _utcnow()
+
+    # Sprint 8.x-2b-1: волна 1 инициализируется при активации.
+    # max_waves — из снапшота validationConfig.attempts.maxAttempts (как
+    # _mark_ready читает team.maxMembers из эффективного снапшота); если
+    # структура отсутствует/невалидна — консервативный default 3.
+    config = team_session.effective_config_snapshot or {}
+    attempts = config.get("attempts") or {}
+    max_waves = attempts.get("maxAttempts")
+    team_session.max_waves = (
+        max_waves if isinstance(max_waves, int) and max_waves >= 1 else 3
+    )
+    team_session.current_wave = 1
+    team_session.wave_status = "playing"
+    team_session.wave_played_members = []
+    team_session.current_cipher_session = _generate_cipher_session_for_wave(
+        session, team_session
+    )
     session.flush()
 
     return _serialize_team_session(session, team_session, player_id)
 
+
+def _submit_wave_answer(
+    session: Session,
+    player_id: str,
+    session_id: str,
+    sequence: list[str] | None,
+) -> dict:
+    """Sprint 8.x-2b-1: игрок отвечает на cipher волны.
+
+    ВАЖНО: переходы волн и failure миссии — НЕ в этом шаге (8.x-2b-2).
+    TeamSession.status здесь НЕ меняется (остаётся 'active'): правильный
+    ответ → wave_status='passed' + MissionRun succeeded + награды, неверный
+    → wave_status='failed', без наград и без перехода.
+    """
+    from app.geo_team_contract import (
+        GeoTeamConfigurationError,
+        validate_team_mission_validation_config,
+    )
+    from app.geo_team_runtime_models import (
+        MissionRun,
+        TeamSession,
+        TeamSessionMember,
+    )
+    from app.minigame_handlers import get_handler
+    from app.models import GamePlayer, Mission
+
+    # 1. Player существует и активен (паттерн _ensure_player).
+    player = session.get(GamePlayer, player_id)
+    if player is None:
+        raise _mission_error(404, "Игрок не найден.")
+    if player.status != "active":
+        raise _mission_error(403, "Игровой профиль неактивен.")
+
+    # 2. TeamSession существует, status='active'.
+    team_session = session.get(TeamSession, session_id)
+    if team_session is None:
+        raise _mission_error(404, "Командная сессия не найдена.")
+    if team_session.status != "active":
+        raise _mission_error(409, "Сессия не активна.")
+
+    # 3. Player — TeamSessionMember этой сессии.
+    member = session.scalar(
+        select(TeamSessionMember).where(
+            TeamSessionMember.team_session_id == team_session.id,
+            TeamSessionMember.player_id == player_id,
+        )
+    )
+    if member is None:
+        raise _mission_error(404, "Вы не участник этой сессии.")
+
+    # 4. member.status='ready' (подтвердил присутствие).
+    if member.status != "ready":
+        raise _mission_error(409, "Сначала подтвердите присутствие.")
+
+    # 5. MissionRun у этого member существует, status='active'.
+    mission_run = session.get(MissionRun, member.mission_run_id)
+    if mission_run is None:
+        raise _mission_error(404, "Прогресс не найден.")
+    if mission_run.status != "active":
+        raise _mission_error(409, "Вы уже завершили миссию.")
+
+    # 6. Миссия опубликована, validation_config валиден (переиспользовать).
+    mission = session.get(Mission, team_session.mission_id)
+    if mission is None or mission.status != "published":
+        raise _mission_error(409, "Миссия недоступна.")
+    try:
+        validate_team_mission_validation_config(mission.validation_config)
+    except GeoTeamConfigurationError:
+        raise _mission_error(409, "Конфигурация командной миссии невалидна.")
+
+    # 7. NEW: игрок уже сыграл в текущей волне.
+    played = list(team_session.wave_played_members or [])
+    if player_id in played:
+        raise _mission_error(409, "Вы уже сыграли в этой волне.")
+
+    # 8. Валидация sequence против cipher-сессии волны.
+    session_data = team_session.current_cipher_session
+    if session_data is None:
+        raise _mission_error(409, "Игровая сессия не инициализирована.")
+    # 8a. Мусорный формат ответа — ошибка клиента (400), а не провал волны:
+    #     wave_status не меняем, validate_submission не вызываем (8.x-2b-1-hotfix).
+    if (
+        sequence is None
+        or not isinstance(sequence, list)
+        or not all(isinstance(el, str) for el in sequence)
+    ):
+        raise _mission_error(400, "Некорректный формат ответа.")
+    handler = get_handler("cipher")
+    accepted = (
+        handler is not None
+        and handler.validate_submission(
+            session_data=session_data, sequence=sequence
+        )
+    )
+
+    if not accepted:
+        # Неверная комбинация: провал волны, без перехода и без наград.
+        team_session.wave_status = "failed"
+        session.flush()
+        return {
+            "sessionId": team_session.id,
+            "waveStatus": "failed",
+            "accepted": False,
+            "message": "Неверная комбинация.",
+        }
+
+    # Правильный ответ: волна пройдена. TeamSession.status НЕ меняем (8.x-2b-2).
+    played.append(player_id)
+    team_session.wave_played_members = played
+    team_session.wave_status = "passed"
+
+    from app.mission_engine import _award_mission_rewards
+
+    mission_run.status = "succeeded"
+    mission_run.terminal_at = _utcnow()
+    session.flush()
+
+    awarded = _award_mission_rewards(
+        session,
+        player_id,
+        mission,
+        reference_id=team_session.id,
+        mission_run_id=mission_run.id,
+    )
+    session.flush()
+
+    return {
+        "sessionId": team_session.id,
+        "missionRunId": mission_run.id,
+        "waveStatus": "passed",
+        "accepted": True,
+        "awarded": awarded,
+    }
+
+
+def submit_wave_answer_entrypoint(
+    player_id: str,
+    session_id: str,
+    sequence: list[str] | None,
+) -> dict:
+    """Точка вызова из HTTP-слоя: ответ cipher волны (одна транзакция)."""
+    from app.db import SessionLocal
+
+    with SessionLocal.begin() as session:
+        return _submit_wave_answer(session, player_id, session_id, sequence)
 
 
 def activate_session_entrypoint(player_id: str, session_id: str) -> dict:

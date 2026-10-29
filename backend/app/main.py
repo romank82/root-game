@@ -59,6 +59,7 @@ from app.team_missions_service import (
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
     submit_location_entrypoint,
+    submit_wave_answer_entrypoint,
 )
 from app.transfer_service import transfer_root_entrypoint
 from app.stars_service import (
@@ -285,6 +286,9 @@ class LocationSubmitPayload(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     accuracy_meters: float = Field(gt=0, le=100000)
+
+class TeamWaveSubmitPayload(BaseModel):
+    sequence: list[str] | None = Field(default=None, max_length=32)
 
 def _new_player_id() -> str:
     return f"player-{uuid4().hex}"
@@ -1612,6 +1616,22 @@ def activate_session_route(
     try:
         return activate_session_entrypoint(player_id, session_id)
 
+    except MissionEngineError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail)
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/team-missions/sessions/{session_id}/submit-wave")
+def submit_wave_route(
+    request: Request,
+    session_id: str,
+    payload: TeamWaveSubmitPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return submit_wave_answer_entrypoint(
+            player_id, session_id, payload.sequence
+        )
     except MissionEngineError as error:
         raise HTTPException(status_code=error.status_code, detail=error.detail)
 
