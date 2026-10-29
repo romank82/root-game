@@ -1016,6 +1016,15 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 2. **Таймер на отказ (3 минуты) на любом типе миссий:** после взятия
    списывается плата, 3 минуты на отказ с возвратом, после — провал.
 3. **Мини-игра для командных миссий:** 3 попытки, провал одного = провал всех.
+   - ✅ Бэкенд готов (2026-10-29, 8.x-2a/2b-1/2b-2a/2b-2b): cipher-волны на
+     TeamSession (current_wave/max_waves/wave_status/wave_played_members/
+     current_cipher_session), эндпоинт submit-wave, «провал одного = провал
+     всех» (переход волны, сброс сыгравших), «ждём остальных» (волна 'playing',
+     пока не сыграли ВСЕ активные члены), финализация (passed+succeeded / failed),
+     row-lock на TeamSession, hotfix 400 на мусорный sequence, тесты
+     test_team_wave_flow.py (8 новых). Файлы: backend/app/team_missions_service.py.
+   - 🔲 Фронт (в работе): 8.x-3 — игровые поля волн в _serialize_team_session;
+     8.x-4 — экран мини-игры в TeamSessionScreen + уведомления.
 
 ---
 
