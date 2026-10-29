@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type TouchEvent } from 'react'
+import { useEffect, useState } from 'react'
 import type { EngineMission, MissionSubmission } from '../../api/engineApi'
 import type { Screen } from '../../types/game'
 import { useActiveMission } from '../../hooks/useActiveMission'
 import { MissionTimer } from '../MissionTimer'
+import { CipherGame } from '../CipherGame'
 
 // Sprint 8.13: мини-игра «кодовый замок с барабанами».
 // Контракт: docs/minigame-cipher.md, разделы 3 (поток) и 4 (UI).
@@ -239,8 +240,9 @@ export function CipherScreen({
   onSubmitMission,
   onExpireMission,
 }: CipherScreenProps) {
-  const [drums, setDrums] = useState<Drum[]>([])
-  const [timeLeft, setTimeLeft] = useState<number | null>(null)
+  const [gameDrums, setGameDrums] = useState<string[][]>([])
+  const [gameIndices, setGameIndices] = useState<number[]>([])
+  const [resetSignal, setResetSignal] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successAward, setSuccessAward] = useState<string | null>(null)
@@ -257,105 +259,41 @@ export function CipherScreen({
   // приоритетнее content.ui; у старых миссий её нет → fallback на content.ui.
   const cipherSession = mission?.cipherSession ?? null
   // Правильный код для показа игроку (игра на внимательность, не на угадывание).
-  const correctCode =
-    cipherSession?.correctCode?.join('') ?? content?.combination ?? ''
-
-  // Хранилище стартовой точки свайпа по вертикали.
-  const startYRef = useRef<number | null>(null)
+  const correctCodeChars =
+    cipherSession?.correctCode ?? Array.from(content?.combination ?? '')
 
   // Инициализация барабанов при смене миссии И при новой backend-сессии:
   // после промаха сервер пересоздаёт cipherSession → deps перезапускают
-  // эффект и барабаны собираются заново (Sprint 8.17, шаг 7).
+  // эффект и игра пересобирается заново (Sprint 8.17, шаг 7). Сами барабаны
+  // и позиции передаются в CipherGame; здесь пересобираем их из buildDrums.
   useEffect(() => {
     const active = mission ? parseCipherContent(mission) : null
     if (!active) {
-      setDrums([])
+      setGameDrums([])
+      setGameIndices([])
       return
     }
-    const next = buildDrums(active, mission?.cipherSession ?? null)
-    setDrums(next ?? [])
+    const built = buildDrums(active, mission?.cipherSession ?? null)
+    setGameDrums(built?.map((drum) => drum.symbols) ?? [])
+    setGameIndices(built?.map((drum) => drum.currentIndex) ?? [])
+    setResetSignal((value) => value + 1)
     setError(null)
     setSuccessAward(null)
     setSuccessTitle(null)
     setSuccessText(null)
     setSubmitting(false)
     setTimedOut(false)
-    setTimeLeft(active.timeLimitSeconds)
   }, [mission?.id, mission?.cipherSession])
 
-  // Обратный отсчёт. timeLeft <= 0 → тайм-аут = промах (не expire миссии).
-  useEffect(() => {
-    if (timeLeft === null || timedOut) return
-    if (timeLeft <= 0) {
-      setTimedOut(true)
-      // Sprint 8.14 (fix): тайм-аут = промах (не expire миссии).
-      // Пустая последовательность гарантированно False для cipher_match.
-      // Это даёт attempt_count += 1 и новую попытку (или 409 + expired
-      // при исчерпании max_attempts).
-      if (mission) {
-        void handleTimeout()
-      }
-      return
-    }
-    const id = setInterval(
-      () => setTimeLeft((current) => (current === null ? null : current - 1)),
-      1000,
-    )
-    // Примечание: handleTimeout намеренно НЕ в списке зависимостей — функция
-    // пересоздаётся каждый рендер, и её добавление в deps перезапускало бы
-    // интервал на каждом рендере (замедление отсчёта). Тайм-аут — one-shot.
-    return () => clearInterval(id)
-  }, [timeLeft, timedOut, mission?.id])
-
-  function stepDrum(drumIndex: number, direction: -1 | 1) {
-    setDrums((current) =>
-      current.map((drum, index) => {
-        if (index !== drumIndex) return drum
-        const length = drum.symbols.length
-        const next = (drum.currentIndex + direction + length) % length
-        return { ...drum, currentIndex: next }
-      }),
-    )
-  }
-
-  function handleTouchStart(e: TouchEvent<HTMLDivElement>, _drumIndex: number) {
-    startYRef.current = e.touches[0]?.clientY ?? null
-  }
-
-  function handleTouchMove(e: TouchEvent<HTMLDivElement>, drumIndex: number) {
-    const startY = startYRef.current
-    if (startY !== null) {
-      const currentY = e.touches[0]?.clientY ?? startY
-      const deltaY = currentY - startY
-      if (Math.abs(deltaY) >= 30) {
-        startYRef.current = currentY
-        stepDrum(drumIndex, deltaY > 0 ? -1 : 1)
-      }
-    }
-  }
-
-  function handleTouchEnd() {
-    startYRef.current = null
-  }
-
-  // Тайм-аут попытки: пустая последовательность — гарантированный False для
-  // cipher_match → промах (attempt_count += 1) и новая попытка. Всю обработку
-  // ответа (null / !accepted / accepted) переиспользуем из handleSubmit.
-  async function handleTimeout() {
-    if (!mission) return
-    if (submitting) return
-    await handleSubmit([])
-  }
-
-  async function handleSubmit(sequenceOverride?: string[]) {
+  // Тайм-аут попытки обрабатывает CipherGame (внутренний таймер): при
+  // timeLeft <= 0 он вызывает onSubmit([]) — пустая последовательность
+  // гарантированный False для cipher_match → промах (attempt_count += 1)
+  // и новая попытка. Экран здесь только обрабатывает ответ сервера.
+  async function handleSubmit(sequence: string[]) {
     if (!mission) return
     setSubmitting(true)
     setError(null)
 
-    // Тайм-аут передаёт пустую последовательность (sequenceOverride=[]),
-    // обычная отправка собирает текущую позицию барабанов.
-    const sequence =
-      sequenceOverride ?? drums.map((drum) => drum.symbols[drum.currentIndex])
     const response = await onSubmitMission(mission.id, { sequence })
 
     setSubmitting(false)
@@ -365,11 +303,10 @@ export function CipherScreen({
     }
     if (!response.accepted) {
       setError(response.message ?? content?.wrongAnswerText ?? 'НЕВЕРНО, ПОПРОБУЙ ЕЩЁ')
-      // Sprint 8.14 (fix): новая попытка — свежий таймер мини-игры.
-      if (content?.timeLimitSeconds != null) {
-        setTimeLeft(content.timeLimitSeconds)
-      }
+      // Sprint 8.14 (fix): новая попытка — свежий таймер и позиции барабанов
+      // (CipherGame пересобирается по resetSignal).
       setTimedOut(false)
+      setResetSignal((value) => value + 1)
       return
     }
 
@@ -377,6 +314,19 @@ export function CipherScreen({
     // Запоминаем тексты из content ДО того, как mission станет null
     setSuccessTitle(content?.successTitle ?? null)
     setSuccessText(content?.successText ?? null)
+  }
+
+  // «ЗАНОВО»: пересобрать барабаны из той же сессии/контента и перезапустить
+  // игру (позиции + таймер) через resetSignal.
+  function handleReset() {
+    if (!content || !mission) return
+    const rebuilt = buildDrums(content, mission.cipherSession ?? null)
+    if (rebuilt) {
+      setGameDrums(rebuilt.map((drum) => drum.symbols))
+      setGameIndices(rebuilt.map((drum) => drum.currentIndex))
+    }
+    setError(null)
+    setResetSignal((value) => value + 1)
   }
 
   // 1. Сначала — финальные состояния (успех, тайм-аут).
@@ -494,79 +444,23 @@ export function CipherScreen({
         {content.instruction && <p>{content.instruction}</p>}
       </div>
 
-      {/* Sprint 8.17 (шаг 7): правильный код — из backend-сессии (correctCode);
-          у старых миссий без cipherSession — fallback на content.ui.combination. */}
-      <div className="cipher-combination" aria-label="Правильная комбинация">
-        {Array.from(correctCode).map((char, index) => (
-          <span key={`${char}-${index}`} className="cipher-combination-char">
-            {char}
-          </span>
-        ))}
-      </div>
-
-      {timeLeft !== null && (
-        <div
-          className={`cipher-timer${
-            timeLeft <= 10 ? ' cipher-timer-critical' : ''
-          }`}
-        >
-          ⏱ {Math.max(timeLeft, 0)} сек
-        </div>
-      )}
-
+      {/* Sprint 8.x-4a: игровая часть вынесена в переиспользуемый CipherGame.
+          Подготовка данных (parseCipherContent/buildDrums) и обработка ответа
+          остаются здесь; поведение solo не меняется. */}
       {mission && <div className="cipher-timer">{attemptLabel}</div>}
 
-      <div className="cipher-drums">
-        {drums.map((drum, drumIndex) => {
-          const length = drum.symbols.length
-          const prev =
-            drum.symbols[(drum.currentIndex - 1 + length) % length]
-          const current = drum.symbols[drum.currentIndex]
-          const next = drum.symbols[(drum.currentIndex + 1) % length]
-          return (
-            <div
-              key={`${drumIndex}-${drum.symbols.join('')}`}
-              className="cipher-drum"
-              style={{ touchAction: 'none' }}
-              onTouchStart={(e) => handleTouchStart(e, drumIndex)}
-              onTouchMove={(e) => handleTouchMove(e, drumIndex)}
-              onTouchEnd={handleTouchEnd}
-            >
-              <span className="cipher-drum-symbol cipher-drum-muted">
-                {prev}
-              </span>
-              <span className="cipher-drum-symbol cipher-drum-current">
-                {current}
-              </span>
-              <span className="cipher-drum-symbol cipher-drum-muted">
-                {next}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-
-      {error && <p className="repair-error">{error}</p>}
-
-      <div className="repair-actions">
-        <button
-          className="repair-clear-button"
-          onClick={() => {
-            const next = buildDrums(content, cipherSession)
-            if (next) setDrums(next)
-            setError(null)
-          }}
-        >
-          ЗАНОВО
-        </button>
-        <button
-          className="repair-submit-button"
-          onClick={() => void handleSubmit()}
-          disabled={submitting || drums.length === 0}
-        >
-          {submitting ? 'ПРОВЕРЯЕМ…' : 'ГОТОВО →'}
-        </button>
-      </div>
+      <CipherGame
+        drums={gameDrums}
+        correctCode={correctCodeChars}
+        timeLimitSeconds={content?.timeLimitSeconds ?? null}
+        onSubmit={handleSubmit}
+        isSubmitting={submitting}
+        resetSignal={resetSignal}
+        initialIndices={gameIndices}
+        onTimeout={() => setTimedOut(true)}
+        onReset={handleReset}
+        error={error}
+      />
     </section>
   )
 }
