@@ -57,7 +57,7 @@ export function TeamSessionScreen({
   const [waveError, setWaveError] = useState<string | null>(null)
   const [waveSuccess, setWaveSuccess] = useState<string | null>(null)
   // Sprint 8.x-4-location-ui: отметка гео-присутствия (proof для активации).
-  const [locationBusy, setLocationBusy] = useState(false)
+  // locationBusy удалён в 8.x-4-ux-fix вместе с кнопкой (сообщения — текстом).
   const [locationNotice, setLocationNotice] = useState<string | null>(null)
   const [locationOk, setLocationOk] = useState(false)
   // Инкремент при смене волны/«ЗАНОВО» → CipherGame пересобирает барабаны/таймер.
@@ -171,6 +171,27 @@ export function TeamSessionScreen({
       window.clearInterval(interval)
     }
   }, [sessionId, sessionActive])
+
+  // Sprint 8.x-4-ux-fix: гео-присутствие отправляется АВТОМАТИЧЕСКИ один раз
+  // при открытии экрана, пока сессия в collecting/ready_to_start (proof нужен
+  // бэкенду для активации). Кнопка «ОТМЕТИТЬ ПРИСУТСТВИЕ» удалена — это был
+  // костыль dev-проверки. proofSentRef ставится ДО вызова, чтобы polling
+  // (getTeamSessions каждые 3 сек обновляет session) не спамил запросами.
+  // Повтор при «вне зоны» — перезаход на экран (новый mount → новая попытка).
+  const proofSentRef = useRef(false)
+
+  useEffect(() => {
+    if (proofSentRef.current) return
+    if (!session) return
+    if (session.status !== 'collecting' && session.status !== 'ready_to_start') {
+      return
+    }
+    proofSentRef.current = true
+    void handleSubmitLocation()
+    // handleSubmitLocation — hoisted function declaration; вызов один раз
+    // (proofSentRef), поэтому в deps достаточно session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session])
 
   // Sprint 8.x-4b-2a: пересборка CipherGame при смене волны/сессии (новые
   // барабаны и таймер) + сброс сообщений результата. Ключ — session.id +
@@ -350,7 +371,6 @@ export function TeamSessionScreen({
     if (session.status !== 'collecting' && session.status !== 'ready_to_start') {
       return
     }
-    setLocationBusy(true)
     setLocationNotice(null)
     try {
       let coords: GeolocationPosition
@@ -394,8 +414,6 @@ export function TeamSessionScreen({
     } catch (err) {
       setLocationOk(false)
       setLocationNotice(`Ошибка: ${(err as Error).message}`)
-    } finally {
-      setLocationBusy(false)
     }
   }
 
@@ -553,30 +571,20 @@ export function TeamSessionScreen({
             </p>
           )}
 
-          {/* Sprint 8.x-4-location-ui: отметка гео-присутствия (proof нужен
-              для активации; бэкенд принимает в collecting/ready_to_start). */}
+          {/* Sprint 8.x-4-ux-fix: кнопка «ОТМЕТИТЬ ПРИСУТСТВИЕ» удалена (костыль
+              dev-проверки) — гео отправляется автоматически (useEffect выше).
+              Сообщения (подтверждено / вне зоны / ошибка) — текстом. */}
           {(session.status === 'collecting' ||
-            session.status === 'ready_to_start') && (
-            <div>
-              <button
-                type="button"
-                className="primary-button"
-                disabled={locationBusy}
-                onClick={() => void handleSubmitLocation()}
+            session.status === 'ready_to_start') &&
+            locationNotice && (
+              <p
+                className={
+                  locationOk ? 'mission-success-card' : 'repair-error'
+                }
               >
-                {locationBusy ? 'Отправка…' : 'ОТМЕТИТЬ ПРИСУТСТВИЕ'}
-              </button>
-              {locationNotice && (
-                <p
-                  className={
-                    locationOk ? 'mission-success-card' : 'repair-error'
-                  }
-                >
-                  {locationNotice}
-                </p>
-              )}
-            </div>
-          )}
+                {locationNotice}
+              </p>
+            )}
 
           {session.status === 'active' && (
             <>

@@ -175,7 +175,12 @@ export function TerminalScreen({
   // 3 минут с момента создания (refunded), затем карточка сессии исчезает.
   async function handleLeaveTeamMission(mission: EngineMission) {
     try {
-      const result = await leaveTeamSession(mission.id)
+      // Sprint 8.x-4-refuse-fix: эндпоинт leave_team_session ждёт id сессии
+      // (team-session-...), а не mission.id. sessionId приходит в bootstrap
+      // (mission.sessionId); fallback на mission.id — для старых ответов
+      // (бэкенд раньше не отдавал sessionId, _leave_team_session умеет искать
+      // активную сессию игрока по id миссии).
+      const result = await leaveTeamSession(mission.sessionId ?? mission.id)
       if (result.left) {
         setTeamLeaveNote(
           result.refunded
@@ -247,6 +252,12 @@ export function TerminalScreen({
       sessionCreatedUtcMs !== null
         ? new Date(sessionCreatedUtcMs + CANCEL_REFUSE_WINDOW_MS).toISOString()
         : null
+    // Sprint 8.x-4-ux-fix: окно отказа с ВОЗВРАТОМ открыто, пока дедлайн не
+    // прошёл. После — _leave_team_session всё ещё разрешает выход, но БЕЗ
+    // возврата платы, поэтому таймер скрываем (кнопка остаётся).
+    const teamCancelWindowOpen =
+      teamCancelDeadlineAt !== null &&
+      new Date(teamCancelDeadlineAt).getTime() > Date.now()
 
     return (
       <article className="puzzle" key={mission.id}>
@@ -379,20 +390,30 @@ export function TerminalScreen({
 
             {mission.sessionStatus === 'active' ? (
               <p className="in-progress-hint">Игра идёт</p>
-            ) : teamCancelDeadlineAt ? (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <MissionTimer
-                  mode="cancel"
-                  deadlineAt={teamCancelDeadlineAt}
-                  label="до конца отказа с возвратом"
-                />
+            ) : mission.sessionStatus === 'collecting' ||
+              mission.sessionStatus === 'ready_to_start' ? (
+              <>
+                {/* Таймер — только пока открыто окно отказа С возвратом
+                    платы (3 мин); после дедлайна возврата нет, таймер скрыт. */}
+                {teamCancelWindowOpen && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <MissionTimer
+                      mode="cancel"
+                      deadlineAt={teamCancelDeadlineAt}
+                      label="до конца отказа с возвратом"
+                    />
+                  </div>
+                )}
+                {/* Sprint 8.x-4-ux-fix: отказ разрешён бэкендом и в
+                    collecting, и в ready_to_start (409 только в active);
+                    после дедлайна — без возврата платы, но выход остаётся. */}
                 <button
                   type="button"
                   style={{
@@ -409,7 +430,7 @@ export function TerminalScreen({
                 >
                   ОТКАЗАТЬСЯ
                 </button>
-              </div>
+              </>
             ) : null}
           </div>
         ) : (

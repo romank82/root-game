@@ -698,6 +698,7 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
     session_member_count_by_mission: dict[str, int] = {}
     session_status_by_mission: dict[str, str] = {}
     session_created_at_by_mission: dict[str, str] = {}
+    session_id_by_mission: dict[str, str] = {}
     for player_team_session in player_team_sessions:
         # setdefault: если у игрока вдруг несколько сессий на одну миссию —
         # берём первую активную.
@@ -716,6 +717,10 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 if player_team_session.created_at
                 else None
             ),
+        )
+        session_id_by_mission.setdefault(
+            player_team_session.mission_id,
+            player_team_session.id,
         )
 
     return {
@@ -844,6 +849,16 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 ),
                 "sessionCreatedAt": (
                     session_created_at_by_mission.get(mission.id)
+                    if mission.mission_type == "team"
+                    else None
+                ),
+                # Sprint 8.x-4-refuse-fix: id активной командной сессии игрока
+                # (team-session-...). Клиент передаёт его в leave_team_session
+                # при отказе (карточка знает миссию, а эндпоинт ждёт id
+                # сессии; mission.id туда передавать нельзя — он выглядит как
+                # валидный UUID, но сессии не существует → 404).
+                "sessionId": (
+                    session_id_by_mission.get(mission.id)
                     if mission.mission_type == "team"
                     else None
                 ),
