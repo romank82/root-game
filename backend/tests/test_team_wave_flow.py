@@ -36,6 +36,7 @@ from app.team_missions_service import (
     activate_session_entrypoint,
     create_team_session_entrypoint,
     join_team_session,
+    last_terminal_team_session_entrypoint,
     mark_ready_entrypoint,
     submit_wave_answer_entrypoint,
 )
@@ -184,6 +185,18 @@ class TeamWaveFlowTests(unittest.TestCase):
         from app.models import Wallet, WalletTransaction
 
         with self.SessionLocal.begin() as session:
+            # Идемпотентно: повторное создание (например, вторая сессия тех же
+            # игроков в test_last_session_picks_latest_terminal) не должно
+            # падать на UNIQUE (player_id, currency).
+            existing = session.scalar(
+                select(Wallet).where(
+                    Wallet.player_id == player_id,
+                    Wallet.currency == "ROOT",
+                )
+            )
+            if existing is not None:
+                return
+
             wallet = Wallet(
                 id=f"wallet-{uuid.uuid4().hex}",
                 player_id=player_id,
@@ -725,6 +738,106 @@ class TeamWaveFlowTests(unittest.TestCase):
         self.assertEqual(len(snap_a["items"]), 1)
         # Ошибившийся B наград не получал.
         self.assertIsNone(self._awarded_snapshot(session_id, player_b))
+
+    # ---- 8.x-4-final-status-2: GET /sessions/last --------------------------
+
+    def test_last_session_returns_succeeded_with_awarded(self) -> None:
+        """Оба верно → сессия succeeded; /last отдаёт её + награды КАЖДОМУ."""
+        player_a = self._make_player()
+        player_b = self._make_player()
+        session_id, _ = self._make_wave_session(
+            [player_a, player_b], with_rewards=True
+        )
+
+        code = self._correct_code(session_id)
+        submit_wave_answer_entrypoint(player_a, session_id, code)
+        submit_wave_answer_entrypoint(player_b, session_id, code)
+
+        for player_id in (player_a, player_b):
+            result = last_terminal_team_session_entrypoint(player_id)
+            self.assertIsNotNone(result["session"])
+            self.assertEqual(result["session"]["id"], session_id)
+            self.assertEqual(result["session"]["status"], "succeeded")
+            awarded = result["session"]["awarded"]
+            self.assertIsInstance(awarded, dict)
+            self.assertEqual(awarded["root"], 10)
+            self.assertEqual(len(awarded["items"]), 1)
+            self.assertEqual(awarded["storyNodeIds"], [])
+
+    def test_last_session_returns_failed_with_awarded_for_passed(self) -> None:
+        """A честно прошёл волну, B провалил единственную → сессия failed;
+        у A награды из снапшота остаются, у B awarded=None (не проходил)."""
+        player_a = self._make_player()
+        player_b = self._make_player()
+        session_id, _ = self._make_wave_session(
+            [player_a, player_b], max_attempts=1, with_rewards=True
+        )
+
+        code = self._correct_code(session_id)
+        correct = submit_wave_answer_entrypoint(player_a, session_id, code)
+        self.assertEqual(correct["accepted"], True)
+
+        wrong = submit_wave_answer_entrypoint(
+            player_b, session_id, self._wrong_sequence()
+        )
+        self.assertFalse(wrong["accepted"])
+        self.assertEqual(wrong["sessionStatus"], "failed")
+
+        result_a = last_terminal_team_session_entrypoint(player_a)
+        self.assertIsNotNone(result_a["session"])
+        self.assertEqual(result_a["session"]["id"], session_id)
+        self.assertEqual(result_a["session"]["status"], "failed")
+        self.assertIsNotNone(result_a["session"]["awarded"])
+        self.assertEqual(result_a["session"]["awarded"]["root"], 10)
+        self.assertEqual(len(result_a["session"]["awarded"]["items"]), 1)
+
+        result_b = last_terminal_team_session_entrypoint(player_b)
+        self.assertIsNotNone(result_b["session"])
+        self.assertEqual(result_b["session"]["status"], "failed")
+        self.assertIsNone(result_b["session"]["awarded"])
+
+    def test_last_session_null_when_none(self) -> None:
+        """Нет терминальных сессий (только активная) → {"session": None}."""
+        player_a = self._make_player()
+        player_b = self._make_player()
+        session_id, _ = self._make_wave_session([player_a, player_b])
+
+        result = last_terminal_team_session_entrypoint(player_a)
+        self.assertEqual(result, {"session": None})
+
+        # Новый игрок без членств вовсе — тоже None.
+        outsider = self._make_player()
+        self.assertEqual(
+            last_terminal_team_session_entrypoint(outsider),
+            {"session": None},
+        )
+
+    def test_last_session_picks_latest_terminal(self) -> None:
+        """Две терминальные сессии → отдаётся новейшая (по terminal_at DESC)."""
+        player_a = self._make_player()
+        player_b = self._make_player()
+
+        # Сессия 1: оба проходят → succeeded.
+        s1, _ = self._make_wave_session([player_a, player_b], with_rewards=True)
+        code = self._correct_code(s1)
+        submit_wave_answer_entrypoint(player_a, s1, code)
+        submit_wave_answer_entrypoint(player_b, s1, code)
+
+        # Сессия 2: A проходит, B ошибается на единственной волне → failed
+        # (terminal_at у s2 новее, чем у s1).
+        s2, _ = self._make_wave_session(
+            [player_a, player_b], max_attempts=1, with_rewards=True
+        )
+        code2 = self._correct_code(s2)
+        submit_wave_answer_entrypoint(player_a, s2, code2)
+        submit_wave_answer_entrypoint(player_b, s2, self._wrong_sequence())
+
+        result = last_terminal_team_session_entrypoint(player_a)
+        self.assertIsNotNone(result["session"])
+        self.assertEqual(result["session"]["id"], s2)
+        self.assertEqual(result["session"]["status"], "failed")
+        self.assertIsNotNone(result["session"]["awarded"])
+        self.assertEqual(result["session"]["awarded"]["root"], 10)
 
     # ---- 8.x-3: сериализация игрового состояния волн --------------------
 

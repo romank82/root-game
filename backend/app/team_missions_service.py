@@ -1295,3 +1295,70 @@ def list_my_team_sessions_entrypoint(player_id: str) -> dict:
     with SessionLocal() as session:
         sessions = _list_my_team_sessions(session, player_id)
     return {"sessions": sessions}
+
+
+# ---- Sprint 8.x-4-final-status-2: последняя терминальная сессия ----------
+
+
+def _get_last_terminal_team_session(session: Session, player_id: str):
+    """Последняя терминальная TeamSession игрока (succeeded/failed) или None.
+
+    Только SELECT. Терминальные сессии не видны через /me
+    (ACTIVE_SESSION_STATUSES в _list_my_team_sessions) — этот хелпер отдаёт
+    финал ВСЕМ членам команды, а не только последнему отправившему.
+    terminal_at заполняется при финализации (_submit_wave_answer: и
+    succeeded, и failed) → сортировка по terminal_at DESC корректна на
+    SQLite и PostgreSQL (NULL не попадают в выборку). При равенстве — новее
+    по created_at.
+    """
+    from app.geo_team_runtime_models import TeamSession, TeamSessionMember
+
+    session_ids = session.scalars(
+        select(TeamSessionMember.team_session_id).where(
+            TeamSessionMember.player_id == player_id,
+        )
+    ).all()
+
+    if not session_ids:
+        return None
+
+    return session.scalar(
+        select(TeamSession)
+        .where(
+            TeamSession.id.in_(session_ids),
+            TeamSession.status.in_({"succeeded", "failed"}),
+        )
+        .order_by(TeamSession.terminal_at.desc(), TeamSession.created_at.desc())
+        .limit(1)
+    )
+
+
+def last_terminal_team_session_entrypoint(player_id: str) -> dict:
+    """Точка вызова из HTTP-слоя: {"session": {...} | None}.
+
+    session — _serialize_team_session + "awarded" (награды ИГРОКА из его
+    awarded_snapshot в TeamSessionMember; None, если наград не было).
+    """
+    from app.db import SessionLocal
+
+    with SessionLocal() as session:
+        team_session = _get_last_terminal_team_session(session, player_id)
+        if team_session is None:
+            return {"session": None}
+
+        from app.geo_team_runtime_models import TeamSessionMember
+
+        payload = _serialize_team_session(session, team_session, player_id)
+
+        member = session.scalar(
+            select(TeamSessionMember).where(
+                TeamSessionMember.team_session_id == team_session.id,
+                TeamSessionMember.player_id == player_id,
+            )
+        )
+        payload["awarded"] = (
+            member.awarded_snapshot
+            if member is not None and member.awarded_snapshot
+            else None
+        )
+        return {"session": payload}

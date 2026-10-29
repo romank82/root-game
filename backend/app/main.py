@@ -55,6 +55,7 @@ from app.team_missions_service import (
     activate_session_entrypoint,
     create_team_session_entrypoint,
     join_team_session,
+    last_terminal_team_session_entrypoint,
     leave_team_session,
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
@@ -1516,6 +1517,27 @@ def list_my_team_sessions_route(
     player_id: str = Depends(get_current_player_id),
 ):
     return list_my_team_sessions_entrypoint(player_id)
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/team-missions/sessions/last")
+def last_team_session_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Последняя терминальная сессия игрока (succeeded/failed) + его награды.
+
+    Sprint 8.x-4-final-status-2: регистрируется ПОСЛЕ /sessions/me и ДО любых
+    будущих /sessions/{id} (правило main.py:1508), чтобы «last» не
+    сопоставилось с {id}. GET /sessions/{id} сейчас нет — безопасно.
+    """
+    try:
+        return last_terminal_team_session_entrypoint(player_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
 
 
 @limiter.limit("10/minute")

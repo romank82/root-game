@@ -3,6 +3,7 @@ import type { Screen } from '../../types/game'
 import {
   createTeamSession,
   getEngineBootstrap,
+  getLastTeamSession,
   getTeamSessions,
   markTeamSessionReady,
   submitTeamLocation,
@@ -84,6 +85,10 @@ export function TeamSessionScreen({
   // «Сессия завершена», а не форму создания (форма — только для тех, у кого
   // активных сессий вообще не было).
   const [sessionEnded, setSessionEnded] = useState(false)
+  // Sprint 8.x-4-final-status-2: разовый флаг — /last зовём ОДИН раз после
+  // того, как поллинг потерял сессию (иначе спам каждые 3 сек). Сбрасывается
+  // при появлении новой активной сессии (polling useEffect).
+  const finalFetchedRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -138,6 +143,8 @@ export function TeamSessionScreen({
 
   useEffect(() => {
     if (!sessionId || !sessionActive) return
+    // Новая активная сессия — разовый флаг /last можно использовать снова.
+    finalFetchedRef.current = false
 
     let cancelled = false
     let warnedOnce = false
@@ -150,9 +157,31 @@ export function TeamSessionScreen({
         // ответа либо меняет status → setSession завершит этот эффект.
         setSession((result.sessions[0] ?? null) as EngineTeamSession | null)
         // Sprint 8.x-4b-2b: активная сессия исчезла из /me — финализация
-        // кем-то из команды (исход нам неизвестен, показываем нейтральный
-        // «Сессия завершена»; свой исход уже зафиксирован в finalStatus).
-        if (result.sessions.length === 0) setSessionEnded(true)
+        // кем-то из команды. Sprint 8.x-4-final-status-2: ОДИН раз дёргаем
+        // /last — он отдаёт последнюю терминальную сессию (succeeded/failed)
+        // с нашими наградами, чтобы финал увидели ВСЕ члены команды, а не
+        // только последний отправивший.
+        if (result.sessions.length === 0) {
+          setSessionEnded(true)
+          if (!finalFetchedRef.current) {
+            finalFetchedRef.current = true
+            void getLastTeamSession()
+              .then((lastResult) => {
+                if (cancelled) return
+                if (lastResult.session) {
+                  setFinalStatus(
+                    lastResult.session.status === 'succeeded'
+                      ? 'succeeded'
+                      : 'failed',
+                  )
+                  setLastAwarded(lastResult.session.awarded ?? null)
+                }
+              })
+              .catch(() => {
+                // тихо: нейтральный «Сессия завершена» останется в стейте.
+              })
+          }
+        }
       } catch {
         // Не спамить консоль каждые 3 сек: один warning, дальше пропускаем
         // опрос, последнее известное состояние остаётся в стейте.
@@ -316,11 +345,15 @@ export function TeamSessionScreen({
       // этого финальный экран не показать.
       if (result.sessionStatus === 'succeeded') {
         setFinalStatus('succeeded')
-        if (result.awarded) setLastAwarded(result.awarded)
       } else if (result.sessionStatus === 'failed') {
         setFinalStatus('failed')
         setLastAwarded(null)
       }
+      // Sprint 8.x-4-final-status-2: награды сохраняем при ЛЮБОМ верном ответе
+      // (не только у последнего отправившего с sessionStatus='succeeded') —
+      // «не последний» тоже получил свои награды (в своём ответе submit-wave)
+      // и должен увидеть их на финальном экране.
+      if (accepted && result.awarded) setLastAwarded(result.awarded)
     } catch (err) {
       setWaveError((err as Error).message)
     } finally {
@@ -480,9 +513,9 @@ export function TeamSessionScreen({
       )}
 
       {/* Sprint 8.x-4b-2b: финальные экраны командной мини-игры. Показываем по
-          зафиксированному в submit-wave исходу (finalStatus) — из /me статус
-          succeeded/failed не приходит, а session на следующем поллинге станет
-          null. Кнопка возврата — в контур (миссии/терминал). */}
+          зафиксированному исходу (finalStatus): из ответа submit-wave (свой
+          ход) и/или из /last после того, как поллинг потерял сессию.
+          Кнопка возврата — в контур (миссии/терминал). */}
       {!loading && finalStatus === 'succeeded' && (
         <div className="mission-success-card">
           <h3>МИССИЯ ПРОЙДЕНА</h3>
@@ -521,6 +554,27 @@ export function TeamSessionScreen({
         <div className="repair-error">
           <h3>МИССИЯ ПРОВАЛЕНА</h3>
           <p>Одна из попыток команды провалена. Волны исчерпаны.</p>
+          {/* Sprint 8.x-4-final-status-2: игрок мог честно пройти свои волны,
+              пока команда не провалилась — его награды остаются и показываются
+              (из снапшота submit-wave / /last). */}
+          {lastAwarded !== null && (
+            <>
+              {lastAwarded.root > 0 && (
+                <p>Награда: +{lastAwarded.root} ROOT</p>
+              )}
+              {lastAwarded.items.length > 0 && (
+                <p>
+                  Предметы:{' '}
+                  {lastAwarded.items
+                    .map((item) => `${item.title} ×${item.quantity}`)
+                    .join(', ')}
+                </p>
+              )}
+              {lastAwarded.storyNodeIds.length > 0 && (
+                <p>Открыто сюжетных узлов: {lastAwarded.storyNodeIds.length}</p>
+              )}
+            </>
+          )}
           <button
             type="button"
             className="primary-button"

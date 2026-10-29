@@ -976,6 +976,30 @@ export async function getTeamSessions(): Promise<{
   return response.json() as Promise<{ sessions: EngineTeamSession[] }>
 }
 
+// Sprint 8.x-4-final-status-2: последняя терминальная сессия игрока
+// (succeeded/failed) + его награды. Контракт бэкенда:
+// GET /api/v1/engine/team-missions/sessions/last → {"session": {...} | null}.
+// session — EngineTeamSession + awarded (награды ИГРОКА из его
+// awarded_snapshot: root/items/storyNodeIds; null, если наград не было).
+// Вызывается ОДИН раз при sessionEnded (поллинг вернул []), не каждые 3 сек.
+export type EngineTeamLastSessionResult = {
+  session:
+    | (EngineTeamSession & { awarded?: EngineTeamAwarded | null })
+    | null
+}
+
+export async function getLastTeamSession(): Promise<EngineTeamLastSessionResult> {
+  const response = await apiFetch(
+    '/api/v1/engine/team-missions/sessions/last',
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeamLastSessionResult>
+}
+
 export async function createTeamSession(
   missionId: string,
 ): Promise<EngineTeamSession> {
