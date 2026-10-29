@@ -20,7 +20,6 @@ from app.team_missions_service import (
     join_team_session,
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
-    submit_answer_entrypoint,
     submit_location_entrypoint,
 )
 from tests.test_geo_team_contract import valid_team_config
@@ -1211,145 +1210,6 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self.assertEqual(captured.exception.detail, "Командная сессия не найдена.")
 
 
-    # ---- 7.1.f-1: submit_answer (MVP, без валидации и наград) -----------
-
-    def test_submit_answer_marks_mission_run_succeeded(self) -> None:
-        leader = self._make_player()
-        member = self._make_player()
-        session_id = self._make_active_session_fixture(leader, member)
-
-        result = submit_answer_entrypoint(leader, session_id, "test-answer")
-
-        self.assertEqual(result["sessionId"], session_id)
-        self.assertIsNotNone(result["missionRunId"])
-        self.assertEqual(result["status"], "succeeded")
-        self.assertIsNotNone(result["terminalAt"])
-
-        from app.geo_team_runtime_models import MissionRun
-
-        member_row = self._get_member(session_id, leader)
-        with self.SessionLocal() as session:
-            mission_run = session.get(MissionRun, member_row.mission_run_id)
-            self.assertEqual(mission_run.status, "succeeded")
-            self.assertIsNotNone(mission_run.terminal_at)
-
-    def test_submit_answer_unknown_session_returns_404(self) -> None:
-        player_id = self._make_player()
-
-        with self.assertRaises(MissionEngineError) as captured:
-            submit_answer_entrypoint(
-                player_id, f"session-{uuid.uuid4().hex}", "test-answer"
-            )
-
-        self.assertEqual(captured.exception.status_code, 404)
-        self.assertEqual(captured.exception.detail, "Командная сессия не найдена.")
-
-    def test_submit_answer_not_member_returns_404(self) -> None:
-        leader = self._make_player()
-        member = self._make_player()
-        outsider = self._make_player()
-        session_id = self._make_active_session_fixture(leader, member)
-
-        with self.assertRaises(MissionEngineError) as captured:
-            submit_answer_entrypoint(outsider, session_id, "test-answer")
-
-        self.assertEqual(captured.exception.status_code, 404)
-        self.assertEqual(captured.exception.detail, "Вы не участник этой сессии.")
-
-    def test_submit_answer_session_not_active_returns_409(self) -> None:
-        leader = self._make_player()
-        member = self._make_player()
-        _, session_id, _ = self._make_ready_fixture(leader, member)
-
-        with self.assertRaises(MissionEngineError) as captured:
-            submit_answer_entrypoint(leader, session_id, "test-answer")
-
-        self.assertEqual(captured.exception.status_code, 409)
-        self.assertEqual(captured.exception.detail, "Сессия не активна.")
-
-    def test_submit_answer_already_terminal_returns_409(self) -> None:
-        leader = self._make_player()
-        member = self._make_player()
-        session_id = self._make_active_session_fixture(leader, member)
-
-        from app.geo_team_runtime_models import MissionRun
-
-        member_row = self._get_member(session_id, leader)
-        with self.SessionLocal.begin() as session:
-            mission_run = session.get(MissionRun, member_row.mission_run_id)
-            mission_run.status = "succeeded"
-
-        with self.assertRaises(MissionEngineError) as captured:
-            submit_answer_entrypoint(leader, session_id, "test-answer")
-
-        self.assertEqual(captured.exception.status_code, 409)
-        self.assertEqual(captured.exception.detail, "Вы уже завершили миссию.")
-
-    def test_submit_answer_awards_root_and_item(self) -> None:
-        leader = self._make_player()
-        member = self._make_player()
-        session_id = self._make_active_session_fixture(leader, member)
-
-        balance_before = self._root_balance(leader)
-        reward_item_id = self._make_team_mission_with_rewards(
-            session_id, root_amount=10, item_amount=1
-        )
-
-        result = submit_answer_entrypoint(leader, session_id, "test-answer")
-
-        self.assertEqual(result["status"], "succeeded")
-        awarded = result["awarded"]
-        self.assertGreater(awarded["root"], 0)
-        self.assertTrue(awarded["items"])
-        self.assertEqual(awarded["items"][0]["id"], reward_item_id)
-
-        # Кошелёк увеличен ровно на amount награды.
-        self.assertEqual(self._root_balance(leader), balance_before + 10)
-        # В инвентаре появился новый key-item.
-        self.assertEqual(self._key_quantity(leader, reward_item_id), 1)
-
-        # Проводка привязана к сессии (reference_id), а не к миссии —
-        # ту же команду можно пройти в другой сессии с новой наградой.
-        from app.models import Wallet, WalletTransaction
-
-        with self.SessionLocal() as session:
-            wallet = session.scalar(
-                select(Wallet).where(Wallet.player_id == leader)
-            )
-            transactions = session.scalars(
-                select(WalletTransaction).where(
-                    WalletTransaction.wallet_id == wallet.id,
-                    WalletTransaction.reference_type == "mission_reward",
-                )
-            ).all()
-            self.assertEqual(len(transactions), 1)
-            self.assertEqual(transactions[0].reference_id, session_id)
-
-    def test_submit_answer_reward_idempotent_within_session(self) -> None:
-        leader = self._make_player()
-        member = self._make_player()
-        session_id = self._make_active_session_fixture(leader, member)
-
-        balance_before = self._root_balance(leader)
-        reward_item_id = self._make_team_mission_with_rewards(
-            session_id, root_amount=10, item_amount=1
-        )
-
-        first = submit_answer_entrypoint(leader, session_id, "test-answer")
-        self.assertEqual(first["status"], "succeeded")
-        self.assertEqual(self._root_balance(leader), balance_before + 10)
-
-        # Повторный submit в той же сессии — MissionRun уже succeeded.
-        with self.assertRaises(MissionEngineError) as captured:
-            submit_answer_entrypoint(leader, session_id, "test-answer")
-
-        self.assertEqual(captured.exception.status_code, 409)
-        self.assertEqual(captured.exception.detail, "Вы уже завершили миссию.")
-        # Второй раз не начисляем ни ROOT, ни ключи.
-        self.assertEqual(self._root_balance(leader), balance_before + 10)
-        self.assertEqual(self._key_quantity(leader, reward_item_id), 1)
-
-
 class OpenAPIContractTests(unittest.TestCase):
     """Защита: OpenAPI строится без PydanticUserError.
 
@@ -1373,7 +1233,6 @@ class OpenAPIContractTests(unittest.TestCase):
             "/api/v1/engine/team-missions/sessions/{session_id}/ready",
             "/api/v1/engine/team-missions/sessions/{session_id}/location",
             "/api/v1/engine/team-missions/sessions/{session_id}/activate",
-            "/api/v1/engine/team-missions/sessions/{session_id}/submit",
         ):
             message = "роут отсутствует в OpenAPI: {0}".format(expected)
             self.assertIn(expected, paths, message)

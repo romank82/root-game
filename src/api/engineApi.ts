@@ -825,14 +825,6 @@ export type EngineTeamAwarded = {
   storyNodeIds: string[]
 }
 
-export type EngineTeamSessionSubmitResult = {
-  sessionId: string
-  missionRunId: string
-  status: string
-  terminalAt: string
-  awarded: EngineTeamAwarded
-}
-
 export type CreateTeamPayload = {
   name: string
   description?: string | null
@@ -1017,27 +1009,5 @@ export async function leaveTeamSession(
   }
 
   return response.json() as Promise<{ left: boolean; refunded: boolean }>
-}
-
-export async function submitTeamSession(
-  sessionId: string,
-  answer?: string | null,
-): Promise<EngineTeamSessionSubmitResult> {
-  const response = await apiFetch(
-    `/api/v1/engine/team-missions/sessions/${sessionId}/submit`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ answer: answer ?? null }),
-    },
-  )
-
-  if (!response.ok) {
-    throw new Error(await readError(response))
-  }
-
-  return response.json() as Promise<EngineTeamSessionSubmitResult>
 }
 

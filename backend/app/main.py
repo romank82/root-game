@@ -58,7 +58,6 @@ from app.team_missions_service import (
     leave_team_session,
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
-    submit_answer_entrypoint,
     submit_location_entrypoint,
 )
 from app.transfer_service import transfer_root_entrypoint
@@ -281,9 +280,6 @@ class JoinRequestPayload(BaseModel):
 
 class TeamSessionCreatePayload(BaseModel):
     mission_id: str = Field(min_length=1, max_length=64)
-
-class TeamAnswerSubmitPayload(BaseModel):
-    answer: str | None = Field(default=None, max_length=2000)
 
 class LocationSubmitPayload(BaseModel):
     latitude: float = Field(ge=-90, le=90)
@@ -1616,20 +1612,6 @@ def activate_session_route(
     try:
         return activate_session_entrypoint(player_id, session_id)
 
-    except MissionEngineError as error:
-        raise HTTPException(status_code=error.status_code, detail=error.detail)
-
-
-@limiter.limit("10/minute")
-@app.post("/api/v1/engine/team-missions/sessions/{session_id}/submit")
-def submit_answer_route(
-    request: Request,
-    session_id: str,
-    payload: TeamAnswerSubmitPayload,
-    player_id: str = Depends(get_current_player_id),
-):
-    try:
-        return submit_answer_entrypoint(player_id, session_id, payload.answer)
     except MissionEngineError as error:
         raise HTTPException(status_code=error.status_code, detail=error.detail)
 
