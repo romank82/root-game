@@ -368,6 +368,15 @@ export function TerminalScreen({
                 : 'Команда собрана!'}
             </p>
 
+            {/* Sprint 8.x-4-nav: вход в экран командной сессии (мини-игра).
+                TeamSessionScreen сам подтягивает сессию игрока. */}
+            <button
+              type="button"
+              onClick={() => onScreenChange('team-session')}
+            >
+              ОТКРЫТЬ СЕССИЮ
+            </button>
+
             {mission.sessionStatus === 'active' ? (
               <p className="in-progress-hint">Игра идёт</p>
             ) : teamCancelDeadlineAt ? (

@@ -2476,3 +2476,29 @@ h2 {
             drop-shadow(0 0 56px color-mix(in srgb, var(--cube-color, #00ff88) 90%, transparent));
   }
 }
+
+/* Sprint 8.x-4-dev-bot-ui: временная панель управления dev-ботом.
+   Рендерится только под import.meta.env.DEV; удаляется вместе с dev-bot. */
+.dev-bot-panel {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px dashed rgba(255, 190, 90, 0.45);
+  border-radius: 10px;
+}
+
+.dev-bot-actions {
+  flex-wrap: wrap;
+}
+
+.dev-bot-actions .repair-clear-button {
+  margin-top: 0;
+}
+
+.dev-bot-notice {
+  margin: 10px 0 0;
+  color: #ffd9a3;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  word-break: break-word;
+}

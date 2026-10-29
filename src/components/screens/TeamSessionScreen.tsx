@@ -2,9 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import type { Screen } from '../../types/game'
 import {
   createTeamSession,
+  devBotActivate,
+  devBotJoin,
+  devBotLocation,
+  devBotPlayWave,
+  devBotReady,
+  devLocationMe,
   getEngineBootstrap,
   getTeamSessions,
   markTeamSessionReady,
+  submitTeamLocation,
   submitTeamWave,
   type EngineMission,
   type EngineTeamSession,
@@ -21,6 +28,11 @@ interface TeamSessionScreenProps {
 }
 
 const TEAM_MISSION_LAYER = 'team'
+
+// Sprint 8.x-4-dev-bot-ui: кнопки управления dev-ботом видны только в dev
+// (vite dev server). В production build import.meta.env.DEV === false —
+// ветка не рендерится и выкидывается минификатором. Удалим вместе с dev-bot.
+const DEV_BOT_UI_ENABLED = import.meta.env.DEV
 
 const SESSION_STATUS_LABELS: Record<string, string> = {
   collecting: 'Сбор команды',
@@ -54,6 +66,13 @@ export function TeamSessionScreen({
   const [waveSubmitting, setWaveSubmitting] = useState(false)
   const [waveError, setWaveError] = useState<string | null>(null)
   const [waveSuccess, setWaveSuccess] = useState<string | null>(null)
+  // Sprint 8.x-4-dev-bot-ui: состояние кнопок dev-бота (только dev).
+  const [devBotBusy, setDevBotBusy] = useState(false)
+  const [devBotNotice, setDevBotNotice] = useState<string | null>(null)
+  // Sprint 8.x-4-location-ui: отметка гео-присутствия (proof для активации).
+  const [locationBusy, setLocationBusy] = useState(false)
+  const [locationNotice, setLocationNotice] = useState<string | null>(null)
+  const [locationOk, setLocationOk] = useState(false)
   // Инкремент при смене волны/«ЗАНОВО» → CipherGame пересобирает барабаны/таймер.
   const [resetSignal, setResetSignal] = useState(0)
   // Ключ текущей волны для сравнения при polling (не сбрасывать игру
@@ -258,6 +277,120 @@ export function TeamSessionScreen({
     setResetSignal((value) => value + 1)
   }
 
+  // Sprint 8.x-4-location-ui: GPS-координаты (паттерн useGameState.ts).
+  function getCurrentPosition(): Promise<GeolocationPosition> {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Геолокация не поддерживается устройством.'))
+        return
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      })
+    })
+  }
+
+  // Отметить гео-присутствие в командной сессии: свежий verified proof нужен
+  // для активации (все готовы + все в зоне). Бэкенд принимает proof только
+  // в статусах 'collecting' / 'ready_to_start'.
+  async function handleSubmitLocation() {
+    if (!session) return
+    if (session.status !== 'collecting' && session.status !== 'ready_to_start') {
+      return
+    }
+    setLocationBusy(true)
+    setLocationNotice(null)
+    try {
+      let coords: GeolocationPosition
+      try {
+        coords = await getCurrentPosition()
+      } catch (geoErr) {
+        const code =
+          geoErr instanceof GeolocationPositionError ? geoErr.code : null
+        const geoMessage =
+          code === 1
+            ? 'Отказано в доступе к геолокации. Разрешите доступ и повторите.'
+            : code === 2
+              ? 'Не удалось определить местоположение. Повторите попытку.'
+              : code === 3
+                ? 'Таймаут геолокации. Повторите попытку.'
+                : (geoErr as Error).message
+        throw new Error(geoMessage)
+      }
+
+      const result = await submitTeamLocation(
+        session.id,
+        coords.coords.latitude,
+        coords.coords.longitude,
+        coords.coords.accuracy,
+      )
+      if (result.verified) {
+        setLocationOk(true)
+        setLocationNotice('Присутствие подтверждено.')
+      } else {
+        setLocationOk(false)
+        setLocationNotice('Вы вне зоны миссии. Подойдите ближе и попробуйте снова.')
+      }
+
+      // Свежее состояние сессии (возможен авто-старт/смена статуса).
+      try {
+        const fresh = await getTeamSessions()
+        setSession((current) => fresh.sessions[0] ?? current)
+      } catch {
+        // тихо: polling обновит состояние.
+      }
+    } catch (err) {
+      setLocationOk(false)
+      setLocationNotice(`Ошибка: ${(err as Error).message}`)
+    } finally {
+      setLocationBusy(false)
+    }
+  }
+
+  // Sprint 8.x-4-dev-bot-ui: выполнить действие dev-бота (только dev).
+  // После каждого вызова подтягиваем свежее состояние сессии, чтобы волны/
+  // статус сразу отразились на экране.
+  async function runDevBot(
+    action:
+      | 'join'
+      | 'ready'
+      | 'location'
+      | 'locationMe'
+      | 'activate'
+      | 'playWave',
+  ) {
+    if (!session) return
+    setDevBotBusy(true)
+    setDevBotNotice(null)
+    try {
+      const callers: Record<
+        typeof action,
+        () => Promise<Record<string, unknown>>
+      > = {
+        join: () => devBotJoin(session.id),
+        ready: () => devBotReady(session.id),
+        location: () => devBotLocation(session.id),
+        locationMe: () => devLocationMe(session.id),
+        activate: () => devBotActivate(session.id),
+        playWave: () => devBotPlayWave(session.id),
+      }
+      const result = await callers[action]()
+      setDevBotNotice(`БОТ: ${JSON.stringify(result)}`)
+      try {
+        const fresh = await getTeamSessions()
+        setSession((current) => fresh.sessions[0] ?? current)
+      } catch {
+        // тихо: polling обновит состояние.
+      }
+    } catch (err) {
+      setDevBotNotice(`БОТ: ошибка — ${(err as Error).message}`)
+    } finally {
+      setDevBotBusy(false)
+    }
+  }
+
   return (
     <section className="inventory">
       <p className="eyebrow">КОМАНДНАЯ МИССИЯ / СЕССИЯ</p>
@@ -343,6 +476,31 @@ export function TeamSessionScreen({
             </p>
           )}
 
+          {/* Sprint 8.x-4-location-ui: отметка гео-присутствия (proof нужен
+              для активации; бэкенд принимает в collecting/ready_to_start). */}
+          {(session.status === 'collecting' ||
+            session.status === 'ready_to_start') && (
+            <div>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={locationBusy}
+                onClick={() => void handleSubmitLocation()}
+              >
+                {locationBusy ? 'Отправка…' : 'ОТМЕТИТЬ ПРИСУТСТВИЕ'}
+              </button>
+              {locationNotice && (
+                <p
+                  className={
+                    locationOk ? 'mission-success-card' : 'repair-error'
+                  }
+                >
+                  {locationNotice}
+                </p>
+              )}
+            </div>
+          )}
+
           {session.status === 'active' && (
             <>
               {/* Счётчик — как в solo (cipher-timer), переиспользуем класс. */}
@@ -371,6 +529,72 @@ export function TeamSessionScreen({
                 <p className="mission-success-card">{waveSuccess}</p>
               )}
             </>
+          )}
+
+          {/* Sprint 8.x-4-dev-bot-ui: временные кнопки dev-бота. Показываются
+              при любой активной сессии (collecting/ready_to_start/active) —
+              join/ready/location/activate нужны ДО старта игры. session на этом
+              уровне гарантированно не null (блок под {!loading && session !==
+              null}). Удаляются вместе с dev-bot. */}
+          {DEV_BOT_UI_ENABLED && (
+            <div className="dev-bot-panel">
+              <p className="admin-muted">
+                DEV: управление ботом (временно, удалим после проверки)
+              </p>
+              <div className="repair-actions dev-bot-actions">
+                <button
+                  type="button"
+                  className="repair-clear-button"
+                  disabled={devBotBusy}
+                  onClick={() => void runDevBot('join')}
+                >
+                  БОТ: вступить
+                </button>
+                <button
+                  type="button"
+                  className="repair-clear-button"
+                  disabled={devBotBusy}
+                  onClick={() => void runDevBot('ready')}
+                >
+                  БОТ: готов
+                </button>
+                <button
+                  type="button"
+                  className="repair-clear-button"
+                  disabled={devBotBusy}
+                  onClick={() => void runDevBot('location')}
+                >
+                  БОТ: на месте
+                </button>
+                <button
+                  type="button"
+                  className="repair-clear-button"
+                  disabled={devBotBusy}
+                  onClick={() => void runDevBot('locationMe')}
+                >
+                  БОТ: я на месте
+                </button>
+                <button
+                  type="button"
+                  className="repair-clear-button"
+                  disabled={devBotBusy}
+                  onClick={() => void runDevBot('activate')}
+                >
+                  БОТ: старт
+                </button>
+                <button
+                  type="button"
+                  className="repair-clear-button"
+                  disabled={devBotBusy}
+                  onClick={() => void runDevBot('playWave')}
+                >
+                  БОТ: пройти волну
+                </button>
+              </div>
+              {devBotNotice && (
+                <p className="dev-bot-notice">{devBotNotice}</p>
+              )}
+            </div>
           )}
         </div>
       )}

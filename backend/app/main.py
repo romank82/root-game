@@ -61,6 +61,14 @@ from app.team_missions_service import (
     submit_location_entrypoint,
     submit_wave_answer_entrypoint,
 )
+from app.dev_bot import (
+    dev_bot_activate_entrypoint,
+    dev_bot_join_entrypoint,
+    dev_bot_play_wave_entrypoint,
+    dev_bot_ready_entrypoint,
+    dev_bot_submit_location_entrypoint,
+    dev_location_me_entrypoint,
+)
 from app.transfer_service import transfer_root_entrypoint
 from app.stars_service import (
     create_invoice_link,
@@ -1634,6 +1642,107 @@ def submit_wave_route(
         )
     except MissionEngineError as error:
         raise HTTPException(status_code=error.status_code, detail=error.detail)
+
+
+# ============================================================================
+# DEV-ONLY: dev-бот для проверки командной мини-игры (Sprint 8.x-4-dev-bot)
+# Временные эндпоинты; удаляются отдельным коммитом (revert dev-bot) после
+# проверки. Защита: доступны только при APP_ENV=development, в проде — 404.
+# ============================================================================
+
+def _ensure_dev_environment() -> None:
+    if settings.app_env != "development":
+        raise HTTPException(status_code=404, detail="Not Found.")
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/dev/bot/join/{session_id}")
+def dev_bot_join_route(request: Request, session_id: str):
+    """Вступить dev-ботом в командную сессию (только dev)."""
+    _ensure_dev_environment()
+    try:
+        return dev_bot_join_entrypoint(session_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/dev/bot/ready/{session_id}")
+def dev_bot_ready_route(request: Request, session_id: str):
+    """Dev-бот готов (без списания entryFee; только dev)."""
+    _ensure_dev_environment()
+    try:
+        return dev_bot_ready_entrypoint(session_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/dev/bot/location/{session_id}")
+def dev_bot_submit_location_route(request: Request, session_id: str):
+    """Verified LocationProof для dev-бота (только dev)."""
+    _ensure_dev_environment()
+    try:
+        return dev_bot_submit_location_entrypoint(session_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/dev/bot/activate/{session_id}")
+def dev_bot_activate_route(request: Request, session_id: str):
+    """Активировать сессию ready_to_start → active (инициализация волны)."""
+    _ensure_dev_environment()
+    try:
+        return dev_bot_activate_entrypoint(session_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/dev/bot/play-wave/{session_id}")
+def dev_bot_play_wave_route(request: Request, session_id: str):
+    """Dev-бот отвечает на волну верным кодом (только dev)."""
+    _ensure_dev_environment()
+    try:
+        return dev_bot_play_wave_entrypoint(session_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/dev/location-me/{session_id}")
+def dev_location_me_route(
+    request: Request,
+    session_id: str,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Verified LocationProof для ТЕКУЩЕГО игрока без GPS (только dev).
+
+    Нужен, чтобы заказчик вне геозоны мог активировать сессию."""
+    _ensure_dev_environment()
+    try:
+        return dev_location_me_entrypoint(player_id, session_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
 
 
 # ============================================================================

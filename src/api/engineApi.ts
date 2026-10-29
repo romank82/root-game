@@ -1072,3 +1072,152 @@ export async function submitTeamWave(
   return response.json() as Promise<EngineTeamWaveSubmitResult>
 }
 
+// Sprint 8.x-4-location-ui: отметка гео-присутствия игрока в командной сессии.
+// Контракт бэкенда: POST /api/v1/engine/team-missions/sessions/{sessionId}/location,
+// body { latitude, longitude, accuracy_meters } — Verified LocationProof
+// (свежий proof нужен для активации сессии при всех готовых участниках).
+export type EngineTeamLocationSubmitResult = {
+  sessionId: string
+  zoneId: string
+  verified: boolean
+  expiresAt: string
+}
+
+export async function submitTeamLocation(
+  sessionId: string,
+  latitude: number,
+  longitude: number,
+  accuracyMeters: number,
+): Promise<EngineTeamLocationSubmitResult> {
+  const response = await apiFetch(
+    `/api/v1/engine/team-missions/sessions/${sessionId}/location`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        latitude,
+        longitude,
+        accuracy_meters: accuracyMeters,
+      }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeamLocationSubmitResult>
+}
+
+// Sprint 8.x-4-dev-bot-ui: ВРЕМЕННЫЕ обёртки для управления dev-ботом.
+// Бьют в dev-only роуты /api/v1/dev/bot/* (бэкенд: APP_ENV != development
+// → 404 «Not Found»). Используются только в TeamSessionScreen под флагом
+// import.meta.env.DEV. Удаляются вместе с dev-bot после проверки.
+// Тип возврата — Record<string, unknown>: контракт dev-эндпоинтов временный.
+export async function devBotJoin(
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  const response = await apiFetch(`/api/v1/dev/bot/join/${sessionId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<Record<string, unknown>>
+}
+
+export async function devBotReady(
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  const response = await apiFetch(`/api/v1/dev/bot/ready/${sessionId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<Record<string, unknown>>
+}
+
+export async function devBotLocation(
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  const response = await apiFetch(`/api/v1/dev/bot/location/${sessionId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<Record<string, unknown>>
+}
+
+export async function devBotActivate(
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  const response = await apiFetch(`/api/v1/dev/bot/activate/${sessionId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<Record<string, unknown>>
+}
+
+export async function devBotPlayWave(
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  const response = await apiFetch(`/api/v1/dev/bot/play-wave/${sessionId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<Record<string, unknown>>
+}
+
+// Sprint 8.x-4-dev-location-me: verified LocationProof для ТЕКУЩЕГО игрока
+// без GPS (dev-only: /api/v1/dev/location-me/{sessionId}, APP_ENV=development
+// на бэкенде). Удаляется вместе с dev-bot.
+export async function devLocationMe(
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  const response = await apiFetch(`/api/v1/dev/location-me/${sessionId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<Record<string, unknown>>
+}
+
