@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Screen } from '../../types/game'
 import {
   createTeamSession,
   getEngineBootstrap,
   getTeamSessions,
   markTeamSessionReady,
+  submitTeamWave,
   type EngineMission,
   type EngineTeamSession,
 } from '../../api/engineApi'
+import { CipherGame } from '../CipherGame'
 
 interface TeamSessionScreenProps {
   onScreenChange: (screen: Screen) => void
@@ -48,6 +50,15 @@ export function TeamSessionScreen({
   const [notice, setNotice] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [readyBusy, setReadyBusy] = useState(false)
+  // Sprint 8.x-4b-2a: состояние командной мини-игры (волна cipher).
+  const [waveSubmitting, setWaveSubmitting] = useState(false)
+  const [waveError, setWaveError] = useState<string | null>(null)
+  const [waveSuccess, setWaveSuccess] = useState<string | null>(null)
+  // Инкремент при смене волны/«ЗАНОВО» → CipherGame пересобирает барабаны/таймер.
+  const [resetSignal, setResetSignal] = useState(0)
+  // Ключ текущей волны для сравнения при polling (не сбрасывать игру
+  // каждые 3 сек — только при реальной смене волны/кода).
+  const prevWaveKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -132,6 +143,33 @@ export function TeamSessionScreen({
     }
   }, [sessionId, sessionActive])
 
+  // Sprint 8.x-4b-2a: пересборка CipherGame при смене волны/сессии (новые
+  // барабаны и таймер) + сброс сообщений результата. Ключ — session.id +
+  // currentWave + correctCode: polling пересоздаёт объект session каждые 3 сек,
+  // но ключ стабилен, пока не сменилась волна (или код после провала) — сброс
+  // НЕ на каждом опросе.
+  const waveKey =
+    session && session.status === 'active'
+      ? `${session.id}:${session.currentWave}:${session.cipherSession?.correctCode?.join('') ?? 'none'}`
+      : null
+
+  useEffect(() => {
+    if (waveKey === null) {
+      prevWaveKeyRef.current = null
+      return
+    }
+    if (prevWaveKeyRef.current === null) {
+      prevWaveKeyRef.current = waveKey
+      return
+    }
+    if (prevWaveKeyRef.current !== waveKey) {
+      prevWaveKeyRef.current = waveKey
+      setResetSignal((value) => value + 1)
+      setWaveError(null)
+      setWaveSuccess(null)
+    }
+  }, [waveKey])
+
   async function handleCreate() {
     setError(null)
     setNotice(null)
@@ -168,6 +206,56 @@ export function TeamSessionScreen({
     } finally {
       setReadyBusy(false)
     }
+  }
+  // Sprint 8.x-4b-2a: отправка cipher-ответа волны (submitTeamWave).
+  async function handleSubmitWave(sequence: string[]) {
+    if (!session) return
+    setWaveSubmitting(true)
+    setWaveError(null)
+    setWaveSuccess(null)
+
+    let accepted = false
+    try {
+      const result = await submitTeamWave(session.id, sequence)
+      accepted = result.accepted
+      if (!result.accepted) {
+        setWaveError(result.message ?? 'Неверная комбинация.')
+      } else if (result.sessionStatus === 'succeeded') {
+        const rootText =
+          result.awarded && result.awarded.root > 0
+            ? ` +${result.awarded.root} ROOT`
+            : ''
+        setWaveSuccess(`Миссия пройдена!${rootText}`)
+      } else {
+        // Верно, но сыграли не все: волна остаётся 'playing' (ждём
+        // остальных — плашка/блокировка в шаге 8.x-4b-2b).
+        setWaveSuccess('Верно!')
+      }
+    } catch (err) {
+      setWaveError((err as Error).message)
+    } finally {
+      setWaveSubmitting(false)
+    }
+
+    // После верного ответа — полный объект сессии (свежий myWavePlayed,
+    // при финализации cipherSession=null/new). Частичный result из
+    // submitTeamWave cipherSession не содержит. При провале волны свежий
+    // объект принесёт polling (~3 сек) — чтобы игрок успел увидеть ошибку
+    // до пересборки игры, здесь не обновляем.
+    if (accepted) {
+      try {
+        const fresh = await getTeamSessions()
+        setSession((current) => fresh.sessions[0] ?? current)
+      } catch {
+        // тихо: следующее polling обновит состояние.
+      }
+    }
+  }
+
+  // «ЗАНОВО» в командной волне: перезапуск таймера и позиций барабанов.
+  function handleResetWave() {
+    setWaveError(null)
+    setResetSignal((value) => value + 1)
   }
 
   return (
@@ -256,10 +344,33 @@ export function TeamSessionScreen({
           )}
 
           {session.status === 'active' && (
-            <p>
-              Игра началась! Здесь появится мини-игра (3 попытки, провал
-              одного — провал всех).
-            </p>
+            <>
+              {/* Счётчик — как в solo (cipher-timer), переиспользуем класс. */}
+              <div className="cipher-timer">
+                ПОПЫТКА {session.currentWave} / {session.maxWaves}
+              </div>
+
+              {session.cipherSession ? (
+                <CipherGame
+                  drums={session.cipherSession.drums}
+                  correctCode={session.cipherSession.correctCode}
+                  timeLimitSeconds={session.cipherSession.timeLimitSeconds}
+                  onSubmit={handleSubmitWave}
+                  isSubmitting={waveSubmitting}
+                  resetSignal={resetSignal}
+                  onReset={handleResetWave}
+                  // CipherGame сам рендерит ошибку (repair-error) — не дублируем.
+                  error={waveError}
+                  title="КОМАНДНАЯ МИНИ-ИГРА"
+                />
+              ) : (
+                <p>Игровая сессия завершена.</p>
+              )}
+
+              {waveSuccess && (
+                <p className="mission-success-card">{waveSuccess}</p>
+              )}
+            </>
           )}
         </div>
       )}
