@@ -86,6 +86,25 @@ class TeamSession(RuntimeTimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Sprint 8.x-2a: механика волн командной мини-игры (схема, логика — 8.x-2b+).
+    # Поля append-only: валидацию статусов/границ волн делает сервис,
+    # CheckConstraint намеренно не добавляем (не ломать существующие строки).
+    current_wave: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    max_waves: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default="3"
+    )
+    wave_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="playing", server_default="playing"
+    )
+    wave_played_members: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+    current_cipher_session: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, default=None, server_default=None
+    )
+
     __table_args__ = (
         CheckConstraint(
             "status IN ("
