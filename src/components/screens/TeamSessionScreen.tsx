@@ -14,6 +14,7 @@ import {
   submitTeamLocation,
   submitTeamWave,
   type EngineMission,
+  type EngineTeamAwarded,
   type EngineTeamSession,
 } from '../../api/engineApi'
 import { CipherGame } from '../CipherGame'
@@ -78,6 +79,25 @@ export function TeamSessionScreen({
   // Ключ текущей волны для сравнения при polling (не сбрасывать игру
   // каждые 3 сек — только при реальной смене волны/кода).
   const prevWaveKeyRef = useRef<string | null>(null)
+  // Sprint 8.x-4b-2b: отслеживание перехода waveStatus 'playing' → 'failed'
+  // (алиас «Член команды провалил попытку»). Бэкенд меняет волну атомарно,
+  // но контракт EngineTeamWaveStatus позволяет вошедшее в ответ/поллинг
+  // значение 'failed' — на него показываем временную плашку (3 сек).
+  const prevWaveStatusRef = useRef<string | null>(null)
+  const [waveFailedNotice, setWaveFailedNotice] = useState<string | null>(null)
+  // Итог командной мини-игры для финального экрана. Бэкенд /me отдаёт только
+  // активные сессии — succeeded/failed приходит только в ответе submit-wave,
+  // и на следующем поллинге сессия пропадает из /me (session становится null).
+  const [finalStatus, setFinalStatus] = useState<'succeeded' | 'failed' | null>(
+    null,
+  )
+  // Награды из ответа submit-wave (для финального экрана «МИССИЯ ПРОЙДЕНА»).
+  const [lastAwarded, setLastAwarded] = useState<EngineTeamAwarded | null>(null)
+  // Была ли у игрока активная сессия, которую поллинг потерял: после
+  // финализации /me вернёт пустой список, и по этому флагу показываем
+  // «Сессия завершена», а не форму создания (форма — только для тех, у кого
+  // активных сессий вообще не было).
+  const [sessionEnded, setSessionEnded] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -143,6 +163,10 @@ export function TeamSessionScreen({
         // Подхватываем и финализацию (succeeded/failed): сессия уходит из
         // ответа либо меняет status → setSession завершит этот эффект.
         setSession((result.sessions[0] ?? null) as EngineTeamSession | null)
+        // Sprint 8.x-4b-2b: активная сессия исчезла из /me — финализация
+        // кем-то из команды (исход нам неизвестен, показываем нейтральный
+        // «Сессия завершена»; свой исход уже зафиксирован в finalStatus).
+        if (result.sessions.length === 0) setSessionEnded(true)
       } catch {
         // Не спамить консоль каждые 3 сек: один warning, дальше пропускаем
         // опрос, последнее известное состояние остаётся в стейте.
@@ -188,6 +212,34 @@ export function TeamSessionScreen({
       setWaveSuccess(null)
     }
   }, [waveKey])
+
+  // Sprint 8.x-4b-2b: плашка «Член команды провалил попытку» — переход
+  // waveStatus 'playing' → 'failed' (кто-то из команды ошибся на волне).
+  // Вне активной сессии ref сбрасываем.
+  const waveStatusValue = session?.waveStatus ?? null
+  const waveStatusActive = session?.status === 'active'
+
+  useEffect(() => {
+    if (!waveStatusActive) {
+      prevWaveStatusRef.current = null
+      return
+    }
+    const previous = prevWaveStatusRef.current
+    prevWaveStatusRef.current = waveStatusValue
+    if (previous === 'playing' && waveStatusValue === 'failed') {
+      setWaveFailedNotice(
+        'Член команды провалил попытку. Переходим на следующую волну...',
+      )
+    }
+  }, [waveStatusValue, waveStatusActive])
+
+  // Плашка «член команды провалил» гаснет через 3 секунды (cleanup снимает
+  // таймер, если за это время пришёл новый статус/размонтировался экран).
+  useEffect(() => {
+    if (waveFailedNotice === null) return
+    const id = window.setTimeout(() => setWaveFailedNotice(null), 3000)
+    return () => window.clearTimeout(id)
+  }, [waveFailedNotice])
 
   async function handleCreate() {
     setError(null)
@@ -249,6 +301,18 @@ export function TeamSessionScreen({
         // Верно, но сыграли не все: волна остаётся 'playing' (ждём
         // остальных — плашка/блокировка в шаге 8.x-4b-2b).
         setWaveSuccess('Верно!')
+      }
+
+      // Sprint 8.x-4b-2b: фиксация исхода для финального экрана. /me отдаёт
+      // только активные сессии, поэтому succeeded/failed приходит только в
+      // ответе submit-wave; на следующем поллинге session станет null — без
+      // этого финальный экран не показать.
+      if (result.sessionStatus === 'succeeded') {
+        setFinalStatus('succeeded')
+        if (result.awarded) setLastAwarded(result.awarded)
+      } else if (result.sessionStatus === 'failed') {
+        setFinalStatus('failed')
+        setLastAwarded(null)
       }
     } catch (err) {
       setWaveError((err as Error).message)
@@ -401,7 +465,24 @@ export function TeamSessionScreen({
       {error && <p className="repair-error">{error}</p>}
       {notice && <p className="mission-success-card">{notice}</p>}
 
-      {!loading && session === null && (
+      {/* Sprint 8.x-4b-2b: сессия закончилась, но исход неизвестен (кто-то
+          из команды финализировал её, пока мы ждали) — сессия пропала из
+          /me. Не оставляем пустоту и не провоцируем создание новой сессии. */}
+      {!loading && session === null && finalStatus === null && sessionEnded && (
+        <div className="gas-block">
+          <h3>Сессия завершена</h3>
+          <p>Спасибо за игру! Командная сессия завершена.</p>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => onScreenChange('terminal')}
+          >
+            ВЕРНУТЬСЯ В КОНТУР
+          </button>
+        </div>
+      )}
+
+      {!loading && session === null && finalStatus === null && !sessionEnded && (
         <div className="gas-block">
           <h3>Создать сессию</h3>
 
@@ -432,6 +513,58 @@ export function TeamSessionScreen({
             onClick={handleCreate}
           >
             {creating ? 'Создаём…' : 'Создать сессию'}
+          </button>
+        </div>
+      )}
+
+      {/* Sprint 8.x-4b-2b: финальные экраны командной мини-игры. Показываем по
+          зафиксированному в submit-wave исходу (finalStatus) — из /me статус
+          succeeded/failed не приходит, а session на следующем поллинге станет
+          null. Кнопка возврата — в контур (миссии/терминал). */}
+      {!loading && finalStatus === 'succeeded' && (
+        <div className="mission-success-card">
+          <h3>МИССИЯ ПРОЙДЕНА</h3>
+          {session?.memberCount != null && session.memberCount > 0 && (
+            <p>Вся команда прошла волны.</p>
+          )}
+          {lastAwarded !== null && (
+            <>
+              {lastAwarded.root > 0 && (
+                <p>Награда: +{lastAwarded.root} ROOT</p>
+              )}
+              {lastAwarded.items.length > 0 && (
+                <p>
+                  Предметы:{' '}
+                  {lastAwarded.items
+                    .map((item) => `${item.title} ×${item.quantity}`)
+                    .join(', ')}
+                </p>
+              )}
+              {lastAwarded.storyNodeIds.length > 0 && (
+                <p>Открыто сюжетных узлов: {lastAwarded.storyNodeIds.length}</p>
+              )}
+            </>
+          )}
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => onScreenChange('terminal')}
+          >
+            ВЕРНУТЬСЯ В КОНТУР
+          </button>
+        </div>
+      )}
+
+      {!loading && finalStatus === 'failed' && (
+        <div className="repair-error">
+          <h3>МИССИЯ ПРОВАЛЕНА</h3>
+          <p>Одна из попыток команды провалена. Волны исчерпаны.</p>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => onScreenChange('terminal')}
+          >
+            ВЕРНУТЬСЯ В КОНТУР
           </button>
         </div>
       )}
@@ -508,13 +641,31 @@ export function TeamSessionScreen({
                 ПОПЫТКА {session.currentWave} / {session.maxWaves}
               </div>
 
-              {session.cipherSession ? (
+              {/* Sprint 8.x-4b-2b: плашка «член команды провалил попытку»
+                  (3 сек, гаснет по таймеру в useEffect). */}
+              {waveFailedNotice && (
+                <p className="repair-error">{waveFailedNotice}</p>
+              )}
+
+              {session.myWavePlayed && session.waveStatus === 'playing' ? (
+                /* Игрок уже верно сыграл эту волну — ждём остальных. Барабаны
+                   и таймер скрыты: повторный сабмит невозможен (409 «уже
+                   сыграл»), и auto-submit пустой sequence по таймауту
+                   CipherGame не сработает. */
+                <p className="admin-muted">
+                  {session.wavePlayedCount < session.memberCount
+                    ? `Вы сыграли. Ждём других игроков: ${session.wavePlayedCount}/${session.memberCount}.`
+                    : 'Вы сыграли. Ждём остальных участников.'}
+                </p>
+              ) : session.cipherSession ? (
                 <CipherGame
                   drums={session.cipherSession.drums}
                   correctCode={session.cipherSession.correctCode}
                   timeLimitSeconds={session.cipherSession.timeLimitSeconds}
                   onSubmit={handleSubmitWave}
-                  isSubmitting={waveSubmitting}
+                  // Sprint 8.x-4b-2b: myWavePlayed блокирует «ГОТОВО» —
+                  // защита от повторного сабмита на случай рассинхрона.
+                  isSubmitting={waveSubmitting || session.myWavePlayed}
                   resetSignal={resetSignal}
                   onReset={handleResetWave}
                   // CipherGame сам рендерит ошибку (repair-error) — не дублируем.
@@ -525,7 +676,7 @@ export function TeamSessionScreen({
                 <p>Игровая сессия завершена.</p>
               )}
 
-              {waveSuccess && (
+              {waveSuccess && !session.myWavePlayed && (
                 <p className="mission-success-card">{waveSuccess}</p>
               )}
             </>
