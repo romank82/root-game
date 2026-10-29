@@ -88,6 +88,13 @@ def _serialize_team_session(
 
     Только SELECT: заголовок миссии (без content/validation_config — закрытые
     данные), активные участники для memberCount и членство игрока.
+
+    Sprint 8.x-3: игровое состояние волн для фронта (мини-игра в TeamSession
+    Screen): currentWave/maxWaves/waveStatus, wavePlayedCount + myWavePlayed
+    (без player_id сыгравших и без имён/ников — только счётчик и флаг
+    текущего игрока), cipherSession для мини-игры (correctCode/drums/
+    timeLimitSeconds; None после финализации). "sessionStatus" не дублируем
+    — уже есть "status".
     """
     from app.geo_team_runtime_models import TeamSessionMember
     from app.models import Mission
@@ -106,6 +113,20 @@ def _serialize_team_session(
     active_count = sum(
         1 for member in members if member.status in ACTIVE_MEMBER_STATUSES
     )
+
+    wave_played = list(team_session.wave_played_members or [])
+
+    # cipherSession для мини-игры: ключи в camelCase (стиль фронта), хранение
+    # в БД (correct_code) не меняем. После финализации сессия отсутствует → None.
+    cipher_payload = None
+    if isinstance(team_session.current_cipher_session, dict):
+        cipher_payload = {
+            "correctCode": team_session.current_cipher_session.get("correct_code"),
+            "drums": team_session.current_cipher_session.get("drums"),
+            "timeLimitSeconds": team_session.current_cipher_session.get(
+                "timeLimitSeconds"
+            ),
+        }
 
     return {
         "id": team_session.id,
@@ -129,6 +150,13 @@ def _serialize_team_session(
             if my_membership is not None and my_membership.ready_at
             else None
         ),
+        # Sprint 8.x-3: игровое состояние волн командной мини-игры.
+        "currentWave": team_session.current_wave,
+        "maxWaves": team_session.max_waves,
+        "waveStatus": team_session.wave_status,
+        "wavePlayedCount": len(wave_played),
+        "myWavePlayed": player_id in wave_played,
+        "cipherSession": cipher_payload,
     }
 
 

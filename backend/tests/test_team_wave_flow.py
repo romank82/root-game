@@ -426,6 +426,16 @@ class TeamWaveFlowTests(unittest.TestCase):
             team_session = session.get(TeamSession, session_id)
             team_session.wave_played_members = players
 
+    def _serialize(self, session_id: str, player_id: str) -> dict:
+        """Сериализовать сессию для игрока (тот же путь, что фронт получит)."""
+
+        from app.geo_team_runtime_models import TeamSession
+        from app.team_missions_service import _serialize_team_session
+
+        with self.SessionLocal() as session:
+            team_session = session.get(TeamSession, session_id)
+            return _serialize_team_session(session, team_session, player_id)
+
     # ---- 8.x-2b: семантика волн -----------------------------------------
 
     def test_wave_success_when_all_played(self) -> None:
@@ -622,6 +632,77 @@ class TeamWaveFlowTests(unittest.TestCase):
 
         # Награда первого за волну 1 осталась в ledger (осознанное решение).
         self.assertEqual(self._root_balance(player_a), balance_before + 10)
+
+    # ---- 8.x-3: сериализация игрового состояния волн --------------------
+
+    def test_serialize_includes_wave_fields(self) -> None:
+        player_a = self._make_player()
+        player_b = self._make_player()
+        session_id, _ = self._make_wave_session([player_a, player_b])
+        code = self._correct_code(session_id)
+
+        payload = self._serialize(session_id, player_a)
+
+        # Контракт submit-wave: "sessionStatus" не дублируем — у сериализатора
+        # уже есть "status".
+        self.assertEqual(payload["status"], "active")
+        self.assertNotIn("sessionStatus", payload)
+        # Старые поля на месте.
+        self.assertEqual(payload["memberCount"], 2)
+        self.assertEqual(payload["myStatus"], "ready")
+        # Новые игровые поля.
+        self.assertEqual(payload["currentWave"], 1)
+        self.assertEqual(payload["maxWaves"], 3)  # attempts.maxAttempts из конфига
+        self.assertEqual(payload["waveStatus"], "playing")
+        self.assertEqual(payload["wavePlayedCount"], 0)
+        self.assertFalse(payload["myWavePlayed"])
+        self.assertIsNotNone(payload["cipherSession"])
+        self.assertEqual(
+            set(payload["cipherSession"].keys()),
+            {"correctCode", "drums", "timeLimitSeconds"},
+        )
+        self.assertEqual(payload["cipherSession"]["correctCode"], code)
+        self.assertIsInstance(payload["cipherSession"]["drums"], list)
+        self.assertTrue(payload["cipherSession"]["drums"])
+        self.assertTrue(
+            all(isinstance(drum, list) for drum in payload["cipherSession"]["drums"])
+        )
+
+    def test_serialize_my_wave_played_true_after_submit(self) -> None:
+        player_a = self._make_player()
+        player_b = self._make_player()
+        session_id, _ = self._make_wave_session([player_a, player_b])
+
+        code = self._correct_code(session_id)
+        submit_wave_answer_entrypoint(player_a, session_id, code)
+
+        payload_a = self._serialize(session_id, player_a)
+        self.assertTrue(payload_a["myWavePlayed"])
+        self.assertEqual(payload_a["wavePlayedCount"], 1)
+        self.assertEqual(payload_a["waveStatus"], "playing")
+        self.assertEqual(payload_a["currentWave"], 1)
+        self.assertEqual(payload_a["status"], "active")
+
+        # Второй игрок ещё не сыграл — его флаг False, счётчик тот же.
+        payload_b = self._serialize(session_id, player_b)
+        self.assertFalse(payload_b["myWavePlayed"])
+        self.assertEqual(payload_b["wavePlayedCount"], 1)
+
+    def test_serialize_cipher_session_none_after_finalize(self) -> None:
+        player_a = self._make_player()
+        player_b = self._make_player()
+        session_id, _ = self._make_wave_session([player_a, player_b])
+
+        code = self._correct_code(session_id)
+        submit_wave_answer_entrypoint(player_a, session_id, code)
+        submit_wave_answer_entrypoint(player_b, session_id, code)
+
+        payload = self._serialize(session_id, player_a)
+        self.assertEqual(payload["status"], "succeeded")
+        self.assertEqual(payload["waveStatus"], "passed")
+        self.assertIsNone(payload["cipherSession"])
+        self.assertEqual(payload["wavePlayedCount"], 2)
+        self.assertTrue(payload["myWavePlayed"])
 
 
 if __name__ == "__main__":
