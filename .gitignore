@@ -58,3 +58,21 @@ package-lock.json
 # Editor backups
 *.save
 *.bak
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+.parcel-cache/
+.vite/
+.next/
+out/
+*.db
+*.sqlite
+*.sqlite3
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
