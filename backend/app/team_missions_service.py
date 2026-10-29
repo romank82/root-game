@@ -1047,12 +1047,15 @@ def _submit_wave_answer(
     session_id: str,
     sequence: list[str] | None,
 ) -> dict:
-    """Sprint 8.x-2b-1: игрок отвечает на cipher волны.
+    """Sprint 8.x-2b-1/2a: игрок отвечает на cipher волны.
 
-    ВАЖНО: переходы волн и failure миссии — НЕ в этом шаге (8.x-2b-2).
-    TeamSession.status здесь НЕ меняется (остаётся 'active'): правильный
-    ответ → wave_status='passed' + MissionRun succeeded + награды, неверный
-    → wave_status='failed', без наград и без перехода.
+    Ошибка игрока → команда переходит к следующей волне (новая
+    current_cipher_session, wave_played_members сброшен); когда волн больше
+    нет — миссия завершается неудачей (TeamSession.status='failed',
+    terminal_at, current_cipher_session=None). Верный ответ → MissionRun
+    succeeded + награды; когда сыграли ВСЕ активные члены — миссия succeeded
+    (wave_status='passed'), иначе волна остаётся 'playing'. Мусорный
+    sequence — 400 без смены статусов (hotfix 8.x-2b-1).
     """
     from app.geo_team_contract import (
         GeoTeamConfigurationError,
@@ -1073,8 +1076,15 @@ def _submit_wave_answer(
     if player.status != "active":
         raise _mission_error(403, "Игровой профиль неактивен.")
 
-    # 2. TeamSession существует, status='active'.
-    team_session = session.get(TeamSession, session_id)
+    # 2. TeamSession существует, status='active'. Row-lock (FOR UPDATE) от
+    #    гонок: параллельные ответы участников пишут в одну строку
+    #    (wave_played_members/current_wave/status) — паттерн проекта
+    #    (admin_chapters.py, mission_engine._get_root_wallet_for_update);
+    #    на SQLite with_for_update — no-op. Транзакция — та же, что и записи
+    #    ниже (entrypoint открывает SessionLocal.begin()).
+    team_session = session.scalar(
+        select(TeamSession).where(TeamSession.id == session_id).with_for_update()
+    )
     if team_session is None:
         raise _mission_error(404, "Командная сессия не найдена.")
     if team_session.status != "active":
@@ -1136,20 +1146,36 @@ def _submit_wave_answer(
     )
 
     if not accepted:
-        # Неверная комбинация: провал волны, без перехода и без наград.
-        team_session.wave_status = "failed"
+        # Реальная ошибка игрока (НЕ мусор формата: тот отсечён выше как 400).
+        # Волна провалена командой — переходим к следующей; когда волн больше
+        # нет, миссия завершается неудачей. Наград нет (8.x-2b-2a).
+        team_session.current_wave += 1
+        if team_session.current_wave > team_session.max_waves:
+            team_session.status = "failed"
+            team_session.terminal_at = _utcnow()
+            team_session.current_cipher_session = None
+            team_session.wave_status = "failed"
+        else:
+            # Есть ещё волны: свежая cipher-сессия, сыгравшие обнуляются.
+            team_session.wave_status = "playing"
+            team_session.wave_played_members = []
+            team_session.current_cipher_session = _generate_cipher_session_for_wave(
+                session, team_session
+            )
         session.flush()
         return {
             "sessionId": team_session.id,
-            "waveStatus": "failed",
+            "waveStatus": team_session.wave_status,
+            "currentWave": team_session.current_wave,
+            "maxWaves": team_session.max_waves,
+            "sessionStatus": team_session.status,
             "accepted": False,
             "message": "Неверная комбинация.",
         }
 
-    # Правильный ответ: волна пройдена. TeamSession.status НЕ меняем (8.x-2b-2).
+    # Правильный ответ: волна пройдена этим игроком (награды сразу).
     played.append(player_id)
     team_session.wave_played_members = played
-    team_session.wave_status = "passed"
 
     from app.mission_engine import _award_mission_rewards
 
@@ -1166,10 +1192,32 @@ def _submit_wave_answer(
     )
     session.flush()
 
+    # Волна завершена, когда сыграли ВСЕ активные участники (статусы те же,
+    # что считает memberCount в _serialize_team_session — ACTIVE_MEMBER_STATUSES).
+    # Тогда финализируем миссию; иначе — ждём остальных.
+    active_players = session.scalars(
+        select(TeamSessionMember.player_id).where(
+            TeamSessionMember.team_session_id == team_session.id,
+            TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
+        )
+    ).all()
+    played_set = set(played)
+    if active_players and all(pid in played_set for pid in active_players):
+        team_session.wave_status = "passed"
+        team_session.status = "succeeded"
+        team_session.terminal_at = _utcnow()
+        team_session.current_cipher_session = None
+    else:
+        team_session.wave_status = "playing"
+    session.flush()
+
     return {
         "sessionId": team_session.id,
         "missionRunId": mission_run.id,
-        "waveStatus": "passed",
+        "waveStatus": team_session.wave_status,
+        "currentWave": team_session.current_wave,
+        "maxWaves": team_session.max_waves,
+        "sessionStatus": team_session.status,
         "accepted": True,
         "awarded": awarded,
     }
