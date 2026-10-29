@@ -71,3 +71,15 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+wallets.toml
+**/wallets.toml
+*.db.bak
+*.db.bak-*
+**/*.db.bak
+**/*.db.bak-*
+backend/chimera.db.bak-*
+**/backups/
+*.bak.*
+**/*.bak
+**/*.bak.*
+**/*.backup
