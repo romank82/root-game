@@ -2,12 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { Screen } from '../../types/game'
 import {
   createTeamSession,
-  devBotActivate,
-  devBotJoin,
-  devBotLocation,
-  devBotPlayWave,
-  devBotReady,
-  devLocationMe,
   getEngineBootstrap,
   getTeamSessions,
   markTeamSessionReady,
@@ -29,11 +23,6 @@ interface TeamSessionScreenProps {
 }
 
 const TEAM_MISSION_LAYER = 'team'
-
-// Sprint 8.x-4-dev-bot-ui: кнопки управления dev-ботом видны только в dev
-// (vite dev server). В production build import.meta.env.DEV === false —
-// ветка не рендерится и выкидывается минификатором. Удалим вместе с dev-bot.
-const DEV_BOT_UI_ENABLED = import.meta.env.DEV
 
 const SESSION_STATUS_LABELS: Record<string, string> = {
   collecting: 'Сбор команды',
@@ -67,9 +56,6 @@ export function TeamSessionScreen({
   const [waveSubmitting, setWaveSubmitting] = useState(false)
   const [waveError, setWaveError] = useState<string | null>(null)
   const [waveSuccess, setWaveSuccess] = useState<string | null>(null)
-  // Sprint 8.x-4-dev-bot-ui: состояние кнопок dev-бота (только dev).
-  const [devBotBusy, setDevBotBusy] = useState(false)
-  const [devBotNotice, setDevBotNotice] = useState<string | null>(null)
   // Sprint 8.x-4-location-ui: отметка гео-присутствия (proof для активации).
   const [locationBusy, setLocationBusy] = useState(false)
   const [locationNotice, setLocationNotice] = useState<string | null>(null)
@@ -413,48 +399,6 @@ export function TeamSessionScreen({
     }
   }
 
-  // Sprint 8.x-4-dev-bot-ui: выполнить действие dev-бота (только dev).
-  // После каждого вызова подтягиваем свежее состояние сессии, чтобы волны/
-  // статус сразу отразились на экране.
-  async function runDevBot(
-    action:
-      | 'join'
-      | 'ready'
-      | 'location'
-      | 'locationMe'
-      | 'activate'
-      | 'playWave',
-  ) {
-    if (!session) return
-    setDevBotBusy(true)
-    setDevBotNotice(null)
-    try {
-      const callers: Record<
-        typeof action,
-        () => Promise<Record<string, unknown>>
-      > = {
-        join: () => devBotJoin(session.id),
-        ready: () => devBotReady(session.id),
-        location: () => devBotLocation(session.id),
-        locationMe: () => devLocationMe(session.id),
-        activate: () => devBotActivate(session.id),
-        playWave: () => devBotPlayWave(session.id),
-      }
-      const result = await callers[action]()
-      setDevBotNotice(`БОТ: ${JSON.stringify(result)}`)
-      try {
-        const fresh = await getTeamSessions()
-        setSession((current) => fresh.sessions[0] ?? current)
-      } catch {
-        // тихо: polling обновит состояние.
-      }
-    } catch (err) {
-      setDevBotNotice(`БОТ: ошибка — ${(err as Error).message}`)
-    } finally {
-      setDevBotBusy(false)
-    }
-  }
-
   return (
     <section className="inventory">
       <p className="eyebrow">КОМАНДНАЯ МИССИЯ / СЕССИЯ</p>
@@ -680,72 +624,6 @@ export function TeamSessionScreen({
                 <p className="mission-success-card">{waveSuccess}</p>
               )}
             </>
-          )}
-
-          {/* Sprint 8.x-4-dev-bot-ui: временные кнопки dev-бота. Показываются
-              при любой активной сессии (collecting/ready_to_start/active) —
-              join/ready/location/activate нужны ДО старта игры. session на этом
-              уровне гарантированно не null (блок под {!loading && session !==
-              null}). Удаляются вместе с dev-bot. */}
-          {DEV_BOT_UI_ENABLED && (
-            <div className="dev-bot-panel">
-              <p className="admin-muted">
-                DEV: управление ботом (временно, удалим после проверки)
-              </p>
-              <div className="repair-actions dev-bot-actions">
-                <button
-                  type="button"
-                  className="repair-clear-button"
-                  disabled={devBotBusy}
-                  onClick={() => void runDevBot('join')}
-                >
-                  БОТ: вступить
-                </button>
-                <button
-                  type="button"
-                  className="repair-clear-button"
-                  disabled={devBotBusy}
-                  onClick={() => void runDevBot('ready')}
-                >
-                  БОТ: готов
-                </button>
-                <button
-                  type="button"
-                  className="repair-clear-button"
-                  disabled={devBotBusy}
-                  onClick={() => void runDevBot('location')}
-                >
-                  БОТ: на месте
-                </button>
-                <button
-                  type="button"
-                  className="repair-clear-button"
-                  disabled={devBotBusy}
-                  onClick={() => void runDevBot('locationMe')}
-                >
-                  БОТ: я на месте
-                </button>
-                <button
-                  type="button"
-                  className="repair-clear-button"
-                  disabled={devBotBusy}
-                  onClick={() => void runDevBot('activate')}
-                >
-                  БОТ: старт
-                </button>
-                <button
-                  type="button"
-                  className="repair-clear-button"
-                  disabled={devBotBusy}
-                  onClick={() => void runDevBot('playWave')}
-                >
-                  БОТ: пройти волну
-                </button>
-              </div>
-              {devBotNotice && (
-                <p className="dev-bot-notice">{devBotNotice}</p>
-              )}
-            </div>
           )}
         </div>
       )}
