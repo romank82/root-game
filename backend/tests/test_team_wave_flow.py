@@ -426,6 +426,20 @@ class TeamWaveFlowTests(unittest.TestCase):
             team_session = session.get(TeamSession, session_id)
             team_session.wave_played_members = players
 
+    def _awarded_snapshot(self, session_id: str, player_id: str):
+        """awarded_snapshot игрока в этой сессии (или None). 8.x-4-final-status-1."""
+
+        from app.geo_team_runtime_models import TeamSessionMember
+
+        with self.SessionLocal() as session:
+            member = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == session_id,
+                    TeamSessionMember.player_id == player_id,
+                )
+            )
+            return member.awarded_snapshot if member is not None else None
+
     def _serialize(self, session_id: str, player_id: str) -> dict:
         """Сериализовать сессию для игрока (тот же путь, что фронт получит)."""
 
@@ -632,6 +646,85 @@ class TeamWaveFlowTests(unittest.TestCase):
 
         # Награда первого за волну 1 осталась в ledger (осознанное решение).
         self.assertEqual(self._root_balance(player_a), balance_before + 10)
+
+    # ---- 8.x-4-final-status-1: снапшот наград в TeamSessionMember ----------
+
+    def test_awarded_snapshot_written_on_success(self) -> None:
+        """Оба игрока верно ответили → у КАЖДОГО в awarded_snapshot свои награды."""
+        player_a = self._make_player()
+        player_b = self._make_player()
+        session_id, _ = self._make_wave_session(
+            [player_a, player_b], with_rewards=True
+        )
+
+        code = self._correct_code(session_id)
+        first = submit_wave_answer_entrypoint(player_a, session_id, code)
+        self.assertEqual(first["accepted"], True)
+        self.assertEqual(first["sessionStatus"], "active")  # B ещё не сыграл
+
+        second = submit_wave_answer_entrypoint(player_b, session_id, code)
+        self.assertEqual(second["accepted"], True)
+        self.assertEqual(second["sessionStatus"], "succeeded")
+
+        for player_id in (player_a, player_b):
+            snap = self._awarded_snapshot(session_id, player_id)
+            self.assertIsInstance(snap, dict)
+            self.assertEqual(snap["root"], 10)  # ROOT-награда из _make_team_mission_rewards
+            self.assertIsInstance(snap["items"], list)
+            self.assertEqual(len(snap["items"]), 1)
+            self.assertEqual(snap["items"][0]["quantity"], 1)
+            self.assertIsInstance(snap["storyNodeIds"], list)
+            self.assertEqual(snap["storyNodeIds"], [])
+
+        self.assertEqual(self._snapshot(session_id)["status"], "succeeded")
+
+    def test_awarded_snapshot_none_on_failure(self) -> None:
+        """Ошибка ответа → наград нет, awarded_snapshot остаётся None."""
+        player_a = self._make_player()
+        player_b = self._make_player()
+        session_id, _ = self._make_wave_session([player_a, player_b])
+
+        wrong = submit_wave_answer_entrypoint(
+            player_a, session_id, self._wrong_sequence()
+        )
+        self.assertFalse(wrong["accepted"])
+        self.assertEqual(wrong["sessionStatus"], "active")  # остались волны
+
+        self.assertIsNone(self._awarded_snapshot(session_id, player_a))
+        self.assertIsNone(self._awarded_snapshot(session_id, player_b))
+
+    def test_awarded_snapshot_kept_after_team_failure(self) -> None:
+        """A верно ответил (снапшот записан), B ошибается (волна провалена
+        для всех) → награда A остаётся зафиксированной, у B — None."""
+        player_a = self._make_player()
+        player_b = self._make_player()
+        session_id, _ = self._make_wave_session(
+            [player_a, player_b], with_rewards=True
+        )
+
+        code = self._correct_code(session_id)
+        correct = submit_wave_answer_entrypoint(player_a, session_id, code)
+        self.assertEqual(correct["accepted"], True)
+        self.assertEqual(correct["waveStatus"], "playing")
+
+        wrong = submit_wave_answer_entrypoint(
+            player_b, session_id, self._wrong_sequence()
+        )
+        self.assertFalse(wrong["accepted"])
+        self.assertEqual(wrong["currentWave"], 2)
+        self.assertEqual(wrong["waveStatus"], "playing")  # свежая волна 2
+
+        snap = self._snapshot(session_id)
+        self.assertEqual(snap["current_wave"], 2)
+        self.assertEqual(snap["status"], "active")
+
+        # Награда A за волну 1 осталась и зафиксирована в снапшоте.
+        snap_a = self._awarded_snapshot(session_id, player_a)
+        self.assertIsNotNone(snap_a)
+        self.assertEqual(snap_a["root"], 10)
+        self.assertEqual(len(snap_a["items"]), 1)
+        # Ошибившийся B наград не получал.
+        self.assertIsNone(self._awarded_snapshot(session_id, player_b))
 
     # ---- 8.x-3: сериализация игрового состояния волн --------------------
 

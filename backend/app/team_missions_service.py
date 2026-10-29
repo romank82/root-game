@@ -1220,6 +1220,23 @@ def _submit_wave_answer(
     )
     session.flush()
 
+    # Sprint 8.x-4-final-status-1: фиксируем награды игрока в снапшоте
+    # TeamSessionMember (append-only, NULL = наград не было), чтобы при
+    # финализации сессии (succeeded/failed) отдать их ВСЕМ членам команды,
+    # а не только последнему отправившему. Пишется в той же транзакции,
+    # что и награды. Повторный верный ответ не пройдёт сюда (409 «Вы уже
+    # сыграли в этой волне» выше); перезапись тем же awarded идемпотентна —
+    # ledger не дублируется (unique wallet_id+reference_type+reference_id).
+    member = session.scalar(
+        select(TeamSessionMember).where(
+            TeamSessionMember.team_session_id == team_session.id,
+            TeamSessionMember.player_id == player_id,
+        )
+    )
+    if member is not None:
+        member.awarded_snapshot = awarded
+    session.flush()
+
     # Волна завершена, когда сыграли ВСЕ активные участники (статусы те же,
     # что считает memberCount в _serialize_team_session — ACTIVE_MEMBER_STATUSES).
     # Тогда финализируем миссию; иначе — ждём остальных.

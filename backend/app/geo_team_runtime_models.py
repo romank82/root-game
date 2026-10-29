@@ -259,6 +259,15 @@ class TeamSessionMember(RuntimeTimestampMixin, Base):
     ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Sprint 8.x-4-final-status-1: снапшот наград игрока за эту командную
+    # сессию — dict из _award_mission_rewards: {"root": int, "items": [...],
+    # "storyNodeIds": [...]}. Пишется в _submit_wave_answer в той же
+    # транзакции, что и награды (ветка верного ответа). None — «наград нет /
+    # ещё не записано» (append-only, старые строки получают None).
+    awarded_snapshot: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, default=None
+    )
+
     __table_args__ = (
         UniqueConstraint(
             "team_session_id",
