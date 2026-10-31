@@ -62,6 +62,10 @@ from app.team_missions_service import (
     submit_location_entrypoint,
     submit_wave_answer_entrypoint,
 )
+from app.team_session_chat_service import (
+    list_messages_entrypoint,
+    send_message_entrypoint,
+)
 from app.transfer_service import transfer_root_entrypoint
 from app.stars_service import (
     create_invoice_link,
@@ -290,6 +294,10 @@ class LocationSubmitPayload(BaseModel):
 
 class TeamWaveSubmitPayload(BaseModel):
     sequence: list[str] | None = Field(default=None, max_length=32)
+
+class TeamSessionMessagePayload(BaseModel):
+    """POST /api/v1/engine/team-missions/sessions/{id}/messages (6.6-a)."""
+    text: str = Field(min_length=1, max_length=1000)
 
 def _new_player_id() -> str:
     return f"player-{uuid4().hex}"
@@ -1654,6 +1662,37 @@ def submit_wave_route(
         return submit_wave_answer_entrypoint(
             player_id, session_id, payload.sequence
         )
+    except MissionEngineError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail)
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/team-missions/sessions/{session_id}/messages")
+def list_session_messages_route(
+    request: Request,
+    session_id: str,
+    limit: int = 50,
+    before: str | None = None,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Чат сессии (6.6-a): только участники, только пока сессия активна."""
+    try:
+        return list_messages_entrypoint(player_id, session_id, limit, before)
+    except MissionEngineError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail)
+
+
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/team-missions/sessions/{session_id}/messages")
+def send_session_message_route(
+    request: Request,
+    session_id: str,
+    payload: TeamSessionMessagePayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Отправка сообщения в чат сессии (6.6-a)."""
+    try:
+        return send_message_entrypoint(player_id, session_id, payload.text)
     except MissionEngineError as error:
         raise HTTPException(status_code=error.status_code, detail=error.detail)
 

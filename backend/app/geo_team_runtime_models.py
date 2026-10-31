@@ -560,3 +560,43 @@ class PlayerFallbackEntitlement(RuntimeTimestampMixin, Base):
             name="ck_player_fallback_entitlements_status",
         ),
     )
+
+
+class TeamSessionMessage(RuntimeTimestampMixin, Base):
+    """Сообщение чата командной сессии (этап 6.6-a).
+
+    Чат живёт ТОЛЬКО в пределах TeamSession: после финала сессии
+    (succeeded/failed/expired/cancelled_before_start) новые сообщения
+    запрещены, старые остаются в истории (физическое удаление запрещено).
+    Модерации пока нет: поле status заложено под скрытие модератором
+    (visible|hidden) в 6.7.b — hidden не отдаётся в списке.
+    """
+
+    __tablename__ = "team_session_messages"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    team_session_id: Mapped[str] = mapped_column(
+        ForeignKey("team_sessions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    text: Mapped[str] = mapped_column(String(1000), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="visible")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('visible', 'hidden')",
+            name="ck_team_session_messages_status",
+        ),
+        Index(
+            "ix_team_session_messages_session_created",
+            "team_session_id",
+            "created_at",
+        ),
+    )
+
