@@ -55,7 +55,11 @@ from app.mission_engine import (
     MissionEngineError,
 )
 from app.shop_service import SHOP_ENABLED_KEY, SHOP_PRICE_ROOT_KEY, purchase_catalog_item
-from app.team_missions_service import create_team_session_entrypoint, mark_ready_entrypoint
+from app.team_missions_service import (
+    create_team_session_entrypoint,
+    join_team_session,
+    mark_ready_entrypoint,
+)
 from tests.test_geo_team_contract import valid_team_config
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -788,6 +792,12 @@ class Economy93FinanceTests(unittest.TestCase):
         ]
         mission_id = self._make_team_mission(validation_config=config)
         session_id = create_team_session_entrypoint(leader, mission_id)["id"]
+        # С 8.x (88dedfb) командные сессии создаются без остальных участников:
+        # в TeamSessionMember попадает только создатель, остальные вступают
+        # через join-session. Без второго участника сессия уходит в
+        # ready_to_start уже после ready лидера, и повторный ready падает на
+        # проверке статуса сессии, а не на «Вы уже отметились готовым».
+        join_team_session(member, session_id)
 
         self._seed_item(required_item_id)
         wallet_id = self._seed_root_wallet(leader, 100)
