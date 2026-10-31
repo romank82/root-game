@@ -283,13 +283,14 @@ class TeamWaveFlowTests(unittest.TestCase):
         entry_item_id = f"item-{uuid.uuid4().hex}"
         config["economy"]["requiredItems"] = [{"itemId": entry_item_id, "quantity": 1}]
         self._seed_item(entry_item_id)
+        for player_id in players:
+            self._seed_root_wallet(player_id, 100)
+            self._seed_key(player_id, entry_item_id, 1)
+
         mission_id = self._make_team_mission(validation_config=config)
         session_id = create_team_session_entrypoint(players[0], mission_id)["id"]
         for player_id in players[1:]:
             join_team_session(player_id, session_id)
-        for player_id in players:
-            self._seed_root_wallet(player_id, 100)
-            self._seed_key(player_id, entry_item_id, 1)
         for player_id in players:
             mark_ready_entrypoint(player_id, session_id)
         self._seed_proofs(session_id, players, config)

@@ -791,6 +791,13 @@ class Economy93FinanceTests(unittest.TestCase):
             {"itemId": required_item_id, "quantity": 1}
         ]
         mission_id = self._make_team_mission(validation_config=config)
+
+        self._seed_item(required_item_id)
+        leader_wallet_id = self._seed_root_wallet(leader, 100)
+        self._seed_key(leader, required_item_id, 2)
+        self._seed_root_wallet(member, 100)
+        self._seed_key(member, required_item_id, 1)
+
         session_id = create_team_session_entrypoint(leader, mission_id)["id"]
         # С 8.x (88dedfb) командные сессии создаются без остальных участников:
         # в TeamSessionMember попадает только создатель, остальные вступают
@@ -799,16 +806,12 @@ class Economy93FinanceTests(unittest.TestCase):
         # проверке статуса сессии, а не на «Вы уже отметились готовым».
         join_team_session(member, session_id)
 
-        self._seed_item(required_item_id)
-        wallet_id = self._seed_root_wallet(leader, 100)
-        self._seed_key(leader, required_item_id, 2)
-
         # Первый ready: списание entry (root 25 + 1 ключ), статус ready.
         first = mark_ready_entrypoint(leader, session_id)
         self.assertEqual(first["myStatus"], "ready")
         self.assertEqual(self._root_balance(leader), 75)
         self.assertEqual(
-            self._count_wallet_transactions(wallet_id, ENTRY_DEBIT_REFERENCE_TYPE),
+            self._count_wallet_transactions(leader_wallet_id, ENTRY_DEBIT_REFERENCE_TYPE),
             1,
         )
 
@@ -820,7 +823,7 @@ class Economy93FinanceTests(unittest.TestCase):
 
         self.assertEqual(self._root_balance(leader), 75)
         self.assertEqual(
-            self._count_wallet_transactions(wallet_id, ENTRY_DEBIT_REFERENCE_TYPE),
+            self._count_wallet_transactions(leader_wallet_id, ENTRY_DEBIT_REFERENCE_TYPE),
             1,
         )
         with self.SessionLocal() as session:

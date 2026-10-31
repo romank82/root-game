@@ -214,8 +214,8 @@ def _create_team_session(
     Сессия стартует с одним участником — создателем (status='joined');
     состав расширяется join-session эндпоинтом (следующий шаг). Все правила
     и количества берутся из validation_config миссии (код не хардкодит
-    экономику). 7.1.b не списывает entryFee/ключи (7.1.c), не проверяет
-    гео (7.1.d) и не переводит сессию из 'collecting'.
+    EntryFee и расходуемые ключи списываются при создании сессии (accept),
+    не проверяется гео (7.1.d) и сессия не переводится из 'collecting'.
     """
     from app.geo_team_contract import (
         GeoTeamConfigurationError,
@@ -300,6 +300,18 @@ def _create_team_session(
     )
 
     session.flush()
+    from app.mission_engine import _apply_entry_debit
+
+    _apply_entry_debit(
+        session,
+        player_id=player_id,
+        mission=mission,
+        root_debit=config["economy"]["entryFeeRootAtomic"],
+        requirements=config["economy"]["requiredItems"],
+        reference_id=team_session.id,
+        mission_run_id=mission_run.id,
+    )
+
     return _serialize_team_session(session, team_session, player_id)
 
 
@@ -345,10 +357,8 @@ def _mark_ready(
     """Подтвердить готовность игрока к старту командной миссии (7.1.c).
 
     Все числа — из mission.validation_config.economy (в коде нет хардкода).
-    Списание entryFee и расходуемых ключей — ядро движка _apply_entry_debit
-    (policy=None, команда читает validation_config): идемпотентно по
-    reference_id=team_session.id и atomic в одной транзакции со сменой
-    статусов ниже. Когда все активные участники ('joined'/'ready') стали
+    EntryFee и расходуемые ключи уже списаны при accept (create/join).
+    Когда все активные участники ('joined'/'ready') стали
     'ready' — сессия переходит collecting → ready_to_start, а при свежих
     гео-proof у всех — авто-старт в active (без лидера).
     """
@@ -402,25 +412,11 @@ def _mark_ready(
     except GeoTeamConfigurationError:
         raise _mission_error(409, "Конфигурация командной миссии невалидна.")
 
-    # 7. Списание entryFeeRootAtomic и ключей — в той же транзакции, что и
-    #    изменения статусов ниже (SessionLocal.begin() коммитит в конце).
-    from app.mission_engine import _apply_entry_debit
-
-    _apply_entry_debit(
-        session,
-        player_id=player_id,
-        mission=mission,
-        root_debit=config["economy"]["entryFeeRootAtomic"],
-        requirements=config["economy"]["requiredItems"],
-        reference_id=team_session.id,
-        mission_run_id=member.mission_run_id,
-    )
-
-    # 8. Участник отметился готовым.
+    # 7. Участник отметился готовым.
     member.status = "ready"
     member.ready_at = datetime.now(timezone.utc)
 
-    # 9. Все активные участники в 'ready' → сессия готова к старту, а при
+    # 8. Все активные участники в 'ready' → сессия готова к старту, а при
     #    свежих гео-proof у всех — авто-старт в active (без лидера).
     #    Участники статусов left/removed/settled не учитываются.
     session.flush()  # зафиксировать 'ready' текущего участника до выборки
@@ -473,7 +469,7 @@ def _join_team_session(
         TeamSession,
         TeamSessionMember,
     )
-    from app.models import GamePlayer
+    from app.models import GamePlayer, Mission
 
     # 1. Player существует и активен (паттерн _ensure_player).
     player = session.get(GamePlayer, player_id)
@@ -553,6 +549,22 @@ def _join_team_session(
     )
     session.flush()
 
+    mission = session.get(Mission, team_session.mission_id)
+    if mission is None or mission.status != "published":
+        raise _mission_error(409, "Миссия недоступна.")
+
+    from app.mission_engine import _apply_entry_debit
+
+    _apply_entry_debit(
+        session,
+        player_id=player_id,
+        mission=mission,
+        root_debit=config["economy"]["entryFeeRootAtomic"],
+        requirements=config["economy"]["requiredItems"],
+        reference_id=team_session.id,
+        mission_run_id=mission_run.id,
+    )
+
     return _serialize_team_session(session, team_session, player_id)
 
 
@@ -575,7 +587,7 @@ def _refund_team_entry(
 ) -> bool:
     """Возврат платы участнику командной сессии (зеркало _refund_mission_entry).
 
-    При mark_ready списание выполнял _apply_entry_debit с reference_id =
+    При create/join списание выполняет _apply_entry_debit с reference_id =
     team_session.id (ROOT: WalletTransaction 'mission_entry_debit'; ключи:
     InventoryEvent 'consumed'). Возврат зеркалит ровно эти записи для ЭТОГО
     игрока: credit-проводка 'mission_entry_refund' с тем же reference_id и
@@ -748,18 +760,13 @@ def _leave_team_session(
     if member.status not in ACTIVE_MEMBER_STATUSES:
         raise _mission_error(409, "Членство в сессии неактивно.")
 
-    # 4. Возврат платы в окне TEAM_CANCEL_REFUND_SECONDS от МОМЕНТА ОПЛАТЫ —
-    #    member.ready_at (entry списывается в _mark_ready). Как в solo, где
-    #    accept = оплата, окно = CANCEL_DEADLINE_SECONDS. Окно от created_at
-    #    сессии не годится: время лобби (ожидание других участников) съедало
-    #    3 минуты, и к моменту Ready возврат уже был невозможен. Не Ready
-    #    (ready_at None) — взнос не списан, возвращать нечего.
+    # 4. Возврат платы в окне TEAM_CANCEL_REFUND_SECONDS от accept/create.
     refunded = False
     now = _utcnow()
-    ready_at = ensure_utc(member.ready_at)
+    session_created_at = ensure_utc(team_session.created_at)
     cancel_window_end = (
-        ready_at + timedelta(seconds=TEAM_CANCEL_REFUND_SECONDS)
-        if ready_at is not None
+        session_created_at + timedelta(seconds=TEAM_CANCEL_REFUND_SECONDS)
+        if session_created_at is not None
         else None
     )
     mission = session.get(Mission, team_session.mission_id)

@@ -266,8 +266,8 @@ export function TeamSessionScreen({
   }, [chatOpen, sessionId])
 
   // Sprint 8.x-4-ux-fix: гео-присутствие отправляется АВТОМАТИЧЕСКИ один раз
-  // при открытии экрана, пока сессия в collecting/ready_to_start (proof нужен
-  // бэкенду для активации). Кнопка «ОТМЕТИТЬ ПРИСУТСТВИЕ» удалена — это был
+  // после сбора команды, в ready_to_start (proof нужен бэкенду для активации).
+  // Кнопка «ОТМЕТИТЬ ПРИСУТСТВИЕ» удалена — это был
   // костыль dev-проверки. proofSentRef ставится ДО вызова, чтобы polling
   // (getTeamSessions каждые 3 сек обновляет session) не спамил запросами.
   // Повтор при «вне зоны» — перезаход на экран (новый mount → новая попытка).
@@ -276,7 +276,7 @@ export function TeamSessionScreen({
   useEffect(() => {
     if (proofSentRef.current) return
     if (!session) return
-    if (session.status !== 'collecting' && session.status !== 'ready_to_start') {
+    if (session.status !== 'ready_to_start') {
       return
     }
     proofSentRef.current = true
@@ -461,11 +461,10 @@ export function TeamSessionScreen({
   }
 
   // Отметить гео-присутствие в командной сессии: свежий verified proof нужен
-  // для активации (все готовы + все в зоне). Бэкенд принимает proof только
-  // в статусах 'collecting' / 'ready_to_start'.
+  // для активации после того, как все участники готовы.
   async function handleSubmitLocation() {
     if (!session) return
-    if (session.status !== 'collecting' && session.status !== 'ready_to_start') {
+    if (session.status !== 'ready_to_start') {
       return
     }
     setLocationNotice(null)
@@ -740,8 +739,7 @@ export function TeamSessionScreen({
           {/* Sprint 8.x-4-ux-fix: кнопка «ОТМЕТИТЬ ПРИСУТСТВИЕ» удалена (костыль
               dev-проверки) — гео отправляется автоматически (useEffect выше).
               Сообщения (подтверждено / вне зоны / ошибка) — текстом. */}
-          {(session.status === 'collecting' ||
-            session.status === 'ready_to_start') &&
+          {session.status === 'ready_to_start' &&
             locationNotice && (
               <p
                 className={

@@ -278,6 +278,13 @@ class TeamMissionsServiceTests(unittest.TestCase):
         from tests.test_geo_team_contract import valid_team_config
 
         suffix = uuid.uuid4().hex
+        if validation_config is None:
+            validation_config = valid_team_config()
+            validation_config["economy"] = {
+                "entryFeeRootAtomic": 0,
+                "requiredItems": [],
+            }
+
         with self.SessionLocal.begin() as session:
             season = Season(
                 id=f"season-{suffix}",
@@ -303,11 +310,7 @@ class TeamMissionsServiceTests(unittest.TestCase):
                 title="Team mission",
                 status=status,
                 content={},
-                validation_config=(
-                    valid_team_config()
-                    if validation_config is None
-                    else validation_config
-                ),
+                validation_config=validation_config,
             )
             session.add(mission)
         return mission.id
@@ -330,6 +333,11 @@ class TeamMissionsServiceTests(unittest.TestCase):
         item_id = f"item-{uuid.uuid4().hex}"
         config["economy"]["requiredItems"] = [{"itemId": item_id, "quantity": 1}]
         mission_id = self._make_team_mission(validation_config=config)
+        self._seed_item(item_id)
+        self._seed_root_wallet(leader_id, 100)
+        self._seed_key(leader_id, item_id, 1)
+        self._seed_root_wallet(member_id, 100)
+        self._seed_key(member_id, item_id, 1)
         session_id = create_team_session_entrypoint(leader_id, mission_id)["id"]
         join_team_session(member_id, session_id)
         return mission_id, session_id, item_id
@@ -339,6 +347,8 @@ class TeamMissionsServiceTests(unittest.TestCase):
         from app.models import Item
 
         with self.SessionLocal.begin() as session:
+            if session.get(Item, item_id) is not None:
+                return
             session.add(
                 Item(
                     id=item_id,
@@ -360,6 +370,16 @@ class TeamMissionsServiceTests(unittest.TestCase):
         from app.models import Wallet, WalletTransaction
 
         with self.SessionLocal.begin() as session:
+            from app.models import Wallet
+
+            existing = session.scalar(
+                select(Wallet).where(
+                    Wallet.player_id == player_id,
+                    Wallet.currency == "ROOT",
+                )
+            )
+            if existing is not None:
+                return
             wallet = Wallet(
                 id=f"wallet-{uuid.uuid4().hex}",
                 player_id=player_id,
@@ -387,6 +407,14 @@ class TeamMissionsServiceTests(unittest.TestCase):
         from app.models import PlayerItem
 
         with self.SessionLocal.begin() as session:
+            existing = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == player_id,
+                    PlayerItem.item_id == item_id,
+                )
+            )
+            if existing is not None:
+                return
             session.add(
                 PlayerItem(
                     id=f"player-item-{uuid.uuid4().hex}",
@@ -943,14 +971,9 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self.assertEqual(stayer_payload["sessionStatus"], "collecting")
         self.assertEqual(stayer_payload["sessionId"], session_id)
 
-    def test_leave_refund_window_counts_from_ready_at(self) -> None:
-        """Окно возврата — от ready_at (момент оплаты), не от created_at сессии.
-
-        (1) Сессия создана 10 минут назад, Ready только что → refunded=True
-            (старое поведение «от created_at» дало бы False).
-        (2) Ready 4 минуты назад → окно (3 мин) закрыто, refunded=False.
-        """
-        # (1) created_at «давно», ready_at только что — возврат есть.
+    def test_leave_refund_window_counts_from_created_at(self) -> None:
+        """Окно возврата считается от accept/create, а ready_at не влияет."""
+        # Сессия создана 10 минут назад — окно закрыто, даже если Ready сейчас.
         leader = self._make_player()
         member = self._make_player()
         _mission_id, session_id, item_id = self._make_ready_fixture(leader, member)
@@ -962,10 +985,10 @@ class TeamMissionsServiceTests(unittest.TestCase):
             session_id, datetime.now(timezone.utc) - timedelta(minutes=10)
         )
 
-        in_window = leave_team_session(leader, session_id)
-        self.assertTrue(in_window["refunded"])
+        outside_window = leave_team_session(leader, session_id)
+        self.assertFalse(outside_window["refunded"])
 
-        # (2) Ready 4 минуты назад — лобби не важно, окно от оплаты истекло.
+        # Сессия создана сейчас — refund есть, даже если ready_at старый.
         leader_two = self._make_player()
         member_two = self._make_player()
         _mission_two, session_two, item_two = self._make_ready_fixture(
@@ -978,11 +1001,11 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self._set_member_ready_at(
             session_two,
             leader_two,
-            datetime.now(timezone.utc) - timedelta(minutes=4),
+            datetime.now(timezone.utc) - timedelta(minutes=10),
         )
 
-        outside_window = leave_team_session(leader_two, session_two)
-        self.assertFalse(outside_window["refunded"])
+        in_window = leave_team_session(leader_two, session_two)
+        self.assertTrue(in_window["refunded"])
 
     def test_join_session_full_returns_409(self) -> None:
         creator = self._make_player()
@@ -990,7 +1013,12 @@ class TeamMissionsServiceTests(unittest.TestCase):
         late = self._make_player()
         config = valid_team_config()
         config["team"]["maxMembers"] = 2
+        config["economy"] = {
+            "entryFeeRootAtomic": 0,
+            "requiredItems": [],
+        }
         mission_id = self._make_team_mission(validation_config=config)
+        self._seed_root_wallet(creator, 100)
         session_id = create_team_session_entrypoint(creator, mission_id)["id"]
         join_team_session(member, session_id)
 
@@ -1049,6 +1077,10 @@ class TeamMissionsServiceTests(unittest.TestCase):
         zone_id = self._seed_geo_zone()
         config = valid_team_config()
         config["geo"]["zoneId"] = zone_id
+        config["economy"] = {
+            "entryFeeRootAtomic": 0,
+            "requiredItems": [],
+        }
         mission_id = self._make_team_mission(validation_config=config)
         session_id = create_team_session_entrypoint(leader_id, mission_id)["id"]
         return session_id, zone_id
@@ -1181,15 +1213,69 @@ class TeamMissionsServiceTests(unittest.TestCase):
         return item_id
 
 
-    # ---- 7.1.c: mark_ready ---------------------------------------------
+    # ---- Entry debit and 7.1.c: mark_ready ------------------------------
 
-    def test_ready_marks_member_and_debits_root_and_item(self) -> None:
+    def test_create_session_debits_entry(self) -> None:
+        player_id = self._make_player()
+        config = valid_team_config()
+        config["economy"] = {"entryFeeRootAtomic": 2, "requiredItems": []}
+        mission_id = self._make_team_mission(validation_config=config)
+        self._seed_root_wallet(player_id, 10)
+
+        result = create_team_session_entrypoint(player_id, mission_id)
+
+        self.assertEqual(self._root_balance(player_id), 8)
+        from app.models import Wallet, WalletTransaction
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == player_id, Wallet.currency == "ROOT")
+            )
+            debit = session.scalar(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_entry_debit",
+                    WalletTransaction.reference_id == result["id"],
+                )
+            )
+        self.assertIsNotNone(debit)
+        self.assertEqual(debit.amount, 2)
+
+    def test_join_session_debits_entry(self) -> None:
+        creator = self._make_player()
+        member = self._make_player()
+        config = valid_team_config()
+        config["economy"] = {"entryFeeRootAtomic": 2, "requiredItems": []}
+        mission_id = self._make_team_mission(validation_config=config)
+        self._seed_root_wallet(creator, 10)
+        session_id = create_team_session_entrypoint(creator, mission_id)["id"]
+        self._seed_root_wallet(member, 10)
+
+        join_team_session(member, session_id)
+
+        self.assertEqual(self._root_balance(member), 8)
+        from app.models import Wallet, WalletTransaction
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == member, Wallet.currency == "ROOT")
+            )
+            debit = session.scalar(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_entry_debit",
+                    WalletTransaction.reference_id == session_id,
+                )
+            )
+        self.assertIsNotNone(debit)
+        self.assertEqual(debit.amount, 2)
+
+    def test_mark_ready_does_not_debit(self) -> None:
         leader = self._make_player()
         member = self._make_player()
         _, session_id, item_id = self._make_ready_fixture(leader, member)
-        self._seed_item(item_id)
-        self._seed_root_wallet(leader, 100)
-        self._seed_key(leader, item_id, 2)
+        balance_before = self._root_balance(leader)
+        key_before = self._key_quantity(leader, item_id)
 
         result = mark_ready_entrypoint(leader, session_id)
 
@@ -1197,9 +1283,22 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self.assertIsNotNone(result["myReadyAt"])
         # Второй участник ещё 'joined' — сессия остаётся в состоянии сбора.
         self.assertEqual(result["status"], "collecting")
-        # entryFeeRootAtomic=25 списан, ключ quantity=1 списан.
-        self.assertEqual(self._root_balance(leader), 75)
-        self.assertEqual(self._key_quantity(leader, item_id), 1)
+        self.assertEqual(self._root_balance(leader), balance_before)
+        self.assertEqual(self._key_quantity(leader, item_id), key_before)
+
+        from app.models import Wallet, WalletTransaction
+
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == leader, Wallet.currency == "ROOT")
+            )
+            debits = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "mission_entry_debit",
+                )
+            ).all()
+        self.assertEqual(len(debits), 1)
 
         member_row = self._get_member(session_id, leader)
         self.assertEqual(member_row.status, "ready")
@@ -1238,14 +1337,14 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self.assertEqual(captured.exception.status_code, 409)
         self.assertEqual(captured.exception.detail, "Вы уже отметились готовым.")
 
-    def test_ready_insufficient_root_returns_409(self) -> None:
+    def test_create_insufficient_root_returns_409(self) -> None:
         leader = self._make_player()
-        member = self._make_player()
-        _, session_id, _ = self._make_ready_fixture(leader, member)
+        config = valid_team_config()
+        mission_id = self._make_team_mission(validation_config=config)
         self._seed_root_wallet(leader, 10)  # entryFeeRootAtomic = 25
 
         with self.assertRaises(MissionEngineError) as captured:
-            mark_ready_entrypoint(leader, session_id)
+            create_team_session_entrypoint(leader, mission_id)
 
         self.assertEqual(captured.exception.status_code, 409)
         self.assertEqual(
@@ -1253,14 +1352,14 @@ class TeamMissionsServiceTests(unittest.TestCase):
             "Недостаточно ROOT для взятия миссии.",
         )
 
-    def test_ready_missing_required_item_returns_409(self) -> None:
+    def test_create_missing_required_item_returns_409(self) -> None:
         leader = self._make_player()
-        member = self._make_player()
-        _, session_id, _ = self._make_ready_fixture(leader, member)
+        config = valid_team_config()
+        mission_id = self._make_team_mission(validation_config=config)
         self._seed_root_wallet(leader, 100)  # ключа нет → 409
 
         with self.assertRaises(MissionEngineError) as captured:
-            mark_ready_entrypoint(leader, session_id)
+            create_team_session_entrypoint(leader, mission_id)
 
         self.assertEqual(captured.exception.status_code, 409)
         self.assertEqual(
@@ -1511,6 +1610,10 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self._make_team(leader, [member])
         config = valid_team_config()
         config["geo"]["zoneId"] = "zone-does-not-exist"
+        config["economy"] = {
+            "entryFeeRootAtomic": 0,
+            "requiredItems": [],
+        }
         mission_id = self._make_team_mission(validation_config=config)
         session_id = create_team_session_entrypoint(leader, mission_id)["id"]
 
