@@ -18,6 +18,7 @@ from app.team_missions_service import (
     activate_session_entrypoint,
     create_team_session_entrypoint,
     join_team_session,
+    leave_team_session,
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
     submit_location_entrypoint,
@@ -663,6 +664,69 @@ class TeamMissionsServiceTests(unittest.TestCase):
             captured.exception.detail,
             "У вас уже есть активная командная сессия.",
         )
+
+    # ---- Регрессия: left-членство не блокирует create/join -------------------
+
+    def test_create_session_allowed_after_left(self) -> None:
+        """После left в живой collecting-сессии новая сессия создаётся (не 409).
+
+        Баг: проверка «одна активная сессия» не смотрела на
+        TeamSessionMember.status — вышедший игрок получал 409, хотя сессия
+        остаётся живой из-за другого активного участника.
+        """
+        leaver = self._make_player()
+        stayer = self._make_player()
+        first_session_id = create_team_session_entrypoint(
+            leaver, self._make_team_mission()
+        )["id"]
+        join_team_session(stayer, first_session_id)
+
+        leave_team_session(leaver, first_session_id)
+
+        from app.geo_team_runtime_models import TeamSession, TeamSessionMember
+
+        with self.SessionLocal.begin() as session:
+            first_status = session.get(TeamSession, first_session_id).status
+            leaver_member = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == first_session_id,
+                    TeamSessionMember.player_id == leaver,
+                )
+            )
+        # Сессия жива (есть активный участник), членство вышедшего — left.
+        self.assertEqual(first_status, "collecting")
+        self.assertEqual(leaver_member.status, "left")
+
+        second_mission_id = self._make_team_mission()
+        created = create_team_session_entrypoint(leaver, second_mission_id)
+
+        self.assertEqual(created["status"], "collecting")
+        self.assertEqual(created["mission_id"], second_mission_id)
+        self.assertEqual(created["myStatus"], "joined")
+        self.assertNotEqual(created["id"], first_session_id)
+
+    def test_join_session_allowed_after_left(self) -> None:
+        """После left игрок может вступить в чужую collecting-сессию (не 409)."""
+        host = self._make_player()
+        stayer = self._make_player()
+        leaver = self._make_player()
+
+        left_session_id = create_team_session_entrypoint(
+            leaver, self._make_team_mission()
+        )["id"]
+        join_team_session(stayer, left_session_id)
+        leave_team_session(leaver, left_session_id)
+
+        host_session_id = create_team_session_entrypoint(
+            host, self._make_team_mission()
+        )["id"]
+
+        joined = join_team_session(leaver, host_session_id)
+
+        self.assertEqual(joined["id"], host_session_id)
+        self.assertEqual(joined["status"], "collecting")
+        self.assertEqual(joined["myStatus"], "joined")
+        self.assertEqual(joined["memberCount"], 2)
 
     def test_join_session_full_returns_409(self) -> None:
         creator = self._make_player()

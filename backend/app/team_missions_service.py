@@ -248,6 +248,10 @@ def _create_team_session(
         .join(TeamSessionMember, TeamSessionMember.team_session_id == TeamSession.id)
         .where(
             TeamSessionMember.player_id == player_id,
+            # Только активное членство (joined/ready): вышедший (left) из
+            # collecting-сессии игрок не должен блокироваться как «уже есть
+            # активная» — симметрично _list_my_team_sessions.
+            TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
             TeamSession.status.in_(ACTIVE_SESSION_STATUSES),
         )
         .limit(1)
@@ -492,11 +496,14 @@ def _join_team_session(
         raise _mission_error(409, "Вы уже участник этой сессии.")
 
     # 4. Игрок не задействован в другой активной командной сессии.
+    #    Только активное членство (joined/ready): вышедший (left) из живой
+    #    collecting-сессии не блокируется — симметрично _create_team_session.
     active_session_id = session.scalar(
         select(TeamSession.id)
         .join(TeamSessionMember, TeamSessionMember.team_session_id == TeamSession.id)
         .where(
             TeamSessionMember.player_id == player_id,
+            TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
             TeamSession.status.in_(ACTIVE_SESSION_STATUSES),
         )
         .limit(1)
