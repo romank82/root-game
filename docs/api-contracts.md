@@ -219,6 +219,43 @@ Player-facing endpoints; admin-модерация команд — этап 6.7.
 2020+ статусов нет: никакого физического удаления, неизменяемые записи
 (`TeamMembershipHistory`, `respondedAt`/статусы — только переход вперёд).
 
+## Чат командной сессии (этап 6.6-a / 6.6-b)
+
+Чат существует ТОЛЬКО внутри `TeamSession` (временной runtime-сборки под
+командную миссию): постоянной сущности «команда» в игре нет. Таблица
+`team_session_messages` (миграция `07b86e10e2c6`): `id`, `team_session_id`
+(FK RESTRICT), `player_id` (FK RESTRICT), `text` (<= 1000), `status`
+(`visible`|`hidden` — задел под модерацию 6.7.b), `created_at`/`updated_at`.
+Физического удаления нет: скрытие — `status='hidden'`, такие сообщения в
+выдачу не попадают.
+
+Доступ — только активные участники сессии (`TeamSessionMember.status` in
+`joined`/`ready`) и только пока сессия в `collecting`/`ready_to_start`/`active`.
+Несуществующая сессия — 404 «Командная сессия не найдена.»; не участник — 404
+«Вы не участник этой сессии.» (существование сессии не раскрывается);
+завершённая сессия (`succeeded`/`failed`/`expired`/`cancelled_before_start`) —
+409 «Сессия завершена. Чат недоступен.».
+
+- `GET /api/v1/engine/team-missions/sessions/{session_id}/messages` (200) —
+  список. Query: `limit` (default 50, max 200), `before` (ISO-8601; курсор —
+  `createdAt` самого старого загруженного сообщения). Выдача — новые сверху:
+  `{"messages": [{"id", "playerId", "displayName", "text", "createdAt"}],
+  "hasMore": bool, "limit": int}`. `displayName` — `GamePlayer.display_name`
+  автора (nullable: клиент показывает `playerId`, если имени нет);
+  `createdAt` — aware ISO-8601. Скрытые (`hidden`) сообщения не отдаются.
+- `POST /api/v1/engine/team-missions/sessions/{session_id}/messages` (200) —
+  отправить сообщение. Body: `{"text" (1..1000, пробелы по краям срезаются)}`.
+  Ответ — созданное сообщение `{"id", "playerId", "displayName", "text",
+  "createdAt"}`. Пустой/пробельный текст — 422 «Сообщение не может быть
+  пустым.»; длиннее 1000 символов — 422 «Сообщение слишком длинное (макс.
+  1000).». Rate limit — `@limiter.limit("10/minute")`, только участники сессии.
+
+Пагинация: при `hasMore=true` следующий запрос — `before=<createdAt последнего
+элемента списка>`. `offset` не используется: `id` — uuid-подобный
+(`team-msg-<hex>`), не монотонный. Текст — plain text (клиент рендерит как
+текст, не HTML); содержимое чата не пишется в `admin_audit_log`/`AppError`
+(требование `docs/geo-team-mission-contract.md`).
+
 ## Planned geo/team API (not implemented)
 
 The following target routes require authenticated player identity and an

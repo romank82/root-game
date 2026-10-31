@@ -1139,3 +1139,68 @@ export async function submitTeamLocation(
   return response.json() as Promise<EngineTeamLocationSubmitResult>
 }
 
+// Sprint 6.6-a/6.6-b: чат КОМАНДНОЙ СЕССИИ (только внутри TeamSession — не в
+// Team). Контракт бэкенда (app/team_session_chat_service.py):
+//   GET  .../sessions/{sessionId}/messages?limit=50&before=<ISO>  →
+//        { messages: [{id, playerId, displayName, text, createdAt}],
+//          hasMore, limit }
+//   POST .../sessions/{sessionId}/messages  body { text } → сообщение
+// Доступ: только участники сессии (joined/ready) и только пока сессия в
+// collecting/ready_to_start/active; после финала бэкенд отвечает 409.
+// Выдача — новые сверху; before — createdAt самого старого загруженного.
+export type EngineTeamMessage = {
+  id: string
+  playerId: string
+  displayName: string | null
+  text: string
+  createdAt: string
+}
+
+export type EngineTeamMessagesResult = {
+  messages: EngineTeamMessage[]
+  hasMore: boolean
+  limit: number
+}
+
+export async function getTeamSessionMessages(
+  sessionId: string,
+  limit = 50,
+  before: string | null = null,
+): Promise<EngineTeamMessagesResult> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (before) params.set('before', before)
+
+  const response = await apiFetch(
+    `/api/v1/engine/team-missions/sessions/${sessionId}/messages?${params.toString()}`,
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeamMessagesResult>
+}
+
+export async function sendTeamSessionMessage(
+  sessionId: string,
+  text: string,
+): Promise<EngineTeamMessage> {
+  const response = await apiFetch(
+    `/api/v1/engine/team-missions/sessions/${sessionId}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      // Контракт бэкенда (send_session_message_route): ключ "text".
+      body: JSON.stringify({ text }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineTeamMessage>
+}
+

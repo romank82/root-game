@@ -93,12 +93,20 @@ def _parse_before(value: str | None) -> datetime | None:
     return ensure_utc(parsed)
 
 
-def _serialize_message(message: TeamSessionMessage) -> dict:
-    """Публичные поля сообщения. displayName намеренно не отдаём (MVP)."""
+def _serialize_message(
+    message: TeamSessionMessage,
+    display_name: str | None,
+) -> dict:
+    """Публичные поля сообщения.
+
+    displayName — GamePlayer.display_name автора (nullable); клиент показывает
+    его, а при отсутствии — playerId.
+    """
     created_at = ensure_utc(message.created_at)
     return {
         "id": message.id,
         "playerId": message.player_id,
+        "displayName": display_name,
         "text": message.text,
         "createdAt": created_at.isoformat() if created_at is not None else None,
     }
@@ -134,7 +142,27 @@ def list_messages_entrypoint(
         ).all()
         # Сериализуем внутри транзакции: после commit объекты expired.
         has_more = len(rows) > safe_limit
-        messages = [_serialize_message(row) for row in rows[:safe_limit]]
+        page = rows[:safe_limit]
+
+        # displayName одним IN-запросом (без N+1 на 50 сообщений).
+        from app.models import GamePlayer
+
+        player_ids = {row.player_id for row in page}
+        display_names: dict[str, str | None] = {}
+        if player_ids:
+            display_names = {
+                player_id: display_name
+                for player_id, display_name in session.execute(
+                    select(GamePlayer.id, GamePlayer.display_name).where(
+                        GamePlayer.id.in_(player_ids)
+                    )
+                ).all()
+            }
+
+        messages = [
+            _serialize_message(row, display_names.get(row.player_id))
+            for row in page
+        ]
 
     return {"messages": messages, "hasMore": has_more, "limit": safe_limit}
 
@@ -168,4 +196,10 @@ def send_message_entrypoint(player_id: str, session_id: str, text: str) -> dict:
         )
         session.add(message)
         session.flush()
-        return _serialize_message(message)
+
+        from app.models import GamePlayer
+
+        player = session.get(GamePlayer, player_id)
+        return _serialize_message(
+            message, player.display_name if player is not None else None
+        )

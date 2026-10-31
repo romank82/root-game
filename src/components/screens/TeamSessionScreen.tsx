@@ -4,12 +4,15 @@ import {
   createTeamSession,
   getEngineBootstrap,
   getLastTeamSession,
+  getTeamSessionMessages,
   getTeamSessions,
   markTeamSessionReady,
+  sendTeamSessionMessage,
   submitTeamLocation,
   submitTeamWave,
   type EngineMission,
   type EngineTeamAwarded,
+  type EngineTeamMessage,
   type EngineTeamSession,
 } from '../../api/engineApi'
 import { CipherGame } from '../CipherGame'
@@ -37,6 +40,16 @@ const SESSION_STATUS_LABELS: Record<string, string> = {
 
 function listTeamMissions(all: EngineMission[]): EngineMission[] {
   return all.filter((mission) => mission.missionLayer === TEAM_MISSION_LAYER)
+}
+
+// Sprint 6.6-b: время сообщения чата (ISO → ЧЧ:ММ локального времени).
+function formatChatTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return date.toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 export function TeamSessionScreen({
@@ -89,6 +102,14 @@ export function TeamSessionScreen({
   // того, как поллинг потерял сессию (иначе спам каждые 3 сек). Сбрасывается
   // при появлении новой активной сессии (polling useEffect).
   const finalFetchedRef = useRef(false)
+  // Sprint 6.6-b: чат команды внутри сессии. Открыт только пока сессия в
+  // collecting/ready_to_start/active — после финала бэкенд отдаёт 409.
+  const [messages, setMessages] = useState<EngineTeamMessage[]>([])
+  const [messagesHasMore, setMessagesHasMore] = useState(false)
+  const [messagesBusy, setMessagesBusy] = useState(false)
+  const [messageText, setMessageText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -140,6 +161,12 @@ export function TeamSessionScreen({
   // сессии опрос не нужен. UI мини-игры — шаг 8.x-4b-2.
   const sessionId = session?.id ?? null
   const sessionActive = session?.status === 'active'
+  // Чат открыт только в активных статусах сессии (после финала — закрыт).
+  const chatOpen =
+    session !== null &&
+    (session.status === 'collecting' ||
+      session.status === 'ready_to_start' ||
+      session.status === 'active')
 
   useEffect(() => {
     if (!sessionId || !sessionActive) return
@@ -200,6 +227,43 @@ export function TeamSessionScreen({
       window.clearInterval(interval)
     }
   }, [sessionId, sessionActive])
+
+  // Sprint 6.6-b: polling чата команды (3 сек, как у сессии). Работает только
+  // пока сессия активна; при смене статуса на финальный — очищаем список и
+  // останавливаем опрос (бэкенд после финала отдаёт 409).
+  useEffect(() => {
+    if (!chatOpen || sessionId === null) {
+      setMessages([])
+      setMessagesHasMore(false)
+      return
+    }
+    const targetSessionId: string = sessionId
+    let cancelled = false
+    let warnedOnce = false
+
+    async function pollMessages() {
+      try {
+        const result = await getTeamSessionMessages(targetSessionId, 50)
+        if (cancelled) return
+        setMessages(result.messages)
+        setMessagesHasMore(result.hasMore)
+      } catch {
+        // Не спамить консоль каждые 3 сек: один warning, дальше тихо.
+        if (!cancelled && !warnedOnce) {
+          warnedOnce = true
+          console.warn('Не удалось обновить чат командной сессии')
+        }
+      }
+    }
+
+    void pollMessages()
+    const interval = window.setInterval(() => void pollMessages(), 3000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [chatOpen, sessionId])
 
   // Sprint 8.x-4-ux-fix: гео-присутствие отправляется АВТОМАТИЧЕСКИ один раз
   // при открытии экрана, пока сессия в collecting/ready_to_start (proof нужен
@@ -450,6 +514,50 @@ export function TeamSessionScreen({
     }
   }
 
+  // Sprint 6.6-b: отправить сообщение в чат сессии.
+  async function handleSendMessage() {
+    if (!session || sending) return
+    const text = messageText.trim()
+    if (!text) return
+
+    setSending(true)
+    setChatError(null)
+    try {
+      await sendTeamSessionMessage(session.id, text)
+      setMessageText('')
+      const result = await getTeamSessionMessages(session.id, 50)
+      setMessages(result.messages)
+      setMessagesHasMore(result.hasMore)
+    } catch {
+      setChatError('Не удалось отправить сообщение.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // Sprint 6.6-b: «Показать ещё» — более старые сообщения (before=createdAt
+  // самого старого загруженного, выдача новых сверху).
+  async function handleShowMoreMessages() {
+    if (!session || messagesBusy || messages.length === 0) return
+
+    const oldest = messages[messages.length - 1]
+    setMessagesBusy(true)
+    setChatError(null)
+    try {
+      const result = await getTeamSessionMessages(
+        session.id,
+        50,
+        oldest.createdAt,
+      )
+      setMessages((prev) => [...prev, ...result.messages])
+      setMessagesHasMore(result.hasMore)
+    } catch {
+      setChatError('Не удалось загрузить историю чата.')
+    } finally {
+      setMessagesBusy(false)
+    }
+  }
+
   return (
     <section className="inventory">
       <p className="eyebrow">КОМАНДНАЯ МИССИЯ / СЕССИЯ</p>
@@ -540,6 +648,8 @@ export function TeamSessionScreen({
               )}
             </>
           )}
+          {/* Sprint 6.6-b: после финала чат закрыт (бэкенд отдаёт 409). */}
+          <p className="admin-muted">Чат закрыт.</p>
           <button
             type="button"
             className="primary-button"
@@ -575,6 +685,8 @@ export function TeamSessionScreen({
               )}
             </>
           )}
+          {/* Sprint 6.6-b: после финала чат закрыт (бэкенд отдаёт 409). */}
+          <p className="admin-muted">Чат закрыт.</p>
           <button
             type="button"
             className="primary-button"
@@ -686,6 +798,66 @@ export function TeamSessionScreen({
                 <p className="mission-success-card">{waveSuccess}</p>
               )}
             </>
+          )}
+
+          {/* Sprint 6.6-b: чат команды (только пока сессия активна). Список —
+              новые сверху, polling 3 сек; «Показать ещё» грузит историю
+              курсором before=createdAt самого старого сообщения. */}
+          {chatOpen && (
+            <div className="gas-block">
+              <h3>ЧАТ КОМАНДЫ</h3>
+
+              {chatError && <p className="repair-error">{chatError}</p>}
+
+              {messages.length === 0 ? (
+                <p className="admin-muted">Сообщений пока нет.</p>
+              ) : (
+                messages.map((message) => (
+                  <article className="message-card" key={message.id}>
+                    <p>
+                      <b>{message.displayName ?? message.playerId}</b>
+                      {' · '}
+                      {formatChatTime(message.createdAt)}
+                    </p>
+                    <p>{message.text}</p>
+                  </article>
+                ))
+              )}
+
+              {messagesHasMore && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={messagesBusy}
+                  onClick={() => void handleShowMoreMessages()}
+                >
+                  {messagesBusy ? 'Загрузка…' : 'ПОКАЗАТЬ ЕЩЁ'}
+                </button>
+              )}
+
+              <label>
+                Сообщение
+                <input
+                  type="text"
+                  value={messageText}
+                  maxLength={1000}
+                  placeholder="Написать команде"
+                  onChange={(event) => {
+                    setMessageText(event.target.value)
+                    setChatError(null)
+                  }}
+                />
+              </label>
+
+              <button
+                type="button"
+                className="primary-button"
+                disabled={sending || messageText.trim().length === 0}
+                onClick={() => void handleSendMessage()}
+              >
+                {sending ? 'Отправка…' : 'ОТПРАВИТЬ'}
+              </button>
+            </div>
           )}
         </div>
       )}
