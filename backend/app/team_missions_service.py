@@ -164,10 +164,14 @@ def _list_my_team_sessions(session: Session, player_id: str) -> list[dict]:
     """Активные TeamSession игрока (только SELECT, сортировка createdAt DESC)."""
     from app.geo_team_runtime_models import TeamSession, TeamSessionMember
 
-    # Мои членства в командных сессиях.
+    # Мои членства в командных сессиях. Только активные (joined/ready):
+    # вышедший (left) / выбывший (removed) / рассчитанный (settled) участник
+    # НЕ должен получать сессию в /me — иначе фронт покажет карточку с
+    # кнопками «ОТКРЫТЬ СЕССИЮ»/«ОТКАЗАТЬСЯ», которые ведут в тупик.
     memberships = session.scalars(
         select(TeamSessionMember).where(
             TeamSessionMember.player_id == player_id,
+            TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
         )
     ).all()
 
