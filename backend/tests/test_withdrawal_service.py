@@ -158,19 +158,30 @@ class WithdrawalServiceTests(unittest.TestCase):
     def _seed_setting(
         self, session, key: str, value_json, value_type: str
     ) -> None:
-        """Активная SystemSetting (CMS-first)."""
-        session.add(
-            SystemSetting(
-                key=key,
-                value_json=value_json,
-                value_type=value_type,
-                category="ton",
-                title=key,
-                description="Seeded by withdrawal_service test",
-                is_sensitive=False,
-                status="active",
+        """Активная SystemSetting (CMS-first), идемпотентно.
+
+        Миграция dde2038a44d9 уже создаёт ton.*-строки из каталога, поэтому
+        при существующей записи обновляем ТОЛЬКО value_json (+status), а
+        метаданные (value_type/category/title/description/is_sensitive)
+        оставляем каталоговыми — иначе admin_system_settings отдаёт 409.
+        """
+        existing = session.get(SystemSetting, key)
+        if existing is not None:
+            existing.value_json = value_json
+            existing.status = "active"
+        else:
+            session.add(
+                SystemSetting(
+                    key=key,
+                    value_json=value_json,
+                    value_type=value_type,
+                    category="ton",
+                    title=key,
+                    description="Seeded by withdrawal_service test",
+                    is_sensitive=False,
+                    status="active",
+                )
             )
-        )
         session.flush()
 
     def _seed_withdrawal_settings(

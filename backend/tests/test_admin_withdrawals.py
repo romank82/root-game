@@ -153,19 +153,30 @@ class AdminWithdrawalsTests(unittest.TestCase):
     def _seed_setting(
         self, session, key: str, value_json, value_type: str
     ) -> None:
-        """Активная SystemSetting (CMS-first)."""
-        session.add(
-            SystemSetting(
-                key=key,
-                value_json=value_json,
-                value_type=value_type,
-                category="ton",
-                title=key,
-                description="Seeded by admin_withdrawals test",
-                is_sensitive=False,
-                status="active",
+        """Активная SystemSetting (CMS-first), идемпотентно.
+
+        Миграция dde2038a44d9 уже создаёт ton.*-строки из каталога, поэтому
+        при существующей записи обновляем ТОЛЬКО value_json (+status), а
+        метаданные оставляем каталоговыми — иначе admin_system_settings
+        отдаёт 409 «Метаданные настройки не соответствуют каталогу».
+        """
+        existing = session.get(SystemSetting, key)
+        if existing is not None:
+            existing.value_json = value_json
+            existing.status = "active"
+        else:
+            session.add(
+                SystemSetting(
+                    key=key,
+                    value_json=value_json,
+                    value_type=value_type,
+                    category="ton",
+                    title=key,
+                    description="Seeded by admin_withdrawals test",
+                    is_sensitive=False,
+                    status="active",
+                )
             )
-        )
         session.flush()
 
     def _seed_withdrawal_settings(self, session) -> None:

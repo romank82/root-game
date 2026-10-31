@@ -145,20 +145,31 @@ class SendGasInvoiceTests(unittest.TestCase):
         return player_id
 
     def _seed_gas_pack_setting(self, session, gas_amount: int, price: int) -> None:
-        """Активная SystemSetting economy.gas_pack_{N} (CMS-first)."""
+        """Активная SystemSetting economy.gas_pack_{N} (CMS-first), идемпотентно.
+
+        Миграция dde2038a44d9 уже создаёт economy.gas_pack_* из каталога,
+        поэтому при существующей записи обновляем ТОЛЬКО value_json
+        (+status): метаданные (в частности is_sensitive=True в каталоге)
+        должны остаться каталоговыми, иначе admin_system_settings отдаёт 409.
+        """
         key = f"economy.gas_pack_{gas_amount}"
-        session.add(
-            SystemSetting(
-                key=key,
-                value_json=price,
-                value_type="integer",
-                category="economy",
-                title=key,
-                description="Seeded by stars_send_invoice test",
-                is_sensitive=False,
-                status="active",
+        existing = session.get(SystemSetting, key)
+        if existing is not None:
+            existing.value_json = price
+            existing.status = "active"
+        else:
+            session.add(
+                SystemSetting(
+                    key=key,
+                    value_json=price,
+                    value_type="integer",
+                    category="economy",
+                    title=key,
+                    description="Seeded by stars_send_invoice test",
+                    is_sensitive=False,
+                    status="active",
+                )
             )
-        )
         session.flush()
 
     def _patch_bot_api(self, result_json: dict):

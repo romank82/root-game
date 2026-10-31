@@ -129,19 +129,32 @@ class TonServiceTests(unittest.TestCase):
     # ---- Fixtures и хелперы -------------------------------------------------
 
     def _seed_payout_wallet_setting(self, session, address: str) -> None:
-        """Активная SystemSetting ton.payout_wallet (CMS-first, 11.5-админ)."""
-        session.add(
-            SystemSetting(
-                key=ton_service.PAYOUT_WALLET_SETTING_KEY,
-                value_json=address,
-                value_type="string",
-                category="ton",
-                title=ton_service.PAYOUT_WALLET_SETTING_KEY,
-                description="Seeded by ton_service test",
-                is_sensitive=True,
-                status="active",
+        """Активная SystemSetting ton.payout_wallet (CMS-first), идемпотентно.
+
+        Миграция dde2038a44d9 уже создаёт ton.payout_wallet из каталога,
+        поэтому при существующей записи обновляем ТОЛЬКО value_json
+        (+status): метаданные (value_type/category/title/description/
+        is_sensitive) обязаны остаться каталоговыми, иначе
+        admin_system_settings отдаёт 409.
+        """
+        key = ton_service.PAYOUT_WALLET_SETTING_KEY
+        existing = session.get(SystemSetting, key)
+        if existing is not None:
+            existing.value_json = address
+            existing.status = "active"
+        else:
+            session.add(
+                SystemSetting(
+                    key=key,
+                    value_json=address,
+                    value_type="string",
+                    category="ton",
+                    title=key,
+                    description="Seeded by ton_service test",
+                    is_sensitive=True,
+                    status="active",
+                )
             )
-        )
         session.flush()
 
     def _patch_ton_settings(self, **values):
