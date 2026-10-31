@@ -748,14 +748,18 @@ def _leave_team_session(
     if member.status not in ACTIVE_MEMBER_STATUSES:
         raise _mission_error(409, "Членство в сессии неактивно.")
 
-    # 4. Возврат платы в окне TEAM_CANCEL_REFUND_SECONDS с момента создания
-    #    (выход возможен только до старта — статус проверен выше).
+    # 4. Возврат платы в окне TEAM_CANCEL_REFUND_SECONDS от МОМЕНТА ОПЛАТЫ —
+    #    member.ready_at (entry списывается в _mark_ready). Как в solo, где
+    #    accept = оплата, окно = CANCEL_DEADLINE_SECONDS. Окно от created_at
+    #    сессии не годится: время лобби (ожидание других участников) съедало
+    #    3 минуты, и к моменту Ready возврат уже был невозможен. Не Ready
+    #    (ready_at None) — взнос не списан, возвращать нечего.
     refunded = False
     now = _utcnow()
-    created_at = ensure_utc(team_session.created_at)
+    ready_at = ensure_utc(member.ready_at)
     cancel_window_end = (
-        created_at + timedelta(seconds=TEAM_CANCEL_REFUND_SECONDS)
-        if created_at is not None
+        ready_at + timedelta(seconds=TEAM_CANCEL_REFUND_SECONDS)
+        if ready_at is not None
         else None
     )
     mission = session.get(Mission, team_session.mission_id)

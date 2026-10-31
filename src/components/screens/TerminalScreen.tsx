@@ -243,14 +243,24 @@ export function TerminalScreen({
         ).toISOString()
       : null
 
-    // Окно отказа для командной сессии: аналог solo-окна, но от времени
-    // создания сессии (createdAt + 3 мин); бэкенд отдаёт sessionCreatedAt.
+    // Окно отказа с возвратом для командной сессии считаем от МОМЕНТА ОПЛАТЫ —
+    // своего ready_at (бэкенд отдаёт mission.myReadyAt), как в solo от
+    // startedAt (accept = оплата). Раньше считали от sessionCreatedAt, и время
+    // лобби (ожидание других участников) съедало 3 минуты: к моменту Ready окно
+    // уже было закрыто → refunded=False.
     // Парсим строго как UTC: без суффикса таймзоны JS принял бы строку за
-    // локальное время, и дедлайн «истёк» сразу после создания сессии.
-    const sessionCreatedUtcMs = parseUtcTimestamp(mission.sessionCreatedAt)
+    // локальное время, и дедлайн «истёк» сразу после Ready.
+    // Поле новое: типизируем локально, чтобы не расширять EngineMission в этом
+    // шаге (кандидат на добавление в тип engineApi.ts отдельным коммитом).
+    const myReadyAtRaw = (
+      mission as EngineMission & { myReadyAt?: string | null }
+    ).myReadyAt
+    const myReadyUtcMs = parseUtcTimestamp(myReadyAtRaw)
+    // ready_at нет (ещё не Ready) → взнос не списан, возврата не будет:
+    // таймер не показываем, кнопка «ОТКАЗАТЬСЯ» остаётся.
     const teamCancelDeadlineAt =
-      sessionCreatedUtcMs !== null
-        ? new Date(sessionCreatedUtcMs + CANCEL_REFUSE_WINDOW_MS).toISOString()
+      myReadyUtcMs !== null
+        ? new Date(myReadyUtcMs + CANCEL_REFUSE_WINDOW_MS).toISOString()
         : null
     // Sprint 8.x-4-ux-fix: окно отказа с ВОЗВРАТОМ открыто, пока дедлайн не
     // прошёл. После — _leave_team_session всё ещё разрешает выход, но БЕЗ

@@ -670,6 +670,11 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
         .join(TeamSessionMember, TeamSessionMember.team_session_id == TeamSession.id)
         .where(
             TeamSessionMember.player_id == player_id,
+            # Только активное членство (joined/ready): вышедший (left) не должен
+            # получать sessionStatus/sessionId — иначе карточка миссии висит с
+            # кнопками «ОТКРЫТЬ СЕССИЮ»/«ОТКАЗАТЬСЯ», а нажатие даёт 409
+            # «Членство в сессии неактивно» (симметрично _list_my_team_sessions).
+            TeamSessionMember.status.in_(TEAM_MEMBER_ACTIVE_STATUSES),
             TeamSession.status.in_(TEAM_SESSION_ACTIVE_STATUSES),
         )
     ).all()
@@ -722,6 +727,30 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
             player_team_session.mission_id,
             player_team_session.id,
         )
+
+    # Личный ready_at (момент оплаты взноса в _mark_ready) по миссии — от него
+    # считается окно отказа с возвратом (3 мин), как в solo от accept (там
+    # accept = оплата). Отдельным запросом: ready_at живёт в TeamSessionMember.
+    session_my_ready_at_by_mission: dict[str, str] = {}
+    if player_team_sessions:
+        my_member_rows = session.scalars(
+            select(TeamSessionMember).where(
+                TeamSessionMember.player_id == player_id,
+                TeamSessionMember.team_session_id.in_(
+                    [row.id for row in player_team_sessions]
+                ),
+                TeamSessionMember.status.in_(TEAM_MEMBER_ACTIVE_STATUSES),
+            )
+        ).all()
+        ready_at_by_session = {
+            row.team_session_id: row.ready_at for row in my_member_rows
+        }
+        for player_team_session in player_team_sessions:
+            ready_at = ensure_utc(ready_at_by_session.get(player_team_session.id))
+            session_my_ready_at_by_mission.setdefault(
+                player_team_session.mission_id,
+                ready_at.isoformat() if ready_at is not None else None,
+            )
 
     return {
         "player": {
@@ -859,6 +888,15 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 # валидный UUID, но сессии не существует → 404).
                 "sessionId": (
                     session_id_by_mission.get(mission.id)
+                    if mission.mission_type == "team"
+                    else None
+                ),
+                # Мой ready_at (момент оплаты взноса) в активной командной
+                # сессии — клиент строит окно отказа с возвратом от него
+                # (readyAt + 3 мин), как solo от startedAt. null — ещё не Ready
+                # (не платил) или не командная миссия.
+                "myReadyAt": (
+                    session_my_ready_at_by_mission.get(mission.id)
                     if mission.mission_type == "team"
                     else None
                 ),

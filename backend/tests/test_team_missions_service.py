@@ -887,6 +887,103 @@ class TeamMissionsServiceTests(unittest.TestCase):
             self.assertEqual(by_player[leader], "succeeded")
             self.assertEqual(by_player[member], "failed")
 
+    # ---- bootstrap: вышедший не видит карточку сессии ------------------------
+
+    def _set_session_created_at(self, session_id: str, moment: datetime) -> None:
+        from app.geo_team_runtime_models import TeamSession
+
+        with self.SessionLocal.begin() as session:
+            session.get(TeamSession, session_id).created_at = moment
+
+    def _set_member_ready_at(
+        self, session_id: str, player_id: str, moment: datetime
+    ) -> None:
+        from app.geo_team_runtime_models import TeamSessionMember
+
+        with self.SessionLocal.begin() as session:
+            row = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == session_id,
+                    TeamSessionMember.player_id == player_id,
+                )
+            )
+            row.ready_at = moment
+
+    def test_bootstrap_hides_session_after_left(self) -> None:
+        """Bootstrap не отдаёт sessionStatus/sessionId/myReadyAt вышедшему:
+        иначе карточка висит с «ОТКАЗАТЬСЯ» и нажатие даёт 409
+        «Членство в сессии неактивно»."""
+        from app import mission_engine
+
+        leader = self._make_player()
+        member = self._make_player()
+        mission_id, session_id, _item_id = self._make_ready_fixture(leader, member)
+
+        leave_team_session(leader, session_id)
+
+        # mission_engine импортирует SessionLocal на уровне модуля — подменяем
+        # атрибут модуля (app.db.SessionLocal уже пропатчен в setUpClass).
+        with patch.object(mission_engine, "SessionLocal", self.SessionLocal):
+            bootstrap = mission_engine.get_bootstrap(leader)
+
+        payload = next(
+            item for item in bootstrap["missions"] if item["id"] == mission_id
+        )
+        self.assertIsNone(payload["sessionStatus"])
+        self.assertIsNone(payload["sessionId"])
+        self.assertIsNone(payload["myReadyAt"])
+
+        # Контроль: у оставшегося участника сессия в bootstrap есть.
+        with patch.object(mission_engine, "SessionLocal", self.SessionLocal):
+            stayer_bootstrap = mission_engine.get_bootstrap(member)
+
+        stayer_payload = next(
+            item for item in stayer_bootstrap["missions"] if item["id"] == mission_id
+        )
+        self.assertEqual(stayer_payload["sessionStatus"], "collecting")
+        self.assertEqual(stayer_payload["sessionId"], session_id)
+
+    def test_leave_refund_window_counts_from_ready_at(self) -> None:
+        """Окно возврата — от ready_at (момент оплаты), не от created_at сессии.
+
+        (1) Сессия создана 10 минут назад, Ready только что → refunded=True
+            (старое поведение «от created_at» дало бы False).
+        (2) Ready 4 минуты назад → окно (3 мин) закрыто, refunded=False.
+        """
+        # (1) created_at «давно», ready_at только что — возврат есть.
+        leader = self._make_player()
+        member = self._make_player()
+        _mission_id, session_id, item_id = self._make_ready_fixture(leader, member)
+        self._seed_item(item_id)
+        self._seed_root_wallet(leader, 100)
+        self._seed_key(leader, item_id, 1)
+        mark_ready_entrypoint(leader, session_id)
+        self._set_session_created_at(
+            session_id, datetime.now(timezone.utc) - timedelta(minutes=10)
+        )
+
+        in_window = leave_team_session(leader, session_id)
+        self.assertTrue(in_window["refunded"])
+
+        # (2) Ready 4 минуты назад — лобби не важно, окно от оплаты истекло.
+        leader_two = self._make_player()
+        member_two = self._make_player()
+        _mission_two, session_two, item_two = self._make_ready_fixture(
+            leader_two, member_two
+        )
+        self._seed_item(item_two)
+        self._seed_root_wallet(leader_two, 100)
+        self._seed_key(leader_two, item_two, 1)
+        mark_ready_entrypoint(leader_two, session_two)
+        self._set_member_ready_at(
+            session_two,
+            leader_two,
+            datetime.now(timezone.utc) - timedelta(minutes=4),
+        )
+
+        outside_window = leave_team_session(leader_two, session_two)
+        self.assertFalse(outside_window["refunded"])
+
     def test_join_session_full_returns_409(self) -> None:
         creator = self._make_player()
         member = self._make_player()
