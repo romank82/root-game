@@ -54,6 +54,10 @@ MEMBER_STATUS_ACTIVE = "active"
 # Валиден по ck_mission_runs_status; тот же, что используют тесты 7.1.a
 # в _make_session/_add_session_member.
 MISSION_RUN_STATUS_ACTIVE = "active"
+# «Открытые» статусы прогресса: их нужно закрывать при финализации сессии и
+# при выходе участника (reserved — из будущих резервов, в team-флоу пока не
+# используется, но модель его допускает).
+MISSION_RUN_OPEN_STATUSES = frozenset({"active", "reserved"})
 
 # ---- 7.1.d: гео-присутствие ---------------------------------------------
 # Dev-режим сам выступает trusted verifier; для prod появится внешний verifier.
@@ -680,17 +684,21 @@ def _leave_team_session(
     player_id: str,
     session_id: str,
 ) -> dict:
-    """Выход игрока из командной сессии в сборе (7.1.e).
+    """Выход игрока из командной сессии (7.1.e).
 
-    Разрешён только в статусах 'collecting' / 'ready_to_start'; из активной
-    игры ('active') выйти нельзя (409). Если с момента создания сессии прошло
-    меньше TEAM_CANCEL_REFUND_SECONDS — участнику возвращается плата (зеркало
-    expire_mission: credit-проводка с тем же reference_id, что и debit при
-    mark_ready). Участник помечается 'left'; если активных участников не
-    осталось — сессия и её MissionRun переводятся в терминальный
-    'cancelled_before_start' (физическое удаление запрещено правилами игры:
-    история и FK-целостность сохраняются; с точки зрения игрока сессия
-    исчезает — активных сессий у него больше нет).
+    Лобби-семантика: выйти можно только ДО старта игры — в 'collecting' или
+    'ready_to_start'. В 'active' выход запрещён (409): игра уже идёт. Если с
+    момента создания сессии прошло меньше TEAM_CANCEL_REFUND_SECONDS —
+    участнику возвращается плата (зеркало expire_mission: credit-проводка с
+    тем же reference_id, что и debit при mark_ready).
+
+    Участник помечается 'left', его MissionRun закрывается всегда
+    ('cancelled_before_start'). Сессия остаётся в своём текущем статусе
+    ('collecting' / 'ready_to_start'), пока в ней есть активные участники;
+    если не осталось никого — сессия и её MissionRun переводятся в
+    терминальный 'cancelled_before_start' (физическое удаление запрещено
+    правилами игры: история и FK-целостность сохраняются; с точки зрения
+    игрока сессия исчезает — активных сессий у него больше нет).
 
     session_id: id сессии ИЛИ id миссии (фронт карточки знает только миссию;
     тогда ищется активная сессия игрока на эту миссию).
@@ -724,7 +732,7 @@ def _leave_team_session(
     if team_session is None:
         raise _mission_error(404, "Командная сессия не найдена.")
     if team_session.status == "active":
-        raise _mission_error(409, "Нельзя выйти из активной командной игры.")
+        raise _mission_error(409, "Игра уже началась, выходить нельзя.")
     if team_session.status not in ("collecting", "ready_to_start"):
         raise _mission_error(409, "Сессия уже не в сборе.")
 
@@ -740,7 +748,8 @@ def _leave_team_session(
     if member.status not in ACTIVE_MEMBER_STATUSES:
         raise _mission_error(409, "Членство в сессии неактивно.")
 
-    # 4. Возврат платы в окне TEAM_CANCEL_REFUND_SECONDS с момента создания.
+    # 4. Возврат платы в окне TEAM_CANCEL_REFUND_SECONDS с момента создания
+    #    (выход возможен только до старта — статус проверен выше).
     refunded = False
     now = _utcnow()
     created_at = ensure_utc(team_session.created_at)
@@ -773,7 +782,14 @@ def _leave_team_session(
     # старого 'joined' и сессия не закроется.
     session.flush()
 
-    # 6. Активных участников не осталось — сессия закрывается терминально
+    # 6. Прогресс вышедшего закрывается всегда: для него лобби/игра завершены,
+    #    MissionRun не должен остаться открытым.
+    mission_run = session.get(MissionRun, member.mission_run_id)
+    if mission_run is not None and mission_run.status in MISSION_RUN_OPEN_STATUSES:
+        mission_run.status = "cancelled_before_start"
+        mission_run.terminal_at = now
+
+    # 7. Активных участников не осталось — сессия закрывается терминально
     #    (история сохраняется, активных сессий у игроков больше нет).
     remaining = session.scalars(
         select(TeamSessionMember).where(
@@ -791,6 +807,8 @@ def _leave_team_session(
         ).all():
             run.status = "cancelled_before_start"
             run.terminal_at = now
+    # Иначе (есть активные участники) сессия остаётся в текущем статусе:
+    # 'collecting' или 'ready_to_start' — до старта волн откатывать нечего.
 
     session.flush()
     return {"left": True, "refunded": refunded}
@@ -1190,10 +1208,21 @@ def _submit_wave_answer(
         # нет, миссия завершается неудачей. Наград нет (8.x-2b-2a).
         team_session.current_wave += 1
         if team_session.current_wave > team_session.max_waves:
+            now = _utcnow()
             team_session.status = "failed"
-            team_session.terminal_at = _utcnow()
+            team_session.terminal_at = now
             team_session.current_cipher_session = None
             team_session.wave_status = "failed"
+            # Финализация: у всех, кто ещё не закрыл свой MissionRun, прогресс
+            # завершается failed. Ответивший ранее уже succeeded — не трогаем.
+            for run in session.scalars(
+                select(MissionRun).where(
+                    MissionRun.team_session_id == team_session.id,
+                )
+            ).all():
+                if run.status in MISSION_RUN_OPEN_STATUSES:
+                    run.status = "failed"
+                    run.terminal_at = now
         else:
             # Есть ещё волны: свежая cipher-сессия, сыгравшие обнуляются.
             team_session.wave_status = "playing"
@@ -1259,10 +1288,22 @@ def _submit_wave_answer(
     ).all()
     played_set = set(played)
     if active_players and all(pid in played_set for pid in active_players):
+        now = _utcnow()
         team_session.wave_status = "passed"
         team_session.status = "succeeded"
-        team_session.terminal_at = _utcnow()
+        team_session.terminal_at = now
         team_session.current_cipher_session = None
+        # Финализация-страховка: игравшие уже succeeded (выше); если по какой-то
+        # причине остались открытые MissionRun (active/reserved) — закрываем
+        # failed, чтобы не осталось «идущих» прогрессов после финала сессии.
+        for run in session.scalars(
+            select(MissionRun).where(
+                MissionRun.team_session_id == team_session.id,
+            )
+        ).all():
+            if run.status in MISSION_RUN_OPEN_STATUSES:
+                run.status = "failed"
+                run.terminal_at = now
     else:
         team_session.wave_status = "playing"
     session.flush()

@@ -22,6 +22,7 @@ from app.team_missions_service import (
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
     submit_location_entrypoint,
+    submit_wave_answer_entrypoint,
 )
 from tests.test_geo_team_contract import valid_team_config
 
@@ -727,6 +728,164 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self.assertEqual(joined["status"], "collecting")
         self.assertEqual(joined["myStatus"], "joined")
         self.assertEqual(joined["memberCount"], 2)
+
+    # ---- Выход: откат сессии в collecting (любой активный статус) -----------
+
+    def test_leave_active_returns_409(self) -> None:
+        """Выход из active запрещён: игра уже началась (409), сессия и
+        членство не меняются."""
+        leader = self._make_player()
+        member = self._make_player()
+        session_id = self._make_active_session_fixture(leader, member)
+
+        with self.assertRaises(MissionEngineError) as captured:
+            leave_team_session(leader, session_id)
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail, "Игра уже началась, выходить нельзя."
+        )
+
+        from app.geo_team_runtime_models import MissionRun, TeamSession, TeamSessionMember
+
+        with self.SessionLocal.begin() as session:
+            team_session = session.get(TeamSession, session_id)
+            self.assertEqual(team_session.status, "active")
+            self.assertIsNotNone(team_session.started_at)
+            self.assertIsNone(team_session.terminal_at)
+
+            leaver_row = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == session_id,
+                    TeamSessionMember.player_id == leader,
+                )
+            )
+            self.assertEqual(leaver_row.status, "ready")
+            run = session.get(MissionRun, leaver_row.mission_run_id)
+            self.assertEqual(run.status, "active")
+
+    def test_leave_ready_to_start_keeps_session_status(self) -> None:
+        """Выход из ready_to_start: сессия остаётся ready_to_start (без отката
+        в collecting), ready у оставшегося не сбрасывается, плата возвращена."""
+        leader = self._make_player()
+        member = self._make_player()
+        session_id, _zone_id = self._make_activation_fixture(leader, member)
+
+        result = leave_team_session(leader, session_id)
+
+        self.assertTrue(result["refunded"])
+
+        from app.geo_team_runtime_models import (
+            MissionRun,
+            TeamSession,
+            TeamSessionMember,
+        )
+
+        with self.SessionLocal.begin() as session:
+            team_session = session.get(TeamSession, session_id)
+            self.assertEqual(team_session.status, "ready_to_start")
+            self.assertEqual(list(team_session.wave_played_members or []), [])
+            self.assertIsNone(team_session.current_cipher_session)
+
+            member_row = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == session_id,
+                    TeamSessionMember.player_id == member,
+                )
+            )
+            # Оставшийся участник не тронут: он по-прежнему ready.
+            self.assertEqual(member_row.status, "ready")
+            self.assertIsNotNone(member_row.ready_at)
+
+            leaver_row = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == session_id,
+                    TeamSessionMember.player_id == leader,
+                )
+            )
+            self.assertEqual(leaver_row.status, "left")
+            run = session.get(MissionRun, leaver_row.mission_run_id)
+            self.assertEqual(run.status, "cancelled_before_start")
+
+    def test_leave_collecting_stays_collecting(self) -> None:
+        """Выход из collecting: сессия остаётся collecting, плата возвращена,
+        MissionRun вышедшего закрыт, второй участник не тронут."""
+        leader = self._make_player()
+        member = self._make_player()
+        _mission_id, session_id, item_id = self._make_ready_fixture(leader, member)
+        self._seed_item(item_id)
+        self._seed_root_wallet(leader, 100)
+        self._seed_key(leader, item_id, 1)
+        # Лидер оплатил взнос, но напарник ещё не ready -> сессия collecting.
+        mark_ready_entrypoint(leader, session_id)
+
+        result = leave_team_session(leader, session_id)
+
+        self.assertTrue(result["refunded"])
+
+        from app.geo_team_runtime_models import (
+            MissionRun,
+            TeamSession,
+            TeamSessionMember,
+        )
+
+        with self.SessionLocal.begin() as session:
+            team_session = session.get(TeamSession, session_id)
+            self.assertEqual(team_session.status, "collecting")
+
+            member_row = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == session_id,
+                    TeamSessionMember.player_id == member,
+                )
+            )
+            self.assertEqual(member_row.status, "joined")
+
+            leaver_row = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == session_id,
+                    TeamSessionMember.player_id == leader,
+                )
+            )
+            self.assertEqual(leaver_row.status, "left")
+            run = session.get(MissionRun, leaver_row.mission_run_id)
+            self.assertEqual(run.status, "cancelled_before_start")
+
+    def test_finalize_closes_all_mission_runs(self) -> None:
+        """Финализация закрывает все MissionRun: ответивший верно — succeeded,
+        остальные — failed; открытых (active/reserved) не остаётся."""
+        leader = self._make_player()
+        member = self._make_player()
+        session_id = self._make_active_session_fixture(leader, member)
+
+        from app.geo_team_runtime_models import MissionRun, TeamSession
+
+        with self.SessionLocal.begin() as session:
+            team_session = session.get(TeamSession, session_id)
+            correct_code = list(team_session.current_cipher_session["correct_code"])
+
+        # Лидер проходит волну верно -> его MissionRun succeeded.
+        submit_wave_answer_entrypoint(leader, session_id, correct_code)
+        # Напарник ошибается на каждой волне -> сессия failed по исчерпанию волн.
+        wrong = ["#", "#", "#", "#"]
+        for _ in range(3):
+            submit_wave_answer_entrypoint(member, session_id, wrong)
+
+        with self.SessionLocal.begin() as session:
+            team_session = session.get(TeamSession, session_id)
+            self.assertEqual(team_session.status, "failed")
+            self.assertIsNotNone(team_session.terminal_at)
+
+            runs = session.scalars(
+                select(MissionRun).where(MissionRun.team_session_id == session_id)
+            ).all()
+            statuses = {run.status for run in runs}
+            self.assertFalse(statuses & {"active", "reserved"})
+            for run in runs:
+                self.assertIsNotNone(run.terminal_at)
+            by_player = {run.player_id: run.status for run in runs}
+            self.assertEqual(by_player[leader], "succeeded")
+            self.assertEqual(by_player[member], "failed")
 
     def test_join_session_full_returns_409(self) -> None:
         creator = self._make_player()
