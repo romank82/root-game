@@ -1,10 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
+  EngineActiveTeamSession,
   EngineInventoryItem,
   EngineMission,
   MissionSubmission,
 } from '../../api/engineApi'
-import { leaveTeamSession } from '../../api/engineApi'
+import {
+  getActiveTeamSessions,
+  joinTeamSession,
+  leaveTeamSession,
+} from '../../api/engineApi'
 import type { ApiStatus, Screen } from '../../types/game'
 import { Sidebar } from '../Sidebar'
 import { CooldownCountdown } from '../CooldownCountdown'
@@ -94,6 +99,23 @@ export function TerminalScreen({
     useState<EngineMission | null>(null)
   const [showArchive, setShowArchive] = useState(false)
   const [openLayer, setOpenLayer] = useState<'story' | 'team' | 'solo'>('story')
+  // Sprint 8.x-4-join-gps: подвкладка «Активные» в папке «Командные» —
+  // чужие лобби в сборе (свободные места, та же страна, ≤50 км до команды).
+  const [teamTab, setTeamTab] = useState<'mine' | 'active'>('mine')
+  const [activeSessions, setActiveSessions] = useState<
+    EngineActiveTeamSession[]
+  >([])
+  const [activeLoading, setActiveLoading] = useState(false)
+  const [activeError, setActiveError] = useState<string | null>(null)
+  const [activeLoaded, setActiveLoaded] = useState(false)
+  const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
+  // GPS кэшируем на время экрана: подвкладку можно открывать повторно,
+  // разрешение не запрашиваем заново (один getCurrentPosition на сессию).
+  const geoCacheRef = useRef<{
+    latitude: number
+    longitude: number
+    accuracy: number | null
+  } | null>(null)
 
   useEffect(() => {
     // Автовыбор: первая непустая папка (story → team → solo).
@@ -195,6 +217,149 @@ export function TerminalScreen({
         err instanceof Error ? err.message : 'Не удалось выйти из сессии.',
       )
     }
+  }
+
+  // ---- Sprint 8.x-4-join-gps: GPS + подвкладка «Активные» ----------------
+
+  // GPS-координаты (паттерн useGameState.acceptMission / TeamSessionScreen).
+  function getCurrentPosition(): Promise<GeolocationPosition> {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Геолокация не поддерживается устройством.'))
+        return
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      })
+    })
+  }
+
+  // Координаты + человекочитаемая ошибка GPS; кэш на время экрана
+  // (повторное открытие подвкладки не запрашивает разрешение заново).
+  async function getCoords(): Promise<{
+    latitude: number
+    longitude: number
+    accuracy: number | null
+  }> {
+    if (geoCacheRef.current !== null) {
+      return geoCacheRef.current
+    }
+
+    let position: GeolocationPosition
+    try {
+      position = await getCurrentPosition()
+    } catch (geoErr) {
+      const code =
+        geoErr instanceof GeolocationPositionError ? geoErr.code : null
+      const message =
+        code === 1
+          ? 'Отказано в доступе к геолокации. Разрешите доступ и повторите.'
+          : code === 2
+            ? 'Не удалось определить местоположение. Повторите попытку.'
+            : code === 3
+              ? 'Таймаут геолокации. Повторите попытку.'
+              : (geoErr as Error).message
+      throw new Error(message)
+    }
+
+    const { latitude, longitude, accuracy } = position.coords
+    const coords = {
+      latitude,
+      longitude,
+      accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : null,
+    }
+    geoCacheRef.current = coords
+    return coords
+  }
+
+  async function loadActiveSessions() {
+    setActiveLoading(true)
+    setActiveError(null)
+    try {
+      const coords = await getCoords()
+      const result = await getActiveTeamSessions(
+        coords.latitude,
+        coords.longitude,
+      )
+      setActiveSessions(result.sessions)
+      setActiveLoaded(true)
+    } catch (err) {
+      setActiveError((err as Error).message)
+    } finally {
+      setActiveLoading(false)
+    }
+  }
+
+  // Вступление из карточки: GPS + join. Бэкенд проверяет страну и «рядом»
+  // (≤50 км) ДО списания entry fee; при отказе — 409 с текстом.
+  async function handleJoinActive(target: EngineActiveTeamSession) {
+    setActiveError(null)
+    setJoiningSessionId(target.id)
+    try {
+      const coords = await getCoords()
+      await joinTeamSession(
+        target.id,
+        coords.latitude,
+        coords.longitude,
+        coords.accuracy,
+      )
+      setActiveSessions((items) =>
+        items.filter((item) => item.id !== target.id),
+      )
+      onScreenChange('team-session')
+    } catch (err) {
+      setActiveError((err as Error).message)
+    } finally {
+      setJoiningSessionId(null)
+    }
+  }
+
+  // Загрузка «Активных» при открытии подвкладки — один раз
+  // (activeLoaded + GPS-кэш защищают от повторных запросов/разрешений).
+  useEffect(() => {
+    if (openLayer !== 'team' || teamTab !== 'active') return
+    if (activeLoaded || activeLoading) return
+    void loadActiveSessions()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openLayer, teamTab, activeLoaded])
+
+  function renderActiveSessions() {
+    return (
+      <>
+        {activeError && <p className="repair-error">{activeError}</p>}
+        {activeLoading && <p className="admin-muted">Ищем сессии рядом…</p>}
+        {!activeLoading && activeSessions.length === 0 && (
+          <p className="layer-empty">Нет активных сессий рядом</p>
+        )}
+        {activeSessions.map((item) => (
+          <article className="puzzle" key={item.id}>
+            <span className="file-label">
+              {item.missionTitle ?? 'Командная миссия'}
+            </span>
+            <small>СТАТУС: СБОР</small>
+            <h3>{item.description ?? 'Без описания'}</h3>
+            <p className="team-member-count">
+              {item.memberCount}/{item.maxMembers ?? '?'} — свободно:{' '}
+              {item.freeSlots ?? '?'}
+            </p>
+            <p className="in-progress-hint">
+              До команды:{' '}
+              {item.distanceKm !== null ? `${item.distanceKm} км` : '—'}
+            </p>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={joiningSessionId !== null}
+              onClick={() => void handleJoinActive(item)}
+            >
+              {joiningSessionId === item.id ? 'Вступаем…' : 'ВСТУПИТЬ'}
+            </button>
+          </article>
+        ))}
+      </>
+    )
   }
 
   function renderMissionCard(mission: EngineMission) {
@@ -547,7 +712,50 @@ export function TerminalScreen({
                     className="layer-folder-body"
                     style={{ borderLeftColor: MISSION_LAYER_COLORS[layer] }}
                   >
-                    {isEmpty ? (
+                    {/* Sprint 8.x-4-join-gps: подвкладки папки «Командные» —
+                        свои сессии (как было) и чужие лобби рядом. */}
+                    {layer === 'team' && (
+                      <div style={{ display: 'flex', gap: 8, margin: '0 0 12px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setTeamTab('mine')}
+                          style={{
+                            background:
+                              teamTab === 'mine' ? '#00ff88' : 'transparent',
+                            color: teamTab === 'mine' ? '#000' : 'inherit',
+                            border: '1px solid #00ff88',
+                            padding: '6px 12px',
+                            borderRadius: 6,
+                            fontWeight: 'bold',
+                            fontSize: 12,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          МОИ СЕССИИ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTeamTab('active')}
+                          style={{
+                            background:
+                              teamTab === 'active' ? '#00ff88' : 'transparent',
+                            color: teamTab === 'active' ? '#000' : 'inherit',
+                            border: '1px solid #00ff88',
+                            padding: '6px 12px',
+                            borderRadius: 6,
+                            fontWeight: 'bold',
+                            fontSize: 12,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          АКТИВНЫЕ
+                        </button>
+                      </div>
+                    )}
+
+                    {layer === 'team' && teamTab === 'active' ? (
+                      renderActiveSessions()
+                    ) : isEmpty ? (
                       <p className="layer-empty">Пока пусто</p>
                     ) : (
                       missionsByLayer[layer].map((mission) =>

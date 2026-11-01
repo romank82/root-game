@@ -19,6 +19,7 @@ from app.team_missions_service import (
     create_team_session_entrypoint,
     join_team_session,
     leave_team_session,
+    list_active_team_sessions_entrypoint,
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
     submit_location_entrypoint,
@@ -293,6 +294,7 @@ class TeamMissionsServiceTests(unittest.TestCase):
         mission_type: str = "team",
         status: str = "published",
         validation_config: dict | None = None,
+        description: str | None = None,
     ) -> str:
         """Командная миссия с валидным team/geo validation_config."""
         from app.models import Chapter, Mission, Season
@@ -329,6 +331,7 @@ class TeamMissionsServiceTests(unittest.TestCase):
                 mission_type=mission_type,
                 mission_category="team" if mission_type == "team" else "solo",
                 title="Team mission",
+                description=description,
                 status=status,
                 content={},
                 validation_config=validation_config,
@@ -1240,6 +1243,9 @@ class TeamMissionsServiceTests(unittest.TestCase):
     MOSCOW_NEARBY = (55.7600, 37.6200)
     SAINT_PETERSBURG = (59.9386, 30.3141)
     BERLIN = (52.5200, 13.4050)
+    # Уникальная точка для тестов «Активных»: далеко от Москвы/СПб/Берлина
+    # (другие тесты класса создают лобби именно там — не мешаем друг другу).
+    NOVOSIBIRSK = (55.0302, 82.9204)
 
     def _proximity_mission(self, *, fee: int = 2, max_members: int | None = None) -> str:
         """Командная миссия с заданной ценой входа (и лимитом состава)."""
@@ -1417,6 +1423,153 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self.assertIsNotNone(location)
         self.assertIsNone(location["latitude"])
         self.assertIsNone(location["location_at"])
+
+    # ---- Sprint 8.x-4-join-gps: подвкладка «Активные» (чужие лобби) --------
+
+    def _create_lobby(
+        self,
+        creator: str,
+        *,
+        latitude: float,
+        longitude: float,
+        mission_id: str | None = None,
+    ) -> str:
+        """Создать лобби (collecting) с GPS создателя; вернуть id сессии."""
+        return create_team_session_entrypoint(
+            creator,
+            mission_id or self._proximity_mission(fee=0),
+            latitude=latitude,
+            longitude=longitude,
+        )["id"]
+
+    def test_active_sessions_lists_foreign_lobby_with_metadata(self) -> None:
+        creator = self._make_player()
+        viewer = self._make_player()
+        config = valid_team_config()
+        config["economy"] = {"entryFeeRootAtomic": 0, "requiredItems": []}
+        mission_id = self._make_team_mission(
+            validation_config=config,
+            description="Собрать команду у вокзала",
+        )
+        session_id = self._create_lobby(
+            creator,
+            latitude=self.NOVOSIBIRSK[0],
+            longitude=self.NOVOSIBIRSK[1],
+            mission_id=mission_id,
+        )
+
+        result = list_active_team_sessions_entrypoint(viewer, *self.NOVOSIBIRSK)
+
+        # Тестовая БД общая для класса: проверяем своё лобби по id, а не весь список.
+        items = [item for item in result["sessions"] if item["id"] == session_id]
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item["mission_id"], mission_id)
+        self.assertEqual(item["missionTitle"], "Team mission")
+        self.assertEqual(item["description"], "Собрать команду у вокзала")
+        self.assertEqual(item["status"], "collecting")
+        self.assertEqual(item["memberCount"], 1)
+        self.assertEqual(item["maxMembers"], 4)
+        self.assertEqual(item["freeSlots"], 3)
+        self.assertLess(item["distanceKm"], 1.0)
+
+    def test_active_sessions_excludes_own_lobby(self) -> None:
+        creator = self._make_player()
+        session_id = self._create_lobby(
+            creator,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+        )
+
+        result = list_active_team_sessions_entrypoint(creator, *self.MOSCOW)
+
+        self.assertNotIn(
+            session_id,
+            [item["id"] for item in result["sessions"]],
+        )
+
+    def test_active_sessions_excludes_full_lobby(self) -> None:
+        creator = self._make_player()
+        member = self._make_player()
+        viewer = self._make_player()
+        session_id = self._create_lobby(
+            creator,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+            mission_id=self._proximity_mission(fee=0, max_members=2),
+        )
+        join_team_session(
+            member,
+            session_id,
+            latitude=self.MOSCOW_NEARBY[0],
+            longitude=self.MOSCOW_NEARBY[1],
+        )
+
+        result = list_active_team_sessions_entrypoint(viewer, *self.MOSCOW)
+
+        self.assertNotIn(
+            session_id,
+            [item["id"] for item in result["sessions"]],
+        )
+
+    def test_active_sessions_excludes_far_lobby(self) -> None:
+        creator = self._make_player()
+        viewer = self._make_player()
+        session_id = self._create_lobby(
+            creator,
+            latitude=self.SAINT_PETERSBURG[0],
+            longitude=self.SAINT_PETERSBURG[1],
+        )
+
+        result = list_active_team_sessions_entrypoint(viewer, *self.MOSCOW)
+
+        self.assertNotIn(
+            session_id,
+            [item["id"] for item in result["sessions"]],
+        )
+
+    def test_active_sessions_excludes_other_country_lobby(self) -> None:
+        creator = self._make_player()
+        viewer = self._make_player()
+        session_id = self._create_lobby(
+            creator,
+            latitude=self.BERLIN[0],
+            longitude=self.BERLIN[1],
+        )
+
+        result = list_active_team_sessions_entrypoint(viewer, *self.MOSCOW)
+
+        self.assertNotIn(
+            session_id,
+            [item["id"] for item in result["sessions"]],
+        )
+
+    def test_active_sessions_sorted_by_distance(self) -> None:
+        far_creator = self._make_player()
+        near_creator = self._make_player()
+        viewer = self._make_player()
+        # Новосибирск: ~30 км севернее и ~0.5 км от точки просмотра.
+        far_session = self._create_lobby(
+            far_creator,
+            latitude=self.NOVOSIBIRSK[0] + 0.27,
+            longitude=self.NOVOSIBIRSK[1],
+        )
+        near_session = self._create_lobby(
+            near_creator,
+            latitude=self.NOVOSIBIRSK[0] + 0.004,
+            longitude=self.NOVOSIBIRSK[1] + 0.004,
+        )
+
+        result = list_active_team_sessions_entrypoint(viewer, *self.NOVOSIBIRSK)
+
+        ids = [item["id"] for item in result["sessions"]]
+        self.assertIn(near_session, ids)
+        self.assertIn(far_session, ids)
+        self.assertLess(ids.index(near_session), ids.index(far_session))
+        self.assertLess(
+            result["sessions"][ids.index(near_session)]["distanceKm"],
+            result["sessions"][ids.index(far_session)]["distanceKm"],
+        )
 
     # ---- Entry debit and 7.1.c: mark_ready ------------------------------
 

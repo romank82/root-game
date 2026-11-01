@@ -76,6 +76,11 @@ SUPPORTED_ZONE_TYPES = frozenset({"radius"})  # polygon/poi — позже
 PAIRWISE_PROXIMITY_LIMIT_METERS = 50_000
 PAIRWISE_PROXIMITY_LIMIT_KM = PAIRWISE_PROXIMITY_LIMIT_METERS / 1000.0
 
+# Подвкладка «Активные» (TerminalScreen → папка «Командные»): чужие лобби,
+# в которые ещё можно вступить (сбор/готовность), и лимит выборки.
+ACTIVE_LOBBY_STATUSES = frozenset({"collecting", "ready_to_start"})
+ACTIVE_LOBBY_LIMIT = 50
+
 
 def _mission_error(status_code: int, detail: str) -> Exception:
     """Ожидаемая ошибка игрового API (ленивый импорт, как в teams_service)."""
@@ -301,6 +306,154 @@ def _list_my_team_sessions(session: Session, player_id: str) -> list[dict]:
         _serialize_team_session(session, team_session, player_id)
         for team_session in team_sessions
     ]
+
+
+def _serialize_active_team_session(
+    *,
+    team_session,
+    mission,
+    member_count: int,
+    max_members,
+    distance_km: float,
+) -> dict:
+    """Карточка чужого лобби для подвкладки «Активные».
+
+    Отдельный сериализатор: базовый ``_serialize_team_session`` не трогаем —
+    он отдаёт данные СВОЕЙ сессии (myStatus/waves/cipher), которых у чужого
+    лобби нет. Описание — публичное поле CMS ``Mission.description``.
+    """
+    free_slots = (
+        max_members - member_count
+        if isinstance(max_members, int)
+        else None
+    )
+    return {
+        "id": team_session.id,
+        "mission_id": team_session.mission_id,
+        "missionTitle": mission.title if mission is not None else None,
+        "description": mission.description if mission is not None else None,
+        "status": team_session.status,
+        "createdAt": (
+            team_session.created_at.isoformat()
+            if team_session.created_at
+            else None
+        ),
+        "memberCount": member_count,
+        "maxMembers": max_members,
+        "freeSlots": free_slots,
+        # Максимальное расстояние до участников («до команды: X км»).
+        "distanceKm": round(distance_km, 1),
+    }
+
+
+def _list_active_team_sessions(
+    session: Session,
+    player_id: str,
+    latitude: float,
+    longitude: float,
+) -> list[dict]:
+    """Чужие лобби в сборе для подвкладки «Активные» (только SELECT).
+
+    Показываем только совместимые сессии:
+    - status in ACTIVE_LOBBY_STATUSES (вступление ещё возможно);
+    - игрок НЕ участник (свои сессии отдаёт /sessions/me);
+    - есть свободные места (memberCount < maxMembers из validation_config);
+    - известны координаты и страна всех участников (иначе «рядом» не проверить;
+      legacy-сессии, созданные team-accept без GPS, не показываем);
+    - все участники в одной стране с игроком (если страна определилась);
+    - расстояние до КАЖДОГО участника ≤ лимита «рядом»;
+      distanceKm в карточке — максимум по участникам.
+
+    Сортировка: ближайшие сверху (стабильно сохраняет createdAt DESC при
+    равных расстояниях).
+    """
+    from geo_intel_offline import calculate_distance_km
+
+    from app.geo_team_runtime_models import TeamSession, TeamSessionMember
+    from app.models import GamePlayer, Mission
+
+    player = session.get(GamePlayer, player_id)
+    if player is None:
+        raise _mission_error(404, "Игрок не найден.")
+
+    player_country = _normalize_country(
+        resolve_country_or_none(latitude, longitude)
+    ) or _normalize_country(player.country)
+
+    # Мои активные членства — эти сессии не показываем (они уже в /me).
+    my_session_ids = set(
+        session.scalars(
+            select(TeamSessionMember.team_session_id).where(
+                TeamSessionMember.player_id == player_id,
+                TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
+            )
+        ).all()
+    )
+
+    team_sessions = session.scalars(
+        select(TeamSession)
+        .where(TeamSession.status.in_(ACTIVE_LOBBY_STATUSES))
+        .order_by(TeamSession.created_at.desc())
+        .limit(ACTIVE_LOBBY_LIMIT)
+    ).all()
+
+    result: list[dict] = []
+    for team_session in team_sessions:
+        if team_session.id in my_session_ids:
+            continue
+
+        members = session.scalars(
+            select(TeamSessionMember).where(
+                TeamSessionMember.team_session_id == team_session.id,
+                TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
+            )
+        ).all()
+        if not members:
+            continue
+
+        config = team_session.effective_config_snapshot or {}
+        max_members = (config.get("team") or {}).get("maxMembers")
+        if max_members is not None and len(members) >= max_members:
+            continue
+
+        # Координаты всех участников должны быть известны.
+        if any(
+            member.join_latitude is None or member.join_longitude is None
+            for member in members
+        ):
+            continue
+
+        # Страна: только совместимые (если страна игрока определилась).
+        if player_country is not None and any(
+            member.join_country != player_country for member in members
+        ):
+            continue
+
+        max_distance_km = max(
+            calculate_distance_km(
+                latitude,
+                longitude,
+                member.join_latitude,
+                member.join_longitude,
+            )
+            for member in members
+        )
+        if max_distance_km > PAIRWISE_PROXIMITY_LIMIT_KM:
+            continue
+
+        mission = session.get(Mission, team_session.mission_id)
+        result.append(
+            _serialize_active_team_session(
+                team_session=team_session,
+                mission=mission,
+                member_count=len(members),
+                max_members=max_members,
+                distance_km=max_distance_km,
+            )
+        )
+
+    result.sort(key=lambda item: item["distanceKm"] or 0.0)
+    return result
 
 
 def _create_team_session(
@@ -1533,6 +1686,28 @@ def list_my_team_sessions_entrypoint(player_id: str) -> dict:
 
     with SessionLocal() as session:
         sessions = _list_my_team_sessions(session, player_id)
+    return {"sessions": sessions}
+
+
+def list_active_team_sessions_entrypoint(
+    player_id: str,
+    latitude: float,
+    longitude: float,
+) -> dict:
+    """Точка вызова из HTTP-слоя: чужие лобби «Активные» (одна SELECT-сессия).
+
+    GPS игрока приходит query-параметрами: по нему считаются страна и
+    расстояние до участников (в БД координаты игрока не пишутся).
+    """
+    from app.db import SessionLocal
+
+    with SessionLocal() as session:
+        sessions = _list_active_team_sessions(
+            session,
+            player_id,
+            latitude,
+            longitude,
+        )
     return {"sessions": sessions}
 
 

@@ -57,6 +57,7 @@ from app.team_missions_service import (
     join_team_session,
     last_terminal_team_session_entrypoint,
     leave_team_session,
+    list_active_team_sessions_entrypoint,
     list_my_team_sessions_entrypoint,
     mark_ready_entrypoint,
     submit_location_entrypoint,
@@ -1562,6 +1563,30 @@ def last_team_session_route(
     """
     try:
         return last_terminal_team_session_entrypoint(player_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("10/minute")
+@app.get("/api/v1/engine/team-missions/sessions/active")
+def list_active_team_sessions_route(
+    request: Request,
+    latitude: float = Query(ge=-90, le=90),
+    longitude: float = Query(ge=-180, le=180),
+    player_id: str = Depends(get_current_player_id),
+):
+    """Чужие лобби «Активные»: свободные места, одна страна, «рядом» ≤ 50 км.
+
+    Sprint 8.x-4-join-gps: GPS игрока — query-параметрами (в БД не пишется;
+    по нему считаются страна и максимальное расстояние до участников).
+    Регистрируется ПОСЛЕ /sessions/me и /sessions/last и ДО любых будущих
+    GET /sessions/{id}, чтобы «active» не сопоставилось с {id}.
+    """
+    try:
+        return list_active_team_sessions_entrypoint(player_id, latitude, longitude)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

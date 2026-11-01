@@ -976,6 +976,45 @@ export async function getTeamSessions(): Promise<{
   return response.json() as Promise<{ sessions: EngineTeamSession[] }>
 }
 
+// Sprint 8.x-4-join-gps: подвкладка «Активные» (чужие лобби в сборе).
+// Контракт бэкенда: GET /api/v1/engine/team-missions/sessions/active
+// ?latitude=..&longitude=.. → {sessions: [...]}. GPS идёт query-параметрами:
+// бэкенд по нему фильтрует по стране и считает максимальное расстояние до
+// участников (distanceKm); в БД координаты игрока не пишутся.
+export type EngineActiveTeamSession = {
+  id: string
+  mission_id: string
+  missionTitle: string | null
+  description: string | null
+  status: string
+  createdAt: string | null
+  memberCount: number
+  maxMembers: number | null
+  // Свободные места (maxMembers - memberCount); null — лимит не задан.
+  freeSlots: number | null
+  // Максимальное расстояние до участников лобби («до команды: X км»).
+  distanceKm: number | null
+}
+
+export async function getActiveTeamSessions(
+  latitude: number,
+  longitude: number,
+): Promise<{ sessions: EngineActiveTeamSession[] }> {
+  const query = new URLSearchParams({
+    latitude: String(latitude),
+    longitude: String(longitude),
+  })
+  const response = await apiFetch(
+    `/api/v1/engine/team-missions/sessions/active?${query.toString()}`,
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<{ sessions: EngineActiveTeamSession[] }>
+}
+
 // Sprint 8.x-4-final-status-2: последняя терминальная сессия игрока
 // (succeeded/failed) + его награды. Контракт бэкенда:
 // GET /api/v1/engine/team-missions/sessions/last → {"session": {...} | null}.
