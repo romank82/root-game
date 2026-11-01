@@ -84,6 +84,10 @@ export type EngineMission = {
   // по startedAt). Для индивидуальных миссий и без сессии — null.
   sessionStatus?: string | null
   sessionCreatedAt?: string | null
+  // myReadyAt — ready_at в активной командной сессии (момент оплаты/Ready
+  // самого игрока), отдаётся бэкендом в bootstrap (mission_engine.py).
+  // null — игрок ещё не Ready (взнос не списан) либо миссия не командная.
+  myReadyAt?: string | null
   // Sprint 8.x-4-refuse-fix: id активной командной сессии игрока на эту миссию
   // (team-session-...). Нужен для leave_team_session (эндпоинт ждёт sessionId,
   // а не mission.id). Для индивидуальных миссий и без сессии — null.
