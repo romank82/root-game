@@ -1002,14 +1002,24 @@ export async function getLastTeamSession(): Promise<EngineTeamLastSessionResult>
 
 export async function createTeamSession(
   missionId: string,
+  latitude: number,
+  longitude: number,
+  accuracy: number | null = null,
 ): Promise<EngineTeamSession> {
   const response = await apiFetch('/api/v1/engine/team-missions/sessions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    // Контракт бэкенда (TeamSessionCreatePayload): mission_id (snake_case).
-    body: JSON.stringify({ mission_id: missionId }),
+    // Контракт бэкенда (TeamSessionCreatePayload): mission_id/latitude/
+    // longitude/accuracy (snake_case). GPS обязателен: бэкенд определяет
+    // страну/город создателя и проверяет «рядом» при вступлении (409).
+    body: JSON.stringify({
+      mission_id: missionId,
+      latitude,
+      longitude,
+      accuracy,
+    }),
   })
 
   if (!response.ok) {
@@ -1041,6 +1051,9 @@ export async function markTeamSessionReady(
 
 export async function joinTeamSession(
   sessionId: string,
+  latitude: number,
+  longitude: number,
+  accuracy: number | null = null,
 ): Promise<EngineTeamSession> {
   const response = await apiFetch(
     `/api/v1/engine/team-missions/sessions/${sessionId}/join`,
@@ -1049,6 +1062,14 @@ export async function joinTeamSession(
       headers: {
         'Content-Type': 'application/json',
       },
+      // Контракт бэкенда (TeamSessionJoinPayload): latitude/longitude/accuracy
+      // (snake_case). GPS обязателен: до списания entry fee бэкенд проверяет
+      // «одна страна» и «рядом ≤ 50 км до всех участников» (409).
+      body: JSON.stringify({
+        latitude,
+        longitude,
+        accuracy,
+      }),
     },
   )
 

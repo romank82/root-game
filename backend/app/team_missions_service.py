@@ -67,6 +67,15 @@ LOCATION_PROOF_STATUS_VERIFIED = "verified"
 LOCATION_PROOF_STATUS_REJECTED = "rejected"
 SUPPORTED_ZONE_TYPES = frozenset({"radius"})  # polygon/poi — позже
 
+# ---- Join proximity (сбор команды): «рядом» -------------------------------
+# Лимит расстояния между участниками при create/join — 50 км (haversine до
+# ВСЕХ активных участников). CMS-поле validation_config.geo.
+# pairwiseProximityMeters пока НЕ используется: admin UI (MissionsSection)
+# пишет туда хардкод 40 (метры) — переключение на CMS отдельным шагом
+# вместе с полем в форме миссии.
+PAIRWISE_PROXIMITY_LIMIT_METERS = 50_000
+PAIRWISE_PROXIMITY_LIMIT_KM = PAIRWISE_PROXIMITY_LIMIT_METERS / 1000.0
+
 
 def _mission_error(status_code: int, detail: str) -> Exception:
     """Ожидаемая ошибка игрового API (ленивый импорт, как в teams_service)."""
@@ -81,6 +90,96 @@ def _utcnow() -> datetime:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex}"
+
+
+def _normalize_country(value) -> str | None:
+    """ISO-2 (верхний регистр) или None.
+
+    geo_intel_offline иногда возвращает плейсхолдер '-99' вместо кода страны
+    (например, Франция: {'country': 'France', 'iso2': '-99'}). Такие значения
+    нельзя ни сохранять, ни сравнивать — считаем страну неизвестной.
+    """
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().upper()
+    if len(normalized) != 2 or not normalized.isalpha():
+        return None
+    return normalized
+
+
+def _resolve_join_geo(
+    latitude: float | None,
+    longitude: float | None,
+    player,
+) -> dict:
+    """Координаты create/join → (latitude, longitude, country, city).
+
+    Только чтение. Страна — geo_intel_offline (как 10.0.5), фолбэк — страна
+    из профиля игрока (GamePlayer.country, могла быть определена ранее).
+    Город — reverse_geocoder (ближайший 1000+ жителей в пределах 50 км).
+    GPS не передан → все значения None (legacy-путь без гео).
+    """
+    if latitude is None or longitude is None:
+        return {
+            "latitude": None,
+            "longitude": None,
+            "country": None,
+            "city": None,
+        }
+
+    from app.geo_city import resolve_city_or_none
+
+    country = _normalize_country(resolve_country_or_none(latitude, longitude))
+    if country is None:
+        country = _normalize_country(player.country)
+    return {
+        "latitude": float(latitude),
+        "longitude": float(longitude),
+        "country": country,
+        "city": resolve_city_or_none(latitude, longitude),
+    }
+
+
+def _ensure_members_nearby(
+    members,
+    *,
+    latitude: float,
+    longitude: float,
+    country: str | None,
+) -> None:
+    """Правило «рядом» при вступлении: одна страна + ≤ лимита км до ВСЕХ.
+
+    Проверяются участники с сохранёнными join_*: сессии, созданные без GPS
+    (legacy team-accept путь), не блокируются — сравнивать нечего.
+    Ошибка 409 бросается ДО списания entry fee.
+    """
+    from geo_intel_offline import calculate_distance_km
+
+    for member in members:
+        if (
+            country is not None
+            and member.join_country is not None
+            and member.join_country != country
+        ):
+            raise _mission_error(
+                409,
+                "Разные страны: участники команды должны быть из одной страны.",
+            )
+        if member.join_latitude is None or member.join_longitude is None:
+            continue
+        distance_km = calculate_distance_km(
+            latitude,
+            longitude,
+            member.join_latitude,
+            member.join_longitude,
+        )
+        if distance_km > PAIRWISE_PROXIMITY_LIMIT_KM:
+            raise _mission_error(
+                409,
+                "Слишком далеко: "
+                f"{distance_km:.1f} км, лимит "
+                f"{PAIRWISE_PROXIMITY_LIMIT_KM:.0f} км.",
+            )
 
 
 def _serialize_team_session(
@@ -208,14 +307,24 @@ def _create_team_session(
     session: Session,
     player_id: str,
     mission_id: str,
+    *,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    accuracy: float | None = None,
 ) -> dict:
     """Создать временную командную сессию. Может любой игрок (без Team).
 
     Сессия стартует с одним участником — создателем (status='joined');
-    состав расширяется join-session эндпоинтом (следующий шаг). Все правила
-    и количества берутся из validation_config миссии (код не хардкодит
-    EntryFee и расходуемые ключи списываются при создании сессии (accept),
-    не проверяется гео (7.1.d) и сессия не переводится из 'collecting'.
+    состав расширяется join-session эндпоинтом. Все правила и количества
+    берутся из validation_config миссии (код не хардкодит EntryFee и
+    расходуемые ключи списываются при создании сессии (accept), сессия не
+    переводится из 'collecting'.
+
+    Join proximity: GPS создателя (latitude/longitude) сохраняется в
+    TeamSessionMember (join_latitude/join_longitude/join_country/join_city)
+    до списания entry fee — по этим данным join проверяет «рядом».
+    Создатель один — расстояние не с кем сравнивать; accuracy принимается
+    для симметрии с solo-accept и не используется.
     """
     from app.geo_team_contract import (
         GeoTeamConfigurationError,
@@ -264,6 +373,11 @@ def _create_team_session(
         raise _mission_error(409, "У вас уже есть активная командная сессия.")
 
 
+    # Join proximity: страна/город/координаты создателя (только чтение:
+    # geo_intel_offline + reverse_geocoder). Все None, если GPS не передан.
+    join_geo = _resolve_join_geo(latitude, longitude, player)
+    join_location_at = _utcnow() if join_geo["latitude"] is not None else None
+
     # Создание (одна транзакция): TeamSession + per-player MissionRun +
     # TeamSessionMember. team_session_members.mission_run_id в БД NOT NULL —
     # обязательный MissionRun создаётся вместе с сессией.
@@ -296,6 +410,11 @@ def _create_team_session(
             mission_run_id=mission_run.id,
             status="joined",
             ready_at=None,
+            join_latitude=join_geo["latitude"],
+            join_longitude=join_geo["longitude"],
+            join_country=join_geo["country"],
+            join_city=join_geo["city"],
+            join_location_at=join_location_at,
         )
     )
 
@@ -442,12 +561,26 @@ def _mark_ready(
     return _serialize_team_session(session, team_session, player_id)
 
 
-def create_team_session_entrypoint(player_id: str, mission_id: str) -> dict:
+def create_team_session_entrypoint(
+    player_id: str,
+    mission_id: str,
+    *,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    accuracy: float | None = None,
+) -> dict:
     """Точка вызова из HTTP-слоя: создать командную сессию (одна транзакция)."""
     from app.db import SessionLocal
 
     with SessionLocal.begin() as session:
-        return _create_team_session(session, player_id, mission_id)
+        return _create_team_session(
+            session,
+            player_id,
+            mission_id,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy=accuracy,
+        )
 
 
 def mark_ready_entrypoint(player_id: str, session_id: str) -> dict:
@@ -462,8 +595,18 @@ def _join_team_session(
     session: Session,
     player_id: str,
     session_id: str,
+    *,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    accuracy: float | None = None,
 ) -> dict:
-    """Присоединить игрока к временной командной сессии (status='collecting')."""
+    """Присоединить игрока к временной командной сессии (status='collecting').
+
+    Join proximity (Sprint 8.x-4): при переданном GPS до списания entry fee
+    проверяются «одна страна» и «рядом ≤ 50 км до ВСЕХ активных участников».
+    GPS/страна/город сохраняются в TeamSessionMember (join_*). accuracy
+    принимается для симметрии с solo-accept и не используется.
+    """
     from app.geo_team_runtime_models import (
         MissionRun,
         TeamSession,
@@ -512,19 +655,33 @@ def _join_team_session(
         raise _mission_error(409, "У вас уже есть активная командная сессия.")
 
     # 5. Лимит состава — из effective_config_snapshot сессии (не из кода).
+    #    Список активных участников нужен и для лимита, и для join proximity.
     config = team_session.effective_config_snapshot or {}
+    active_members = session.scalars(
+        select(TeamSessionMember).where(
+            TeamSessionMember.team_session_id == team_session.id,
+            TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
+        )
+    ).all()
     max_members = (config.get("team") or {}).get("maxMembers")
-    if max_members is not None:
-        active_members = session.scalars(
-            select(TeamSessionMember).where(
-                TeamSessionMember.team_session_id == team_session.id,
-                TeamSessionMember.status.in_(ACTIVE_MEMBER_STATUSES),
-            )
-        ).all()
-        if len(active_members) >= max_members:
-            raise _mission_error(409, "Слишком много участников для этой миссии.")
+    if max_members is not None and len(active_members) >= max_members:
+        raise _mission_error(409, "Слишком много участников для этой миссии.")
 
-    # 6. Создание (одна транзакция): MissionRun + TeamSessionMember.
+    # 6. Join proximity (ДО списания entry fee): одна страна и расстояние
+    #    ≤ лимита до ВСЕХ активных участников. Проверяется только при
+    #    переданном GPS; участники без координат (legacy team-accept путь)
+    #    пропускаются — сравнивать нечего.
+    join_geo = _resolve_join_geo(latitude, longitude, player)
+    if join_geo["latitude"] is not None:
+        _ensure_members_nearby(
+            active_members,
+            latitude=join_geo["latitude"],
+            longitude=join_geo["longitude"],
+            country=join_geo["country"],
+        )
+    join_location_at = _utcnow() if join_geo["latitude"] is not None else None
+
+    # 7. Создание (одна транзакция): MissionRun + TeamSessionMember.
     #    team_session_members.mission_run_id в БД NOT NULL — MissionRun
     #    создаётся вместе с членством.
     mission_run = MissionRun(
@@ -545,6 +702,11 @@ def _join_team_session(
             mission_run_id=mission_run.id,
             status="joined",
             ready_at=None,
+            join_latitude=join_geo["latitude"],
+            join_longitude=join_geo["longitude"],
+            join_country=join_geo["country"],
+            join_city=join_geo["city"],
+            join_location_at=join_location_at,
         )
     )
     session.flush()
@@ -568,12 +730,26 @@ def _join_team_session(
     return _serialize_team_session(session, team_session, player_id)
 
 
-def join_team_session(player_id: str, session_id: str) -> dict:
+def join_team_session(
+    player_id: str,
+    session_id: str,
+    *,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    accuracy: float | None = None,
+) -> dict:
     """Точка вызова из HTTP-слоя: присоединиться к сессии (одна транзакция)."""
     from app.db import SessionLocal
 
     with SessionLocal.begin() as session:
-        return _join_team_session(session, player_id, session_id)
+        return _join_team_session(
+            session,
+            player_id,
+            session_id,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy=accuracy,
+        )
 
 
 def _refund_team_entry(

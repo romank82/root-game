@@ -226,6 +226,27 @@ class TeamMissionsServiceTests(unittest.TestCase):
                 )
             )
 
+    def _member_location(self, team_session_id: str, player_id: str) -> dict | None:
+        """join_* участника (Sprint 8.x-4-join-proximity) или None, если нет членства."""
+        from app.geo_team_runtime_models import TeamSessionMember
+
+        with self.SessionLocal() as session:
+            member = session.scalar(
+                select(TeamSessionMember).where(
+                    TeamSessionMember.team_session_id == team_session_id,
+                    TeamSessionMember.player_id == player_id,
+                )
+            )
+            if member is None:
+                return None
+            return {
+                "latitude": member.join_latitude,
+                "longitude": member.join_longitude,
+                "country": member.join_country,
+                "city": member.join_city,
+                "location_at": member.join_location_at,
+            }
+
     def _make_team(
         self,
         leader_id: str,
@@ -1212,6 +1233,190 @@ class TeamMissionsServiceTests(unittest.TestCase):
             )
         return item_id
 
+
+    # ---- Sprint 8.x-4: join proximity (страна + ≤50 км + город) ------------
+
+    MOSCOW = (55.7558, 37.6173)
+    MOSCOW_NEARBY = (55.7600, 37.6200)
+    SAINT_PETERSBURG = (59.9386, 30.3141)
+    BERLIN = (52.5200, 13.4050)
+
+    def _proximity_mission(self, *, fee: int = 2, max_members: int | None = None) -> str:
+        """Командная миссия с заданной ценой входа (и лимитом состава)."""
+        config = valid_team_config()
+        config["economy"] = {"entryFeeRootAtomic": fee, "requiredItems": []}
+        if max_members is not None:
+            config["team"]["maxMembers"] = max_members
+        return self._make_team_mission(validation_config=config)
+
+    def test_create_session_saves_join_location(self) -> None:
+        """create с GPS: координаты/страна/город сохранены, entry fee списан."""
+        player_id = self._make_player()
+        mission_id = self._proximity_mission(fee=2)
+        self._seed_root_wallet(player_id, 10)
+
+        result = create_team_session_entrypoint(
+            player_id,
+            mission_id,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+            accuracy=10.0,
+        )
+
+        location = self._member_location(result["id"], player_id)
+        self.assertIsNotNone(location)
+        self.assertAlmostEqual(location["latitude"], self.MOSCOW[0], places=6)
+        self.assertAlmostEqual(location["longitude"], self.MOSCOW[1], places=6)
+        self.assertEqual(location["country"], "RU")
+        self.assertIsNotNone(location["city"])
+        self.assertIsNotNone(location["location_at"])
+        # Создатель один — проверок расстояния нет, entry fee списан.
+        self.assertEqual(self._root_balance(player_id), 8)
+
+    def test_join_session_nearby_same_country_succeeds(self) -> None:
+        """join рядом (та же страна, ~0.4 км): успех, join_* сохранены, fee списан."""
+        creator = self._make_player()
+        member = self._make_player()
+        mission_id = self._proximity_mission(fee=2)
+        self._seed_root_wallet(creator, 10)
+        self._seed_root_wallet(member, 10)
+        session_id = create_team_session_entrypoint(
+            creator,
+            mission_id,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+        )["id"]
+
+        joined = join_team_session(
+            member,
+            session_id,
+            latitude=self.MOSCOW_NEARBY[0],
+            longitude=self.MOSCOW_NEARBY[1],
+        )
+
+        self.assertEqual(joined["myStatus"], "joined")
+        self.assertEqual(joined["memberCount"], 2)
+        location = self._member_location(session_id, member)
+        self.assertIsNotNone(location)
+        self.assertEqual(location["country"], "RU")
+        self.assertAlmostEqual(location["latitude"], self.MOSCOW_NEARBY[0], places=6)
+        self.assertEqual(self._root_balance(member), 8)
+
+    def test_join_session_other_country_returns_409_without_debit(self) -> None:
+        """join из другой страны → 409 «Разные страны», entry fee НЕ списан."""
+        creator = self._make_player()
+        member = self._make_player()
+        mission_id = self._proximity_mission(fee=2)
+        self._seed_root_wallet(creator, 10)
+        self._seed_root_wallet(member, 10)
+        session_id = create_team_session_entrypoint(
+            creator,
+            mission_id,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+        )["id"]
+
+        with self.assertRaises(MissionEngineError) as captured:
+            join_team_session(
+                member,
+                session_id,
+                latitude=self.BERLIN[0],
+                longitude=self.BERLIN[1],
+            )
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "Разные страны: участники команды должны быть из одной страны.",
+        )
+        # Плата не списана, членство не создано.
+        self.assertEqual(self._root_balance(member), 10)
+        self.assertIsNone(self._member_location(session_id, member))
+
+    def test_join_session_too_far_returns_409_without_debit(self) -> None:
+        """join в той же стране, но ~635 км → 409 «Слишком далеко», fee НЕ списан."""
+        creator = self._make_player()
+        member = self._make_player()
+        mission_id = self._proximity_mission(fee=2)
+        self._seed_root_wallet(creator, 10)
+        self._seed_root_wallet(member, 10)
+        session_id = create_team_session_entrypoint(
+            creator,
+            mission_id,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+        )["id"]
+
+        with self.assertRaises(MissionEngineError) as captured:
+            join_team_session(
+                member,
+                session_id,
+                latitude=self.SAINT_PETERSBURG[0],
+                longitude=self.SAINT_PETERSBURG[1],
+            )
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertTrue(
+            captured.exception.detail.startswith("Слишком далеко: "),
+            captured.exception.detail,
+        )
+        self.assertIn("лимит 50 км", captured.exception.detail)
+        self.assertEqual(self._root_balance(member), 10)
+        self.assertIsNone(self._member_location(session_id, member))
+
+    def test_join_proximity_respects_config_max_members(self) -> None:
+        """maxMembers из validation_config.team: 2 → третий участник получает 409."""
+        creator = self._make_player()
+        member = self._make_player()
+        late = self._make_player()
+        mission_id = self._proximity_mission(fee=0, max_members=2)
+        session_id = create_team_session_entrypoint(
+            creator,
+            mission_id,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+        )["id"]
+        join_team_session(
+            member,
+            session_id,
+            latitude=self.MOSCOW_NEARBY[0],
+            longitude=self.MOSCOW_NEARBY[1],
+        )
+
+        with self.assertRaises(MissionEngineError) as captured:
+            join_team_session(
+                late,
+                session_id,
+                latitude=self.MOSCOW_NEARBY[0],
+                longitude=self.MOSCOW_NEARBY[1],
+            )
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "Слишком много участников для этой миссии.",
+        )
+        self.assertIsNone(self._member_location(session_id, late))
+
+    def test_join_without_gps_skips_proximity_checks(self) -> None:
+        """Без GPS (legacy-вызов) proximity не проверяется — регресс поведения."""
+        creator = self._make_player()
+        member = self._make_player()
+        mission_id = self._proximity_mission(fee=0)
+        session_id = create_team_session_entrypoint(
+            creator,
+            mission_id,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+        )["id"]
+
+        joined = join_team_session(member, session_id)
+
+        self.assertEqual(joined["myStatus"], "joined")
+        location = self._member_location(session_id, member)
+        self.assertIsNotNone(location)
+        self.assertIsNone(location["latitude"])
+        self.assertIsNone(location["location_at"])
 
     # ---- Entry debit and 7.1.c: mark_ready ------------------------------
 

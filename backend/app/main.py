@@ -285,7 +285,28 @@ class JoinRequestPayload(BaseModel):
     message: str | None = Field(default=None, max_length=2000)
 
 class TeamSessionCreatePayload(BaseModel):
+    """POST /api/v1/engine/team-missions/sessions (create).
+
+    Sprint 8.x-4-join-proximity: GPS обязателен — по нему определяется
+    страна/город создателя и проверяется «рядом» при вступлении.
+    """
+
     mission_id: str = Field(min_length=1, max_length=64)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    accuracy: float | None = Field(default=None, gt=0, le=100000)
+
+
+class TeamSessionJoinPayload(BaseModel):
+    """POST /api/v1/engine/team-missions/sessions/{id}/join.
+
+    Sprint 8.x-4-join-proximity: GPS обязателен — до списания entry fee
+    проверяются «одна страна» и «рядом ≤ 50 км до всех участников».
+    """
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    accuracy: float | None = Field(default=None, gt=0, le=100000)
 
 class LocationSubmitPayload(BaseModel):
     latitude: float = Field(ge=-90, le=90)
@@ -1556,7 +1577,13 @@ def create_team_session_route(
     player_id: str = Depends(get_current_player_id),
 ):
     try:
-        return create_team_session_entrypoint(player_id, payload.mission_id)
+        return create_team_session_entrypoint(
+            player_id,
+            payload.mission_id,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy=payload.accuracy,
+        )
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,
@@ -1569,10 +1596,17 @@ def create_team_session_route(
 def join_team_session_route(
     request: Request,
     session_id: str,
+    payload: TeamSessionJoinPayload,
     player_id: str = Depends(get_current_player_id),
 ):
     try:
-        return join_team_session(player_id, session_id)
+        return join_team_session(
+            player_id,
+            session_id,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy=payload.accuracy,
+        )
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,

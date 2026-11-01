@@ -8,6 +8,11 @@ slowapi==0.1.9
 
 argon2-cffi==23.1.0
 geo-intel-offline==1.5.0
+# Гео: населённый пункт по координатам (offline, GeoNames cities1000).
+# mode=1 (single-threaded KDTree) — см. app/geo_city.py.
+reverse_geocoder==1.5.1
+numpy==2.5.4
+scipy==1.18.1
 httpx==0.28.1
 
 # TON (11.4): SDK для валидации адресов и Jetton transfer (testnet).

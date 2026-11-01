@@ -6,6 +6,7 @@ import {
   getLastTeamSession,
   getTeamSessionMessages,
   getTeamSessions,
+  joinTeamSession,
   markTeamSessionReady,
   sendTeamSessionMessage,
   submitTeamLocation,
@@ -65,6 +66,9 @@ export function TeamSessionScreen({
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  // Sprint 8.x-4-join-gps: вступление в чужую сессию по её ID (GPS обязателен).
+  const [joinSessionId, setJoinSessionId] = useState<string>('')
+  const [joining, setJoining] = useState(false)
   const [readyBusy, setReadyBusy] = useState(false)
   // Sprint 8.x-4b-2a: состояние командной мини-игры (волна cipher).
   const [waveSubmitting, setWaveSubmitting] = useState(false)
@@ -352,13 +356,54 @@ export function TeamSessionScreen({
 
     setCreating(true)
     try {
-      const created = await createTeamSession(selectedMissionId)
+      // Sprint 8.x-4-join-gps: GPS обязателен — бэкенд сохраняет страну/город
+      // создателя и проверяет «рядом» при вступлении. Без GPS не создаём.
+      const coords = await getCoordsOrThrow()
+      const created = await createTeamSession(
+        selectedMissionId,
+        coords.latitude,
+        coords.longitude,
+        coords.accuracy,
+      )
       setSession(created)
-      setNotice('Сессия создана. Друзья могут присоединиться по коду сессии.')
+      setNotice('Сессия создана. Друзья могут присоединиться по ID сессии.')
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setCreating(false)
+    }
+  }
+
+  // Sprint 8.x-4-join-gps: вступить в чужую сессию по её ID. GPS обязателен:
+  // до списания entry fee бэкенд проверяет страну и расстояние (409).
+  async function handleJoin() {
+    setError(null)
+    setNotice(null)
+
+    const targetSessionId = joinSessionId.trim()
+    if (!targetSessionId) {
+      setError('Укажите ID сессии, к которой нужно присоединиться.')
+      return
+    }
+
+    setJoining(true)
+    try {
+      const coords = await getCoordsOrThrow()
+      const joined = await joinTeamSession(
+        targetSessionId,
+        coords.latitude,
+        coords.longitude,
+        coords.accuracy,
+      )
+      setSession(joined)
+      setJoinSessionId('')
+      setNotice(
+        'Вы вступили в сессию. Когда все отметятся и будут в зоне — старт автоматически.',
+      )
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setJoining(false)
     }
   }
 
@@ -458,6 +503,40 @@ export function TeamSessionScreen({
         maximumAge: 0,
       })
     })
+  }
+
+  // Sprint 8.x-4-join-gps: координаты для create/join + человекочитаемая
+  // ошибка GPS (как в useGameState.acceptMission). Без координат create/join
+  // не выполняются — бэкенд отвечает 422.
+  async function getCoordsOrThrow(): Promise<{
+    latitude: number
+    longitude: number
+    accuracy: number | null
+  }> {
+    let position: GeolocationPosition
+    try {
+      position = await getCurrentPosition()
+    } catch (geoErr) {
+      const code =
+        geoErr instanceof GeolocationPositionError ? geoErr.code : null
+      const message =
+        code === 1
+          ? 'Отказано в доступе к геолокации. Разрешите доступ и повторите.'
+          : code === 2
+            ? 'Не удалось определить местоположение. Повторите попытку.'
+            : code === 3
+              ? 'Таймаут геолокации. Повторите попытку.'
+              : (geoErr as Error).message
+      throw new Error(message)
+    }
+
+    const { latitude, longitude, accuracy } = position.coords
+    return {
+      latitude,
+      longitude,
+      // Контракт бэкенда: accuracy > 0 или null (0/NaN не отправляем).
+      accuracy: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : null,
+    }
   }
 
   // Отметить гео-присутствие в командной сессии: свежий verified proof нужен
@@ -615,6 +694,34 @@ export function TeamSessionScreen({
             onClick={handleCreate}
           >
             {creating ? 'Создаём…' : 'Создать сессию'}
+          </button>
+        </div>
+      )}
+
+      {/* Sprint 8.x-4-join-gps: вступление в чужую сессию по ID. GPS
+          запрашивается при нажатии — до списания entry fee бэкенд проверяет
+          «одна страна» и «рядом ≤ 50 км до всех участников». */}
+      {!loading && session === null && finalStatus === null && !sessionEnded && (
+        <div className="gas-block">
+          <h3>Вступить в сессию</h3>
+
+          <label>
+            ID сессии
+            <input
+              value={joinSessionId}
+              disabled={joining}
+              placeholder="team-session-…"
+              onChange={(e) => setJoinSessionId(e.target.value)}
+            />
+          </label>
+
+          <button
+            type="button"
+            className="primary-button"
+            disabled={joining || joinSessionId.trim().length === 0}
+            onClick={handleJoin}
+          >
+            {joining ? 'Вступаем…' : 'Вступить'}
           </button>
         </div>
       )}

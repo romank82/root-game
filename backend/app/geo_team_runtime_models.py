@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -266,6 +267,23 @@ class TeamSessionMember(RuntimeTimestampMixin, Base):
     # ещё не записано» (append-only, старые строки получают None).
     awarded_snapshot: Mapped[dict | None] = mapped_column(
         JSON, nullable=True, default=None
+    )
+
+    # Join proximity (сбор команды): гео игрока на момент create/join.
+    # Пишется в _create_team_session / _join_team_session ДО списания entry
+    # fee: по этим данным проверяются «одна страна» и «рядом (≤ лимита км)».
+    # Append-only, nullable: старые строки и сессии, созданные без GPS
+    # (legacy team-accept путь через mission_engine), остаются NULL —
+    # такие участники в проверках расстояния/страны пропускаются.
+    # Сырые координаты — только server-side (не в audit/logs).
+    join_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    join_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Страна (ISO-2) по координатам: geo_intel_offline, фолбэк — GamePlayer.country.
+    join_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    # Ближайший город (1000+ жителей): reverse_geocoder, справочно.
+    join_city: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    join_location_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     __table_args__ = (
