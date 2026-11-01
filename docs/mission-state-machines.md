@@ -48,11 +48,15 @@ CMS lifecycle не является runtime state team session.
 `active -> succeeded | failed | expired`
 `collecting | ready_to_start -> cancelled_before_start`
 
-В `collecting` участники имеют резерв ROOT/keys. Переход
-`ready_to_start -> active` атомарно повторно проверяет team size, readiness,
-fresh geo/proximity rule D, списывает entry fee/keys и активирует member runs.
-Wrong answer, explicit exit или timeout одного active member завершают всю
-session как `failed`. Детали: `docs/geo-team-mission-contract.md`.
+В `collecting` взнос ROOT и required items уже списаны при accept:
+создание сессии (create) и вступление (join). Переход
+`ready_to_start -> active` атомарно повторно проверяет team size, readiness и
+fresh geo/proximity rule D, затем активирует member runs; повторного списания
+entry fee/keys на старте нет. Окно отказа с возвратом — 3 минуты от
+`TeamSession.created_at`; после окна выход до `active` разрешён, но без
+возврата. Wrong answer, explicit exit или timeout одного active member
+завершают всю session как `failed`. Детали:
+`docs/geo-team-mission-contract.md`.
 
 ## Approval request
 `pending -> approved | rejected | cancelled | expired`
@@ -75,8 +79,10 @@ repeatability, ROOT and item requirements; lock applicable rows; debit ROOT,
 consume required items, snapshot configuration, and create `MissionRun(active)`
 in one transaction. Solo start does not use a reservation phase.
 
-The existing `reserved -> accepted -> active` MissionRun path remains for
-future geo/team pre-start assembly only. It must not be imposed on solo runs.
+The existing `reserved -> accepted -> active` MissionRun path remains a target
+for future pre-start assembly; current paid solo and team verticals charge
+directly at accept/start without a reservation phase. It must not be imposed
+on solo runs.
 
 Target solo attempt lifecycle:
 

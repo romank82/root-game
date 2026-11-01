@@ -40,13 +40,13 @@ inventory events, and a per-player fallback enforcement record.
 ## Geo eligibility and session state
 
 Client coordinates, browser distance checks, QR scans, and claimed proximity
-are untrusted inputs. Before join/reserve and again immediately before start,
+are untrusted inputs. Before join and again immediately before start,
 backend validates: published mission/geo policy, fresh server-validated
 location proof, zone membership, pairwise proximity rule D, capacity, and
 non-terminal session state.
 
 Public `safeScanPoint` coordinates are navigation data only. They are not a
-LocationProof and never authorize join, reserve, start, progress, or reward.
+LocationProof and never authorize join, start, progress, or reward.
 Raw location evidence, protected QR data, and anti-abuse signals are
 server-side; raw private location data is not copied to admin audit.
 
@@ -64,9 +64,19 @@ issued -> submitted -> succeeded | failed
 issued -> timed_out
 ```
 
-Members in `collecting` hold active reservations and may leave before start; their reservations are released. A runtime session is never created in `draft`.
+Entry is charged at accept: creating a session (`create`) and joining one
+(`join`) debit `validation_config.economy.entryFeeRootAtomic` and
+`requiredItems` in the same transaction as the session/member creation, as in
+solo where accept means payment. Members in `collecting` may leave before
+start; the 3-minute refund window counts from `TeamSession.created_at`.
+After that window, leaving is still allowed before `active` but without a
+refund. A runtime session is never created in `draft`.
 
-The `ready_to_start -> active` transition is atomic: lock the eligible session, memberships, wallets, inventory, and reservations; revalidate team size, readiness, geo/proximity and CMS eligibility; charge reserved entry fees; consume reserved keys; create active runs/attempts; mark the session active. No partial start is valid.
+The `ready_to_start -> active` transition is atomic: lock the eligible session,
+memberships, wallets, and inventory; revalidate team size, readiness,
+geo/proximity and CMS eligibility; create active runs/attempts; mark the
+session active. Entry fees and required keys were already charged at accept;
+start does not charge them again. No partial start is valid.
 
 After `active`, explicit exit, wrong answer, or server-side deadline failure of one member produces one idempotent shared `failed` settlement with no rewards for all members. WebApp closure, network loss, or a missing periodic location update is not by itself an immediate exit. Periodic enforcement requires an explicit published policy.
 
@@ -76,9 +86,20 @@ A `cipher` attempt is created server-side for an active run and stores immutable
 
 For the first cipher flow, backend validates AR/QR activation, issues the attempt-specific visible code and deadline, then validates ownership, active run/session, deadline, and submitted combination against the server snapshot. A visible code may be shown to its intended player, but is never trusted back as proof of success. Answers, protected challenge state, QR secrets, and raw activation evidence never enter bootstrap, frontend bundles, audit, or ordinary error logs.
 
-ROOT uses integer atomic units. `WalletTransaction` is the immutable ledger; wallet balances are cached projections and cannot become negative. Before start, a reservation moves no more than the configured entry fee from available to locked. Required keys are also reserved. Charge/consume/release operations are idempotent and cannot make balances or inventory negative.
+ROOT uses integer atomic units. `WalletTransaction` is the immutable ledger;
+wallet balances are cached projections and cannot become negative. Team entry
+uses a direct atomic debit at accept (session create / join) rather than a
+pre-start reservation. Charge operations are idempotent per
+`(wallet, reference_type, reference_id)` and cannot make balances or inventory
+negative.
 
-At start, fee charge and key consumption occur in the same transaction as activation. Before-start cancellation releases both. A post-start refund exists only under an explicit published CMS policy. Rewards are per successful `MissionRun`, use its snapshot and attempt multiplier, and reference the exact settlement event rather than only `mission_id`.
+At accept, fee charge and key consumption occur in the same transaction as
+session/member creation. Leaving before start refunds both only inside the
+3-minute window counted from `TeamSession.created_at`; after the window there
+is no refund. A post-start refund exists only under an explicit published CMS
+policy. Rewards are per successful `MissionRun`, use its snapshot and attempt
+multiplier, and reference the exact settlement event rather than only
+`mission_id`.
 
 Fallback eligibility and quota are per-player and server-enforced. A purchase is an idempotent atomic ROOT debit plus entitlement creation.
 
@@ -95,8 +116,8 @@ eligibility, global pool, and purchase rules are defined by
 `docs/fallback-shop-contract.md`.
 
 The `reserved -> accepted -> active` path and wallet/inventory reservations
-described in this document apply to future geo/team pre-start assembly. The
-first paid solo vertical uses direct atomic start without a reservation phase.
+remain a target for future pre-start assembly. The current paid solo and team
+verticals use direct atomic charging at accept without a reservation phase.
 
 A qualifying first-attempt outcome may use the shared fallback policy, but
 this document does not define a separate team-specific purchase executor or
