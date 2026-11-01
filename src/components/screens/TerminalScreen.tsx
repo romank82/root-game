@@ -107,7 +107,6 @@ export function TerminalScreen({
   >([])
   const [activeLoading, setActiveLoading] = useState(false)
   const [activeError, setActiveError] = useState<string | null>(null)
-  const [activeLoaded, setActiveLoaded] = useState(false)
   const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
   // GPS кэшируем на время экрана: подвкладку можно открывать повторно,
   // разрешение не запрашиваем заново (один getCurrentPosition на сессию).
@@ -284,7 +283,6 @@ export function TerminalScreen({
         coords.longitude,
       )
       setActiveSessions(result.sessions)
-      setActiveLoaded(true)
     } catch (err) {
       setActiveError((err as Error).message)
     } finally {
@@ -316,14 +314,14 @@ export function TerminalScreen({
     }
   }
 
-  // Загрузка «Активных» при открытии подвкладки — один раз
-  // (activeLoaded + GPS-кэш защищают от повторных запросов/разрешений).
+  // Sprint 8.x-4-active-refresh: «Активные» без кэша (activeLoaded убран) —
+  // подвкладка перезагружается при каждом открытии: список лобби и GPS
+  // всегда свежие. GPS берётся из geoCacheRef (разрешение не спрашиваем заново).
   useEffect(() => {
     if (openLayer !== 'team' || teamTab !== 'active') return
-    if (activeLoaded || activeLoading) return
     void loadActiveSessions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openLayer, teamTab, activeLoaded])
+  }, [openLayer, teamTab])
 
   function renderActiveSessions() {
     return (
@@ -735,7 +733,15 @@ export function TerminalScreen({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setTeamTab('active')}
+                          onClick={() => {
+                            // Нажатие на уже активную подвкладку — перезагрузка
+                            // (эффект не сработает: teamTab не меняется).
+                            if (teamTab === 'active') {
+                              void loadActiveSessions()
+                              return
+                            }
+                            setTeamTab('active')
+                          }}
                           style={{
                             background:
                               teamTab === 'active' ? '#00ff88' : 'transparent',
