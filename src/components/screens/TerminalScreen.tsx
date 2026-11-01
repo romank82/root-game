@@ -318,10 +318,66 @@ export function TerminalScreen({
   // подвкладка перезагружается при каждом открытии: список лобби и GPS
   // всегда свежие. GPS берётся из geoCacheRef (разрешение не спрашиваем заново).
   useEffect(() => {
-    if (openLayer !== 'team' || teamTab !== 'active') return
+    // «АКТИВНЫЕ» (чужие лобби) не зависят от наличия своих миссий: при пустом
+    // activeMissions папки не рендерятся, поэтому подвкладка вынесена отдельным
+    // блоком (см. ветку «НЕТ ДОСТУПНЫХ») и грузится по тому же клику.
+    const activeTabOpen =
+      teamTab === 'active' &&
+      (openLayer === 'team' || activeMissions.length === 0)
+    if (!activeTabOpen) return
     void loadActiveSessions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openLayer, teamTab])
+
+  // Подвкладки папки «Командные»: свои сессии и чужие лобби рядом.
+  // Вынесены в helper, чтобы использовать и в папке, и в блоке при пустом
+  // активном списке миссий (папки там не рендерятся).
+  function renderTeamTabs() {
+    return (
+      <div style={{ display: 'flex', gap: 8, margin: '0 0 12px' }}>
+        <button
+          type="button"
+          onClick={() => setTeamTab('mine')}
+          style={{
+            background: teamTab === 'mine' ? '#00ff88' : 'transparent',
+            color: teamTab === 'mine' ? '#000' : 'inherit',
+            border: '1px solid #00ff88',
+            padding: '6px 12px',
+            borderRadius: 6,
+            fontWeight: 'bold',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
+          МОИ СЕССИИ
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            // Нажатие на уже активную подвкладку — перезагрузка
+            // (эффект не сработает: teamTab не меняется).
+            if (teamTab === 'active') {
+              void loadActiveSessions()
+              return
+            }
+            setTeamTab('active')
+          }}
+          style={{
+            background: teamTab === 'active' ? '#00ff88' : 'transparent',
+            color: teamTab === 'active' ? '#000' : 'inherit',
+            border: '1px solid #00ff88',
+            padding: '6px 12px',
+            borderRadius: 6,
+            fontWeight: 'bold',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
+          АКТИВНЫЕ
+        </button>
+      </div>
+    )
+  }
 
   function renderActiveSessions() {
     return (
@@ -676,16 +732,36 @@ export function TerminalScreen({
         )}
 
         {activeMissions.length === 0 ? (
-          <section className="location-status">
-            <span className="location-status-icon">⌖</span>
-            <div>
-              <strong>НЕТ ДОСТУПНЫХ ТЕКСТОВЫХ ПАКЕТОВ</strong>
-              <p>
-                Опубликованный сюжетный пакет ещё не получен из игрового
-                bootstrap, либо все доступные пакеты уже в истории заданий.
-              </p>
-            </div>
-          </section>
+          <>
+            <section className="location-status">
+              <span className="location-status-icon">⌖</span>
+              <div>
+                <strong>НЕТ ДОСТУПНЫХ ТЕКСТОВЫХ ПАКЕТОВ</strong>
+                <p>
+                  Опубликованный сюжетный пакет ещё не получен из игрового
+                  bootstrap, либо все доступные пакеты уже в истории заданий.
+                </p>
+              </div>
+            </section>
+
+            {/* «АКТИВНЫЕ» (чужие лобби) не зависят от наличия своих миссий:
+                при пустом activeMissions папки не рендерятся, поэтому
+                подвкладка вынесена отдельным блоком. */}
+            <section className="layer-folder">
+              <p className="eyebrow">{LAYER_LABEL.team}</p>
+              <div
+                className="layer-folder-body"
+                style={{ borderLeftColor: MISSION_LAYER_COLORS.team }}
+              >
+                {renderTeamTabs()}
+                {teamTab === 'active' ? (
+                  renderActiveSessions()
+                ) : (
+                  <p className="layer-empty">Пока пусто</p>
+                )}
+              </div>
+            </section>
+          </>
         ) : (
           LAYER_ORDER.map((layer) => {
             const isOpen = openLayer === layer
@@ -712,52 +788,7 @@ export function TerminalScreen({
                   >
                     {/* Sprint 8.x-4-join-gps: подвкладки папки «Командные» —
                         свои сессии (как было) и чужие лобби рядом. */}
-                    {layer === 'team' && (
-                      <div style={{ display: 'flex', gap: 8, margin: '0 0 12px' }}>
-                        <button
-                          type="button"
-                          onClick={() => setTeamTab('mine')}
-                          style={{
-                            background:
-                              teamTab === 'mine' ? '#00ff88' : 'transparent',
-                            color: teamTab === 'mine' ? '#000' : 'inherit',
-                            border: '1px solid #00ff88',
-                            padding: '6px 12px',
-                            borderRadius: 6,
-                            fontWeight: 'bold',
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          МОИ СЕССИИ
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            // Нажатие на уже активную подвкладку — перезагрузка
-                            // (эффект не сработает: teamTab не меняется).
-                            if (teamTab === 'active') {
-                              void loadActiveSessions()
-                              return
-                            }
-                            setTeamTab('active')
-                          }}
-                          style={{
-                            background:
-                              teamTab === 'active' ? '#00ff88' : 'transparent',
-                            color: teamTab === 'active' ? '#000' : 'inherit',
-                            border: '1px solid #00ff88',
-                            padding: '6px 12px',
-                            borderRadius: 6,
-                            fontWeight: 'bold',
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          АКТИВНЫЕ
-                        </button>
-                      </div>
-                    )}
+                    {layer === 'team' && renderTeamTabs()}
 
                     {layer === 'team' && teamTab === 'active' ? (
                       renderActiveSessions()
