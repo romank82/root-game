@@ -65,7 +65,7 @@ function missionStatusLabel(
   t: TFunction,
   status: EngineMission['status'],
 ): string {
-  return t(`terminal.missionStatus.${status}`, 'ДОСТУПНО')
+  return t(`terminal:missionStatus.${status}`, 'ДОСТУПНО')
 }
 
 export function TerminalScreen({
@@ -144,9 +144,9 @@ export function TerminalScreen({
 
   // Группировка активных миссий по слоям.
   const LAYER_LABEL: Record<typeof LAYER_ORDER[number], string> = {
-    story: t('terminal.sections.story'),
-    team: t('terminal.sections.team'),
-    solo: t('terminal.sections.individual'),
+    story: t('terminal:sections.story'),
+    team: t('terminal:sections.team'),
+    solo: t('terminal:sections.individual'),
   }
   const missionsByLayer = {
     story: activeMissions.filter((m) => m.missionLayer === 'story'),
@@ -176,7 +176,7 @@ export function TerminalScreen({
     const result = await onAcceptMission(mission.id)
     setAcceptingId(null)
     if (!result.accepted) {
-      setAcceptError(result.error ?? t('terminal.errors.takeMissionFailed'))
+      setAcceptError(result.error ?? t('terminal:errors.takeMissionFailed'))
       return
     }
     // После accept переходим на карту — там будут круги.
@@ -206,7 +206,7 @@ export function TerminalScreen({
       setTeamLeaveNote(
         err instanceof Error
           ? err.message
-          : t('terminal.errors.leaveSessionFailed'),
+          : t('terminal:errors.leaveSessionFailed'),
       )
     }
   }
@@ -342,7 +342,7 @@ export function TerminalScreen({
             cursor: 'pointer',
           }}
         >
-          {t('terminal.sections.mySessions')}
+          {t('terminal:sections.mySessions')}
         </button>
         <button
           type="button"
@@ -366,7 +366,7 @@ export function TerminalScreen({
             cursor: 'pointer',
           }}
         >
-          {t('terminal.sections.activeSessions')}
+          {t('terminal:sections.activeSessions')}
         </button>
       </div>
     )
@@ -376,9 +376,9 @@ export function TerminalScreen({
     return (
       <>
         {activeError && <p className="repair-error">{activeError}</p>}
-        {activeLoading && <p className="admin-muted">{t('terminal.empty.searchingSessions')}</p>}
+        {activeLoading && <p className="admin-muted">{t('terminal:empty.searchingSessions')}</p>}
         {!activeLoading && activeSessions.length === 0 && (
-          <p className="layer-empty">{t('terminal.empty.noActiveSessions')}</p>
+          <p className="layer-empty">{t('terminal:empty.noActiveSessions')}</p>
         )}
         {activeSessions.map((item) => (
           <article className="puzzle" key={item.id}>
@@ -402,8 +402,8 @@ export function TerminalScreen({
               onClick={() => void handleJoinActive(item)}
             >
               {joiningSessionId === item.id
-                ? t('terminal.buttons.joining')
-                : t('terminal.buttons.join')}
+                ? t('terminal:buttons.joining')
+                : t('terminal:buttons.join')}
             </button>
           </article>
         ))}
@@ -485,9 +485,9 @@ export function TerminalScreen({
 
         {mission.availableAgainAt !== null ? (
           <div className="expired-file">
-            <p>{t('terminal.status.onBreak')}</p>
+            <p>{t('terminal:status.onBreak')}</p>
             <p className="expired-hint">
-              {t('terminal.status.availableAgainIn')}{' '}
+              {t('terminal:status.availableAgainIn')}{' '}
               <CooldownCountdown availableAgainAt={mission.availableAgainAt} />
             </p>
           </div>
@@ -497,52 +497,52 @@ export function TerminalScreen({
               {missionText(
                 mission,
                 'successTitle',
-                t('terminal.status.packageConfirmed'),
+                t('terminal:status.packageConfirmed'),
               )}
             </strong>
             <p>
               {missionText(
                 mission,
                 'successText',
-                t('terminal.status.progressConfirmed'),
+                t('terminal:status.progressConfirmed'),
               )}
             </p>
           </div>
         ) : isExpired ? (
           <div className="expired-file">
-            <p>{t('terminal.status.timeUp')}</p>
-            <p className="expired-hint">{t('terminal.status.missionOneTime')}</p>
+            <p>{t('terminal:status.timeUp')}</p>
+            <p className="expired-hint">{t('terminal:status.missionOneTime')}</p>
             <button
               className="expired-remove"
               onClick={() => void onExpireMission(mission.id)}
             >
-              {t('terminal.buttons.remove')}
+              {t('terminal:buttons.remove')}
             </button>
           </div>
         ) : isLocked ? (
           <div className="locked-file">
             <span>?</span>
             <div>
-              <strong>{t('terminal.status.packageUnavailable')}</strong>
-              <small>{t('terminal.status.serverWillOpen')}</small>
+              <strong>{t('terminal:status.packageUnavailable')}</strong>
+              <small>{t('terminal:status.serverWillOpen')}</small>
             </div>
           </div>
         ) : isInProgress ? (
           <div className="accept-row">
             <p className="in-progress-hint">
-              {t('terminal.status.missionActive')}
+              {t('terminal:status.missionActive')}
             </p>
             {mission.missionType === 'team' && (
               <p className="team-member-count">
                 {mission.sessionMemberCount ?? 0}/{mission.maxMembers ?? 0}
                 {' — '}
                 {((mission.sessionMemberCount ?? 0) < (mission.maxMembers ?? 0))
-                  ? t('terminal.status.waitingPlayers')
-                  : t('terminal.status.teamAssembled')}
+                  ? t('terminal:status.waitingPlayers')
+                  : t('terminal:status.teamAssembled')}
               </p>
             )}
             <button onClick={() => onScreenChange('map')}>
-              {t('terminal.buttons.openMap')}
+              {t('terminal:buttons.openMap')}
             </button>
 
             {cancelDeadlineAt && (
@@ -573,7 +573,7 @@ export function TerminalScreen({
                   }}
                   onClick={() => void onExpireMission(mission.id)}
                 >
-                  {t('terminal.buttons.refuse')}
+                  {t('terminal:buttons.refuse')}
                 </button>
               </div>
             )}
@@ -586,8 +586,8 @@ export function TerminalScreen({
               {mission.sessionMemberCount ?? 0}/{mission.maxMembers ?? 0}
               {' — '}
               {((mission.sessionMemberCount ?? 0) < (mission.maxMembers ?? 0))
-                ? t('terminal.status.waitingPlayers')
-                : t('terminal.status.teamAssembled')}
+                ? t('terminal:status.waitingPlayers')
+                : t('terminal:status.teamAssembled')}
             </p>
 
             {/* Sprint 8.x-4-nav: вход в экран командной сессии (мини-игра).
@@ -596,11 +596,11 @@ export function TerminalScreen({
               type="button"
               onClick={() => onScreenChange('team-session')}
             >
-              {t('terminal.buttons.openSession')}
+              {t('terminal:buttons.openSession')}
             </button>
 
             {mission.sessionStatus === 'active' ? (
-              <p className="in-progress-hint">{t('terminal.status.gameInProgress')}</p>
+              <p className="in-progress-hint">{t('terminal:status.gameInProgress')}</p>
             ) : mission.sessionStatus === 'collecting' ||
               mission.sessionStatus === 'ready_to_start' ? (
               <>
@@ -639,7 +639,7 @@ export function TerminalScreen({
                   }}
                   onClick={() => void handleLeaveTeamMission(mission)}
                 >
-                  {t('terminal.buttons.refuse')}
+                  {t('terminal:buttons.refuse')}
                 </button>
               </>
             ) : null}
@@ -651,7 +651,7 @@ export function TerminalScreen({
                 <p>Вход: {mission.entryRoot} ROOT</p>
                 {missingRoot && (
                   <p className="repair-error">
-                    {t('terminal.errors.notEnoughRoot', {
+                    {t('terminal:errors.notEnoughRoot', {
                       amount: mission.entryRoot - rootBalance,
                     })}
                   </p>
@@ -677,7 +677,7 @@ export function TerminalScreen({
 
             <div className="accept-row">
               <button onClick={() => setSelectedMission(mission)}>
-                {t('terminal.buttons.view')}
+                {t('terminal:buttons.view')}
               </button>
             </div>
           </>
@@ -695,12 +695,12 @@ export function TerminalScreen({
       />
 
       <div className="terminal-content">
-        <p className="eyebrow">{t('terminal.header.contourConnected')}</p>
-        <h2>{t('terminal.header.availablePackages')}</h2>
+        <p className="eyebrow">{t('terminal:header.contourConnected')}</p>
+        <h2>{t('terminal:header.availablePackages')}</h2>
 
         <div className="log-window">
-          <p>{t('terminal.header.systemContentReceived')}</p>
-          <p>{t('terminal.header.systemResultsReceived')}</p>
+          <p>{t('terminal:header.systemContentReceived')}</p>
+          <p>{t('terminal:header.systemResultsReceived')}</p>
         </div>
 
         {acceptError && (
@@ -724,8 +724,8 @@ export function TerminalScreen({
             <section className="location-status">
               <span className="location-status-icon">⌖</span>
               <div>
-                <strong>{t('terminal.empty.noTextPackages')}</strong>
-                <p>{t('terminal.empty.publishedPackageHint')}</p>
+                <strong>{t('terminal:empty.noTextPackages')}</strong>
+                <p>{t('terminal:empty.publishedPackageHint')}</p>
               </div>
             </section>
 
@@ -742,7 +742,7 @@ export function TerminalScreen({
                 {teamTab === 'active' ? (
                   renderActiveSessions()
                 ) : (
-                  <p className="layer-empty">{t('terminal.empty.nothingYet')}</p>
+                  <p className="layer-empty">{t('terminal:empty.nothingYet')}</p>
                 )}
               </div>
             </section>
@@ -778,7 +778,7 @@ export function TerminalScreen({
                     {layer === 'team' && teamTab === 'active' ? (
                       renderActiveSessions()
                     ) : isEmpty ? (
-                      <p className="layer-empty">{t('terminal.empty.nothingYet')}</p>
+                      <p className="layer-empty">{t('terminal:empty.nothingYet')}</p>
                     ) : (
                       missionsByLayer[layer].map((mission) =>
                         renderMissionCard(mission),
@@ -798,7 +798,7 @@ export function TerminalScreen({
               className="archive-toggle"
               onClick={() => setShowArchive((v) => !v)}
             >
-              {showArchive ? '▼' : '▶'} {t('terminal.sections.jobHistory')} ({archivedMissions.length})
+              {showArchive ? '▼' : '▶'} {t('terminal:sections.jobHistory')} ({archivedMissions.length})
             </button>
 
             {showArchive && (
@@ -811,8 +811,8 @@ export function TerminalScreen({
                     <small>
                       СТАТУС:{' '}
                       {mission.status === 'completed'
-                        ? t('terminal.missionStatus.completed')
-                        : t('terminal.missionStatus.expired')}
+                        ? t('terminal:missionStatus.completed')
+                        : t('terminal:missionStatus.expired')}
                     </small>
                     <h3>{mission.title}</h3>
                     {mission.completedAt && (
