@@ -1118,10 +1118,17 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
      «АКТИВНЫЕ» (f7927f1, без кэша) и myReadyAt в EngineMission (785b5bd,
      bootstrap-поле). Файлы: src/components/screens/TerminalScreen.tsx,
      src/api/engineApi.ts, backend/app/mission_engine.py.
-   - ⚠️ ОСТАЛОСЬ (2026-11-01, поздний вечер): проверка на 2 реальных телефонах
-     (пункт выше — по коду всё готово); pairwiseProximityMeters (40) —
-     CMS-поле миссии (сейчас в админке MissionsSection хардкод 40, в рантайме
-     — константа 50 км); UI-полировка интерфейса — 14.6.
+   - ✅ joinProximityMeters CMS (2026-11-02, 1282294): CMS-поле
+     validation_config.geo.joinProximityMeters (optional, default 50000);
+     runtime — из config (fallback 50000, DEFAULT_JOIN_PROXIMITY_METERS);
+     админка — поле (1000…100000, default 50000); старые миссии — fallback
+     50000. Тесты +4 (855 OK, skipped=10).
+   - ⚠️ ОСТАЛОСЬ (2026-11-02): проверка на 2 реальных телефонах (пункт выше —
+     по коду всё готово); pairwiseProximityMeters (40) — CMS-поле миссии
+     (сейчас в админке MissionsSection хардкод 40, в рантайме — константа
+     50 км; долг, поле — после решения семантики);
+     proofFreshnessSeconds/deadlineSeconds/maxAttempts — хардкод (долг);
+     UI-полировка интерфейса — 14.6.
 
 ---
 
