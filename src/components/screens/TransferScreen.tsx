@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Screen } from '../../types/game'
 import {
   getEngineBootstrap,
@@ -46,6 +47,7 @@ export function TransferScreen({
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [requestId, setRequestId] = useState<string>(() => makeRequestId())
+  const { t } = useTranslation(['transfer', 'common'])
   // 10.4-j-1: газ на момент открытия экрана (бootstrap). Пропс из App может
   // отсутствовать — тогда тянем сами, чтобы блок «Газ: N» был виден всегда.
   const [gas, setGas] = useState<string | null>(null)
@@ -73,7 +75,7 @@ export function TransferScreen({
   async function handleSearch() {
     const q = query.trim()
     if (q.length < 3) {
-      setError('Для поиска нужно минимум 3 символа.')
+      setError(t('transfer:search.error.tooShort'))
       return
     }
     setLoading(true)
@@ -100,7 +102,7 @@ export function TransferScreen({
     if (selected === null || saving) return
     const value = Number(amount)
     if (!Number.isFinite(value) || value <= 0) {
-      setError('Введите сумму больше 0.')
+      setError(t('transfer:amount.error.notPositive'))
       return
     }
     setSaving(true)
@@ -114,7 +116,7 @@ export function TransferScreen({
         amount: value,
         request_id: requestId,
       })
-      setNotice(`Переведено. Баланс: ${result.fromBalance} ROOT.`)
+      setNotice(t('transfer:notices.transferSuccess', { fromBalance: result.fromBalance }))
       // Успешная отправка: новый request_id для следующего перевода.
       setRequestId(makeRequestId())
       setSelected(null)
@@ -131,18 +133,18 @@ export function TransferScreen({
 
   return (
     <section className="inventory">
-      <p className="eyebrow">ПЕРЕВОД / ROOT</p>
-      <h2>Перевод</h2>
+      <p className="eyebrow">{t('transfer:header.eyebrow')}</p>
+      <h2>{t('transfer:header.title')}</h2>
 
       {typeof rootBalance === 'number' && (
         <p>
-          Доступно: <b>{rootBalance} ROOT</b>
+          {t('transfer:header.availableLabel')} <b>{rootBalance} ROOT</b>
         </p>
       )}
 
       {gas !== null && (
         <p>
-          Газ: <b>{gas}</b>
+          {t('transfer:gas.label')} <b>{gas}</b>
         </p>
       )}
 
@@ -152,11 +154,11 @@ export function TransferScreen({
       {selected === null ? (
         <>
           <label>
-            Поиск игрока (минимум 3 символа)
+            {t('transfer:search.label')}
             <input
               type="text"
               value={query}
-              placeholder="Никнейм игрока"
+              placeholder={t('transfer:search.placeholder')}
               onChange={(e) => {
                 setQuery(e.target.value)
                 setError(null)
@@ -170,13 +172,13 @@ export function TransferScreen({
             disabled={loading || query.trim().length < 3}
             onClick={handleSearch}
           >
-            {loading ? 'Поиск…' : 'Найти'}
+            {loading ? t('transfer:search.buttons.searching') : t('common:search')}
           </button>
 
           {results.map((hit) => (
             <article className="message-card" key={hit.id}>
               <p>
-                {hit.nickname ?? 'Без ника'}
+                {hit.nickname ?? t('transfer:search.noNickname')}
                 {hit.country ? ` · ${hit.country}` : ''}
               </p>
               <button
@@ -187,7 +189,7 @@ export function TransferScreen({
                   setError(null)
                 }}
               >
-                Выбрать
+                {t('transfer:search.buttons.select')}
               </button>
             </article>
           ))}
@@ -195,7 +197,7 @@ export function TransferScreen({
       ) : (
         <>
           <p>
-            Получатель:{' '}
+            {t('transfer:recipient.label')}{' '}
             <b>
               {selected.nickname ?? selected.id}
               {selected.country ? ` · ${selected.country}` : ''}
@@ -203,7 +205,7 @@ export function TransferScreen({
           </p>
 
           <label>
-            Сумма (ROOT)
+            {t('transfer:amount.label')}
             <input
               type="number"
               min={1}
@@ -221,11 +223,11 @@ export function TransferScreen({
             disabled={saving}
             onClick={handleTransfer}
           >
-            {saving ? 'Перевод…' : 'Перевести'}
+            {saving ? t('transfer:buttons.transferring') : t('transfer:buttons.transfer')}
           </button>
 
           <button type="button" onClick={handleCancel}>
-            Отмена
+            {t('common:cancel')}
           </button>
         </>
       )}
@@ -234,7 +236,7 @@ export function TransferScreen({
         className="back-button"
         onClick={() => onScreenChange('terminal')}
       >
-        ← ВЕРНУТЬСЯ В КОНТУР
+        {t('common:backToContour')}
       </button>
     </section>
   )

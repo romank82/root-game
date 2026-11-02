@@ -1,1 +1,38 @@
-{}
+{
+  "header": {
+    "eyebrow": "ПЕРЕВОД / ROOT",
+    "title": "Перевод",
+    "availableLabel": "Доступно:"
+  },
+  "search": {
+    "label": "Поиск игрока (минимум 3 символа)",
+    "placeholder": "Никнейм игрока",
+    "noNickname": "Без ника",
+    "buttons": {
+      "searching": "Поиск…",
+      "select": "Выбрать"
+    },
+    "error": {
+      "tooShort": "Для поиска нужно минимум 3 символа."
+    }
+  },
+  "recipient": {
+    "label": "Получатель:"
+  },
+  "amount": {
+    "label": "Сумма (ROOT)",
+    "error": {
+      "notPositive": "Введите сумму больше 0."
+    }
+  },
+  "gas": {
+    "label": "Газ:"
+  },
+  "buttons": {
+    "transfer": "Перевести",
+    "transferring": "Перевод…"
+  },
+  "notices": {
+    "transferSuccess": "Переведено. Баланс: {{fromBalance}} ROOT."
+  }
+}
