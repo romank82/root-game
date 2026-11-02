@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import type {
   EngineActiveTeamSession,
@@ -59,23 +61,11 @@ interface TerminalScreenProps {
   ) => Promise<{ ok: boolean; error?: string }>
 }
 
-function missionStatusLabel(status: EngineMission['status']): string {
-  if (status === 'completed') {
-    return 'РАСШИФРОВАНО'
-  }
-  if (status === 'locked') {
-    return 'НЕДОСТУПНО'
-  }
-  if (status === 'in_progress') {
-    return 'В ПРОЦЕССЕ'
-  }
-  if (status === 'expired') {
-    return 'ПРОВАЛЕНО'
-  }
-  if (status === 'cancelled') {
-    return 'ОТМЕНЕНО'
-  }
-  return 'ДОСТУПНО'
+function missionStatusLabel(
+  t: TFunction,
+  status: EngineMission['status'],
+): string {
+  return t(`terminal.missionStatus.${status}`, 'ДОСТУПНО')
 }
 
 export function TerminalScreen({
@@ -88,6 +78,7 @@ export function TerminalScreen({
   onAcceptMission,
   onExpireMission,
 }: TerminalScreenProps) {
+  const { t } = useTranslation(['terminal', 'common'])
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
   const [acceptError, setAcceptError] = useState<string | null>(null)
   // Командные сессии, из которых игрок вышел (для «исчезновения» карточки
@@ -153,9 +144,9 @@ export function TerminalScreen({
 
   // Группировка активных миссий по слоям.
   const LAYER_LABEL: Record<typeof LAYER_ORDER[number], string> = {
-    story: 'СЮЖЕТНЫЕ',
-    team: 'КОМАНДНЫЕ',
-    solo: 'ИНДИВИДУАЛЬНЫЕ',
+    story: t('terminal.sections.story'),
+    team: t('terminal.sections.team'),
+    solo: t('terminal.sections.individual'),
   }
   const missionsByLayer = {
     story: activeMissions.filter((m) => m.missionLayer === 'story'),
@@ -185,7 +176,7 @@ export function TerminalScreen({
     const result = await onAcceptMission(mission.id)
     setAcceptingId(null)
     if (!result.accepted) {
-      setAcceptError(result.error ?? 'Не удалось взять миссию.')
+      setAcceptError(result.error ?? t('terminal.errors.takeMissionFailed'))
       return
     }
     // После accept переходим на карту — там будут круги.
@@ -213,7 +204,9 @@ export function TerminalScreen({
       }
     } catch (err) {
       setTeamLeaveNote(
-        err instanceof Error ? err.message : 'Не удалось выйти из сессии.',
+        err instanceof Error
+          ? err.message
+          : t('terminal.errors.leaveSessionFailed'),
       )
     }
   }
@@ -349,7 +342,7 @@ export function TerminalScreen({
             cursor: 'pointer',
           }}
         >
-          МОИ СЕССИИ
+          {t('terminal.sections.mySessions')}
         </button>
         <button
           type="button"
@@ -373,7 +366,7 @@ export function TerminalScreen({
             cursor: 'pointer',
           }}
         >
-          АКТИВНЫЕ
+          {t('terminal.sections.activeSessions')}
         </button>
       </div>
     )
@@ -383,9 +376,9 @@ export function TerminalScreen({
     return (
       <>
         {activeError && <p className="repair-error">{activeError}</p>}
-        {activeLoading && <p className="admin-muted">Ищем сессии рядом…</p>}
+        {activeLoading && <p className="admin-muted">{t('terminal.empty.searchingSessions')}</p>}
         {!activeLoading && activeSessions.length === 0 && (
-          <p className="layer-empty">Нет активных сессий рядом</p>
+          <p className="layer-empty">{t('terminal.empty.noActiveSessions')}</p>
         )}
         {activeSessions.map((item) => (
           <article className="puzzle" key={item.id}>
@@ -408,7 +401,9 @@ export function TerminalScreen({
               disabled={joiningSessionId !== null}
               onClick={() => void handleJoinActive(item)}
             >
-              {joiningSessionId === item.id ? 'Вступаем…' : 'ВСТУПИТЬ'}
+              {joiningSessionId === item.id
+                ? t('terminal.buttons.joining')
+                : t('terminal.buttons.join')}
             </button>
           </article>
         ))}
@@ -483,16 +478,16 @@ export function TerminalScreen({
         <span className="file-label">
           {missionText(mission, 'label', mission.title)}
         </span>
-        <small>СТАТУС: {missionStatusLabel(mission.status)}</small>
+        <small>СТАТУС: {missionStatusLabel(t, mission.status)}</small>
         <h3>
           {missionText(mission, 'question', mission.description)}
         </h3>
 
         {mission.availableAgainAt !== null ? (
           <div className="expired-file">
-            <p>НА ПЕРЕРЫВЕ</p>
+            <p>{t('terminal.status.onBreak')}</p>
             <p className="expired-hint">
-              Доступна снова через:{' '}
+              {t('terminal.status.availableAgainIn')}{' '}
               <CooldownCountdown availableAgainAt={mission.availableAgainAt} />
             </p>
           </div>
@@ -502,55 +497,52 @@ export function TerminalScreen({
               {missionText(
                 mission,
                 'successTitle',
-                '✓ ПАКЕТ ПОДТВЕРЖДЁН',
+                t('terminal.status.packageConfirmed'),
               )}
             </strong>
             <p>
               {missionText(
                 mission,
                 'successText',
-                'Прогресс подтверждён сервером.',
+                t('terminal.status.progressConfirmed'),
               )}
             </p>
           </div>
         ) : isExpired ? (
           <div className="expired-file">
-            <p>ВРЕМЯ ВЫШЛО</p>
-            <p className="expired-hint">Миссия одноразовая.</p>
+            <p>{t('terminal.status.timeUp')}</p>
+            <p className="expired-hint">{t('terminal.status.missionOneTime')}</p>
             <button
               className="expired-remove"
               onClick={() => void onExpireMission(mission.id)}
             >
-              УБРАТЬ
+              {t('terminal.buttons.remove')}
             </button>
           </div>
         ) : isLocked ? (
           <div className="locked-file">
             <span>?</span>
             <div>
-              <strong>ПАКЕТ НЕДОСТУПЕН</strong>
-              <small>
-                Сервер откроет задание после выполнения необходимых
-                условий.
-              </small>
+              <strong>{t('terminal.status.packageUnavailable')}</strong>
+              <small>{t('terminal.status.serverWillOpen')}</small>
             </div>
           </div>
         ) : isInProgress ? (
           <div className="accept-row">
             <p className="in-progress-hint">
-              Миссия активна. Зона поиска уже на карте.
+              {t('terminal.status.missionActive')}
             </p>
             {mission.missionType === 'team' && (
               <p className="team-member-count">
                 {mission.sessionMemberCount ?? 0}/{mission.maxMembers ?? 0}
                 {' — '}
                 {((mission.sessionMemberCount ?? 0) < (mission.maxMembers ?? 0))
-                  ? 'Ждём игроков...'
-                  : 'Команда собрана!'}
+                  ? t('terminal.status.waitingPlayers')
+                  : t('terminal.status.teamAssembled')}
               </p>
             )}
             <button onClick={() => onScreenChange('map')}>
-              ОТКРЫТЬ КАРТУ
+              {t('terminal.buttons.openMap')}
             </button>
 
             {cancelDeadlineAt && (
@@ -581,7 +573,7 @@ export function TerminalScreen({
                   }}
                   onClick={() => void onExpireMission(mission.id)}
                 >
-                  ОТКАЗАТЬСЯ
+                  {t('terminal.buttons.refuse')}
                 </button>
               </div>
             )}
@@ -594,8 +586,8 @@ export function TerminalScreen({
               {mission.sessionMemberCount ?? 0}/{mission.maxMembers ?? 0}
               {' — '}
               {((mission.sessionMemberCount ?? 0) < (mission.maxMembers ?? 0))
-                ? 'Ждём игроков...'
-                : 'Команда собрана!'}
+                ? t('terminal.status.waitingPlayers')
+                : t('terminal.status.teamAssembled')}
             </p>
 
             {/* Sprint 8.x-4-nav: вход в экран командной сессии (мини-игра).
@@ -604,11 +596,11 @@ export function TerminalScreen({
               type="button"
               onClick={() => onScreenChange('team-session')}
             >
-              ОТКРЫТЬ СЕССИЮ
+              {t('terminal.buttons.openSession')}
             </button>
 
             {mission.sessionStatus === 'active' ? (
-              <p className="in-progress-hint">Игра идёт</p>
+              <p className="in-progress-hint">{t('terminal.status.gameInProgress')}</p>
             ) : mission.sessionStatus === 'collecting' ||
               mission.sessionStatus === 'ready_to_start' ? (
               <>
@@ -647,7 +639,7 @@ export function TerminalScreen({
                   }}
                   onClick={() => void handleLeaveTeamMission(mission)}
                 >
-                  ОТКАЗАТЬСЯ
+                  {t('terminal.buttons.refuse')}
                 </button>
               </>
             ) : null}
@@ -659,7 +651,9 @@ export function TerminalScreen({
                 <p>Вход: {mission.entryRoot} ROOT</p>
                 {missingRoot && (
                   <p className="repair-error">
-                    Не хватает {mission.entryRoot - rootBalance} ROOT
+                    {t('terminal.errors.notEnoughRoot', {
+                      amount: mission.entryRoot - rootBalance,
+                    })}
                   </p>
                 )}
               </>
@@ -683,7 +677,7 @@ export function TerminalScreen({
 
             <div className="accept-row">
               <button onClick={() => setSelectedMission(mission)}>
-                ПРОСМОТР
+                {t('terminal.buttons.view')}
               </button>
             </div>
           </>
@@ -701,18 +695,12 @@ export function TerminalScreen({
       />
 
       <div className="terminal-content">
-        <p className="eyebrow">КОНТУР / ПОДКЛЮЧЕНИЕ УСТАНОВЛЕНО</p>
-        <h2>Доступные архивные пакеты</h2>
+        <p className="eyebrow">{t('terminal.header.contourConnected')}</p>
+        <h2>{t('terminal.header.availablePackages')}</h2>
 
         <div className="log-window">
-          <p>
-            <span>[СИСТЕМА]</span> Контент получен из защищённого игрового
-            bootstrap.
-          </p>
-          <p>
-            <span>[СИСТЕМА]</span> Результаты проверок и награды подтверждает
-            сервер.
-          </p>
+          <p>{t('terminal.header.systemContentReceived')}</p>
+          <p>{t('terminal.header.systemResultsReceived')}</p>
         </div>
 
         {acceptError && (
@@ -736,11 +724,8 @@ export function TerminalScreen({
             <section className="location-status">
               <span className="location-status-icon">⌖</span>
               <div>
-                <strong>НЕТ ДОСТУПНЫХ ТЕКСТОВЫХ ПАКЕТОВ</strong>
-                <p>
-                  Опубликованный сюжетный пакет ещё не получен из игрового
-                  bootstrap, либо все доступные пакеты уже в истории заданий.
-                </p>
+                <strong>{t('terminal.empty.noTextPackages')}</strong>
+                <p>{t('terminal.empty.publishedPackageHint')}</p>
               </div>
             </section>
 
@@ -757,7 +742,7 @@ export function TerminalScreen({
                 {teamTab === 'active' ? (
                   renderActiveSessions()
                 ) : (
-                  <p className="layer-empty">Пока пусто</p>
+                  <p className="layer-empty">{t('terminal.empty.nothingYet')}</p>
                 )}
               </div>
             </section>
@@ -793,7 +778,7 @@ export function TerminalScreen({
                     {layer === 'team' && teamTab === 'active' ? (
                       renderActiveSessions()
                     ) : isEmpty ? (
-                      <p className="layer-empty">Пока пусто</p>
+                      <p className="layer-empty">{t('terminal.empty.nothingYet')}</p>
                     ) : (
                       missionsByLayer[layer].map((mission) =>
                         renderMissionCard(mission),
@@ -813,7 +798,7 @@ export function TerminalScreen({
               className="archive-toggle"
               onClick={() => setShowArchive((v) => !v)}
             >
-              {showArchive ? '▼' : '▶'} ИСТОРИЯ ЗАДАНИЙ ({archivedMissions.length})
+              {showArchive ? '▼' : '▶'} {t('terminal.sections.jobHistory')} ({archivedMissions.length})
             </button>
 
             {showArchive && (
@@ -825,7 +810,9 @@ export function TerminalScreen({
                     </span>
                     <small>
                       СТАТУС:{' '}
-                      {mission.status === 'completed' ? 'РАСШИФРОВАНО' : 'ПРОВАЛЕНО'}
+                      {mission.status === 'completed'
+                        ? t('terminal.missionStatus.completed')
+                        : t('terminal.missionStatus.expired')}
                     </small>
                     <h3>{mission.title}</h3>
                     {mission.completedAt && (

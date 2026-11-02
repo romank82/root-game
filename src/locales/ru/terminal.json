@@ -1,0 +1,59 @@
+{
+  "sections": {
+    "story": "СЮЖЕТНЫЕ",
+    "team": "КОМАНДНЫЕ",
+    "individual": "ИНДИВИДУАЛЬНЫЕ",
+    "mySessions": "МОИ СЕССИИ",
+    "activeSessions": "АКТИВНЫЕ",
+    "jobHistory": "ИСТОРИЯ ЗАДАНИЙ"
+  },
+  "header": {
+    "contourConnected": "КОНТУР / ПОДКЛЮЧЕНИЕ УСТАНОВЛЕНО",
+    "availablePackages": "Доступные архивные пакеты",
+    "systemContentReceived": "[СИСТЕМА] Контент получен из защищённого игрового bootstrap.",
+    "systemResultsReceived": "[СИСТЕМА] Результаты проверок и награды подтверждает сервер."
+  },
+  "empty": {
+    "noTextPackages": "НЕТ ДОСТУПНЫХ ТЕКСТОВЫХ ПАКЕТОВ",
+    "publishedPackageHint": "Опубликованный сюжетный пакет ещё не получен из игрового bootstrap, либо все доступные пакеты уже в истории заданий.",
+    "nothingYet": "Пока пусто",
+    "searchingSessions": "Ищем сессии рядом…",
+    "noActiveSessions": "Нет активных сессий рядом"
+  },
+  "buttons": {
+    "join": "ВСТУПИТЬ",
+    "joining": "Вступаем…",
+    "refuse": "ОТКАЗАТЬСЯ",
+    "openSession": "ОТКРЫТЬ СЕССИЮ",
+    "openMap": "ОТКРЫТЬ КАРТУ",
+    "view": "ПРОСМОТР",
+    "remove": "УБРАТЬ"
+  },
+  "status": {
+    "missionActive": "Миссия активна. Зона поиска уже на карте.",
+    "waitingPlayers": "Ждём игроков...",
+    "teamAssembled": "Команда собрана!",
+    "gameInProgress": "Игра идёт",
+    "packageConfirmed": "✓ ПАКЕТ ПОДТВЕРЖДЁН",
+    "progressConfirmed": "Прогресс подтверждён сервером.",
+    "timeUp": "ВРЕМЯ ВЫШЛО",
+    "missionOneTime": "Миссия одноразовая.",
+    "packageUnavailable": "ПАКЕТ НЕДОСТУПЕН",
+    "serverWillOpen": "Сервер откроет задание после выполнения необходимых условий.",
+    "onBreak": "НА ПЕРЕРЫВЕ",
+    "availableAgainIn": "Доступна снова через:"
+  },
+  "errors": {
+    "takeMissionFailed": "Не удалось взять миссию.",
+    "leaveSessionFailed": "Не удалось выйти из сессии.",
+    "notEnoughRoot": "Не хватает {{amount}} ROOT"
+  },
+  "missionStatus": {
+    "completed": "РАСШИФРОВАНО",
+    "locked": "НЕДОСТУПНО",
+    "in_progress": "В ПРОЦЕССЕ",
+    "expired": "ПРОВАЛЕНО",
+    "cancelled": "ОТМЕНЕНО",
+    "available": "ДОСТУПНО"
+  }
+}
