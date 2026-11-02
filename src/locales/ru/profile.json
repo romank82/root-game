@@ -1,1 +1,90 @@
-{}
+{
+  "header": {
+    "eyebrow": "ПРОФИЛЬ / АНКЕТА ИГРОКА",
+    "title": "Профиль"
+  },
+  "gas": {
+    "title": "Газ",
+    "balanceLabel": "Баланс:",
+    "emptyValue": "—",
+    "buying": "Создаём инвойс…",
+    "packs": {
+      "pack10": "10 газа (10 ⭐)",
+      "pack100": "100 газа (80 ⭐)",
+      "pack1000": "1000 газа (700 ⭐)"
+    },
+    "notice": {
+      "sentToChat": "Инвойс отправлен в чат с ботом. Откройте чат с ботом и оплатите.",
+      "credited": "Газ зачислен (после подтверждения).",
+      "openedInNewTab": "Перейдите в Telegram-бота для подтверждения оплаты.",
+      "paymentFailed": "Оплата не прошла. Попробуйте ещё раз."
+    }
+  },
+  "tonWallet": {
+    "title": "TON-кошелёк",
+    "addressLabel": "Адрес для вывода ROOT в TON:",
+    "inputLabel": "Ваш TON-адрес",
+    "inputPlaceholder": "Вставьте адрес кошелька",
+    "delete": "Удалить",
+    "deleting": "Удаляем…",
+    "save": "Сохранить",
+    "saving": "Сохранение…",
+    "notice": {
+      "saved": "TON-кошелёк сохранён.",
+      "deleted": "TON-кошелёк удалён."
+    },
+    "error": {
+      "emptyAddress": "Введите TON-адрес"
+    }
+  },
+  "withdrawal": {
+    "title": "Вывод ROOT → TON",
+    "noAddressHint": "Сначала сохраните TON-адрес выше.",
+    "amountLabel": "Сумма ROOT",
+    "amountPlaceholder": "например, 100",
+    "toAddressLabel": "На адрес:",
+    "submit": "Создать заявку",
+    "submitting": "Отправка…",
+    "notice": {
+      "created": "Заявка отправлена. Она в обработке."
+    },
+    "error": {
+      "noAddress": "Сначала сохраните TON-адрес.",
+      "invalidAmount": "Сумма должна быть положительным целым числом."
+    }
+  },
+  "applications": {
+    "title": "Мои заявки",
+    "empty": "Заявок пока нет.",
+    "statusLabel": "Статус:",
+    "separator": " · ",
+    "reasonPrefix": "Причина: ",
+    "summary": "{{amount}} ROOT → {{address}}…"
+  },
+  "form": {
+    "playerLabel": "Игрок:",
+    "countryLabel": "Страна",
+    "countryNotSpecified": "Не указана",
+    "countryLockedHint": "Страна определена автоматически по координатам и не может быть изменена в анкете.",
+    "genderLabel": "Пол",
+    "genderNotSpecified": "Не указан",
+    "ageLabel": "Возраст",
+    "save": "Сохранить",
+    "saving": "Сохранение…"
+  },
+  "genderOptions": {
+    "male": "Мужской",
+    "female": "Женский",
+    "other": "Другое",
+    "unspecified": "Не определился"
+  },
+  "status": {
+    "pending": "В обработке",
+    "approved": "Одобрено",
+    "processing": "Выплачивается",
+    "confirmed": "Выплачено",
+    "rejected": "Отклонено",
+    "failed": "Ошибка выплаты",
+    "fallback": "В обработке"
+  }
+}

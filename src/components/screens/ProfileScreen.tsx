@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Screen } from '../../types/game'
 import {
   createGasInvoice,
@@ -31,11 +32,11 @@ type DraftState = {
 
 // Значения gender — контракт backend-схемы (admin_players.VALID_GENDERS):
 // {"male", "female", "other", "unspecified"}.
-const GENDER_OPTIONS: { value: string; label: string }[] = [
-  { value: 'male', label: 'Мужской' },
-  { value: 'female', label: 'Женский' },
-  { value: 'other', label: 'Другое' },
-  { value: 'unspecified', label: 'Не определился' },
+const GENDER_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: 'male', labelKey: 'profile:genderOptions.male' },
+  { value: 'female', labelKey: 'profile:genderOptions.female' },
+  { value: 'other', labelKey: 'profile:genderOptions.other' },
+  { value: 'unspecified', labelKey: 'profile:genderOptions.unspecified' },
 ]
 // Полный официальный список ISO 3166-1 alpha-2 (249 стран и территорий)
 // с русскими названиями (источник: CLDR ru). Сначала — самые частые страны,
@@ -294,10 +295,10 @@ const COUNTRY_OPTIONS: { value: string; label: string }[] = [
 
 // 10.4-j-1: пакеты газа. Цены соответствуют CMS-каталогу gas packs
 // (economy.*); подпись кнопки — «объём (цена в Stars)».
-const GAS_PACKS: { amount: number; label: string }[] = [
-  { amount: 10, label: '10 газа (10 ⭐)' },
-  { amount: 100, label: '100 газа (80 ⭐)' },
-  { amount: 1000, label: '1000 газа (700 ⭐)' },
+const GAS_PACKS: { amount: number; labelKey: string }[] = [
+  { amount: 10, labelKey: 'profile:gas.packs.pack10' },
+  { amount: 100, labelKey: 'profile:gas.packs.pack100' },
+  { amount: 1000, labelKey: 'profile:gas.packs.pack1000' },
 ]
 
 function draftFromPlayer(player: MyProfile): DraftState {
@@ -328,6 +329,7 @@ function buildPayload(
 }
 
 export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
+  const { t } = useTranslation(['profile', 'common'])
   const [profile, setProfile] = useState<MyProfile | null>(null)
   const [draft, setDraft] = useState<DraftState>({
     country: '',
@@ -518,20 +520,20 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
             getEngineBootstrap()
               .then((data) => {
                 setGasBalance(data.gasBalance)
-                setGasNotice('Газ зачислен (после подтверждения).')
+                setGasNotice(t('profile:gas.notice.credited'))
               })
               .catch((err: Error) => {
                 setGasError(err.message)
               })
           } else {
-            setGasError(`Оплата не завершена: ${status}.`)
+            setGasError(t('profile:gas.notice.paymentFailed'))
           }
         })
       } else {
         // Fallback вне Telegram WebApp: открыть ссылку инвойса в новой
         // вкладке (в WebView openInvoice обычно присутствует).
         window.open(invoice.invoiceLink, '_blank')
-        setGasNotice('Инвойс открыт в новой вкладке (вне Telegram WebApp).')
+        setGasNotice(t('profile:gas.notice.openedInNewTab'))
       }
     } catch (err) {
       setGasError((err as Error).message)
@@ -545,7 +547,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     if (savingTonWallet) return
     const address = tonWalletDraft.trim()
     if (!address) {
-      setTonWalletError('Введите TON-адрес (EQ…/EQA…/kQA…).')
+      setTonWalletError(t('profile:tonWallet.error.emptyAddress'))
       return
     }
     setSavingTonWallet(true)
@@ -555,7 +557,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       const next = await saveMyTonWallet(address)
       setTonWallet(next)
       setTonWalletDraft('')
-      setTonWalletNotice('TON-кошелёк сохранён.')
+      setTonWalletNotice(t('profile:tonWallet.notice.saved'))
     } catch (err) {
       setTonWalletError((err as Error).message)
     } finally {
@@ -572,7 +574,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       await deleteMyTonWallet()
       setTonWallet(null)
       setTonWalletDraft('')
-      setTonWalletNotice('TON-кошелёк удалён.')
+      setTonWalletNotice(t('profile:tonWallet.notice.deleted'))
     } catch (err) {
       setTonWalletError((err as Error).message)
     } finally {
@@ -584,22 +586,20 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
   async function handleSubmitWithdrawal() {
     const address = savedAddress
     if (!address) {
-      setWithdrawError('Сначала сохраните TON-адрес.')
+      setWithdrawError(t('profile:withdrawal.error.noAddress'))
       return
     }
     const amount = parseInt(withdrawAmount, 10)
     if (!Number.isFinite(amount) || amount <= 0) {
-      setWithdrawError('Сумма должна быть положительным целым числом.')
+      setWithdrawError(t('profile:withdrawal.error.invalidAmount'))
       return
     }
     setSubmittingWithdrawal(true)
     setWithdrawError(null)
     setWithdrawNotice(null)
     try {
-      const result = await createWithdrawal(amount, address)
-      setWithdrawNotice(
-        `Заявка ${result.withdrawalId} создана (${result.status}).`,
-      )
+      await createWithdrawal(amount, address)
+      setWithdrawNotice(t('profile:withdrawal.notice.created'))
       setWithdrawAmount('')
       // Обновляем список, чтобы новая заявка появилась сразу.
       const refreshed = await listMyWithdrawals(50, 0)
@@ -613,13 +613,13 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
 
   return (
     <section className="inventory">
-      <p className="eyebrow">ПРОФИЛЬ / АНКЕТА ИГРОКА</p>
-      <h2>Профиль</h2>
+      <p className="eyebrow">{t('profile:header.eyebrow')}</p>
+      <h2>{t('profile:header.title')}</h2>
 
       <div className="gas-block">
-        <h3>Газ</h3>
+        <h3>{t('profile:gas.title')}</h3>
         <p>
-          Баланс: <b>{gasBalance ?? '—'}</b>
+          {t('profile:gas.balanceLabel')} <b>{gasBalance ?? t('profile:gas.emptyValue')}</b>
         </p>
         {gasError && <p className="repair-error">{gasError}</p>}
         {gasNotice && <p className="mission-success-card">{gasNotice}</p>}
@@ -631,18 +631,18 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
             disabled={buyingGas}
             onClick={() => handleBuyGas(pack.amount)}
           >
-            {pack.label}
+            {t(pack.labelKey)}
           </button>
         ))}
-        {buyingGas && <p>Создаём инвойс…</p>}
+        {buyingGas && <p>{t('profile:gas.buying')}</p>}
       </div>
 
       <div className="gas-block">
-        <h3>TON-кошелёк</h3>
+        <h3>{t('profile:tonWallet.title')}</h3>
         {savedAddress ? (
           <>
             <p>
-              Адрес для вывода ROOT в TON: <b>{savedAddress}</b>
+              {t('profile:tonWallet.addressLabel')} <b>{savedAddress}</b>
             </p>
             <button
               type="button"
@@ -650,17 +650,19 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
               disabled={savingTonWallet}
               onClick={handleDeleteTonWallet}
             >
-              {savingTonWallet ? 'Удаляем…' : 'Удалить'}
+              {savingTonWallet
+                ? t('profile:tonWallet.deleting')
+                : t('profile:tonWallet.delete')}
             </button>
           </>
         ) : (
           <>
             <label>
-              TON-адрес (EQ…/EQA…/kQA…)
+              {t('profile:tonWallet.inputLabel')}
               <input
                 type="text"
                 value={tonWalletDraft}
-                placeholder="EQ…"
+                placeholder={t('profile:tonWallet.inputPlaceholder')}
                 autoComplete="off"
                 onChange={(e) => setTonWalletDraft(e.target.value)}
               />
@@ -671,7 +673,9 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
               disabled={savingTonWallet || tonWalletDraft.trim() === ''}
               onClick={handleSaveTonWallet}
             >
-              {savingTonWallet ? 'Сохранение…' : 'Сохранить'}
+              {savingTonWallet
+                ? t('profile:tonWallet.saving')
+                : t('profile:tonWallet.save')}
             </button>
           </>
         )}
@@ -682,23 +686,23 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       </div>
 
       <div className="gas-block">
-        <h3>Вывод ROOT → TON</h3>
+        <h3>{t('profile:withdrawal.title')}</h3>
         {savedAddress === null ? (
-          <p className="admin-muted">Сначала сохраните TON-адрес выше.</p>
+          <p className="admin-muted">{t('profile:withdrawal.noAddressHint')}</p>
         ) : (
           <>
             <label>
-              Сумма ROOT
+              {t('profile:withdrawal.amountLabel')}
               <input
                 type="text"
                 value={withdrawAmount}
-                placeholder="например, 100"
+                placeholder={t('profile:withdrawal.amountPlaceholder')}
                 autoComplete="off"
                 onChange={(e) => setWithdrawAmount(e.target.value)}
               />
             </label>
             <p>
-              На адрес: <b>{savedAddress}</b>
+              {t('profile:withdrawal.toAddressLabel')} <b>{savedAddress}</b>
             </p>
             <button
               type="button"
@@ -706,7 +710,9 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
               disabled={submittingWithdrawal || withdrawAmount.trim() === ''}
               onClick={handleSubmitWithdrawal}
             >
-              {submittingWithdrawal ? 'Отправка…' : 'Создать заявку'}
+              {submittingWithdrawal
+                ? t('profile:withdrawal.submitting')
+                : t('profile:withdrawal.submit')}
             </button>
           </>
         )}
@@ -715,36 +721,47 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
           <p className="mission-success-card">{withdrawNotice}</p>
         )}
 
-        <h4>Мои заявки</h4>
+        <h4>{t('profile:applications.title')}</h4>
         {withdrawalsLoading ? (
-          <p>Загрузка…</p>
+          <p>{t('common:loading')}</p>
         ) : withdrawals.length === 0 ? (
-          <p>Заявок пока нет.</p>
+          <p>{t('profile:applications.empty')}</p>
         ) : (
           <ul>
             {withdrawals.map((item) => {
               const statusLabel =
                 (
                   {
-                    pending: 'В обработке',
-                    confirmed: 'Выплачено',
-                    rejected: 'Отклонено',
-                    failed: 'Ошибка',
+                    pending: t('profile:status.pending'),
+                    approved: t('profile:status.approved'),
+                    processing: t('profile:status.processing'),
+                    confirmed: t('profile:status.confirmed'),
+                    rejected: t('profile:status.rejected'),
+                    failed: t('profile:status.failed'),
                   } as Record<string, string>
-                )[item.status] ?? item.status
+                )[item.status] ?? t('profile:status.fallback')
               const createdAt = item.createdAt
                 ? new Date(item.createdAt).toLocaleString()
                 : '—'
               return (
                 <li key={item.withdrawalId}>
                   <p>
-                    {item.amountRoot} ROOT → {item.toAddress.slice(0, 12)}…
+                    {t('profile:applications.summary', {
+                      amount: item.amountRoot,
+                      address: item.toAddress.slice(0, 12),
+                    })}
                     <br />
-                    Статус: <b>{statusLabel}</b> · {createdAt}
+                    {t('profile:applications.statusLabel')}{' '}
+                    <b>{statusLabel}</b>
+                    {t('profile:applications.separator')}
+                    {createdAt}
                   </p>
                   {(item.status === 'rejected' || item.status === 'failed') &&
                     item.reason && (
-                      <p className="repair-error">{item.reason}</p>
+                      <p className="repair-error">
+                        {t('profile:applications.reasonPrefix')}
+                        {item.reason}
+                      </p>
                     )}
                 </li>
               )
@@ -753,23 +770,23 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
         )}
       </div>
 
-      {loading && <p>Загрузка…</p>}
+      {loading && <p>{t('common:loading')}</p>}
       {error && <p className="repair-error">{error}</p>}
 
       {!loading && profile && (
         <>
           <p>
-            Игрок: <b>{profile.nickname}</b>
+            {t('profile:form.playerLabel')} <b>{profile.nickname}</b>
           </p>
 
           <label>
-            Страна
+            {t('profile:form.countryLabel')}
             <select
               value={draft.country}
               disabled={countryLocked}
               onChange={(e) => setDraft({ ...draft, country: e.target.value })}
             >
-              <option value="">Не указана</option>
+              <option value="">{t('profile:form.countryNotSpecified')}</option>
               {COUNTRY_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -778,29 +795,28 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
             </select>
             {countryLocked && (
               <small>
-                Страна определена автоматически по координатам и не может
-                быть изменена в анкете.
+                {t('profile:form.countryLockedHint')}
               </small>
             )}
           </label>
 
           <label>
-            Пол
+            {t('profile:form.genderLabel')}
             <select
               value={draft.gender}
               onChange={(e) => setDraft({ ...draft, gender: e.target.value })}
             >
-              <option value="">Не указан</option>
+              <option value="">{t('profile:form.genderNotSpecified')}</option>
               {GENDER_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {t(option.labelKey)}
                 </option>
               ))}
             </select>
           </label>
 
           <label>
-            Возраст
+            {t('profile:form.ageLabel')}
             <input
               type="number"
               min={0}
@@ -816,11 +832,11 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
             disabled={!isDirty() || saving}
             onClick={handleSave}
           >
-            {saving ? 'Сохранение…' : 'Сохранить'}
+            {saving ? t('profile:form.saving') : t('profile:form.save')}
           </button>
 
           <button type="button" onClick={handleCancel}>
-            Отмена
+            {t('common:cancel')}
           </button>
         </>
       )}
@@ -829,7 +845,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
         className="back-button"
         onClick={() => onScreenChange('terminal')}
       >
-        ← ВЕРНУТЬСЯ В КОНТУР
+        {t('common:backToContour')}
       </button>
     </section>
   )
