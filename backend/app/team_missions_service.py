@@ -68,13 +68,36 @@ LOCATION_PROOF_STATUS_REJECTED = "rejected"
 SUPPORTED_ZONE_TYPES = frozenset({"radius"})  # polygon/poi — позже
 
 # ---- Join proximity (сбор команды): «рядом» -------------------------------
-# Лимит расстояния между участниками при create/join — 50 км (haversine до
-# ВСЕХ активных участников). CMS-поле validation_config.geo.
+# Лимит расстояния между участниками при create/join — по умолчанию 50 км
+# (haversine до ВСЕХ активных участников). Значение — CMS-поле
+# validation_config.geo.joinProximityMeters (optional, метры).
+# Ключ опционален: у существующих миссий его нет — тогда используется
+# DEFAULT_JOIN_PROXIMITY_METERS.
+DEFAULT_JOIN_PROXIMITY_METERS = 50_000
 # pairwiseProximityMeters пока НЕ используется: admin UI (MissionsSection)
 # пишет туда хардкод 40 (метры) — переключение на CMS отдельным шагом
 # вместе с полем в форме миссии.
 PAIRWISE_PROXIMITY_LIMIT_METERS = 50_000
 PAIRWISE_PROXIMITY_LIMIT_KM = PAIRWISE_PROXIMITY_LIMIT_METERS / 1000.0
+
+
+def _join_proximity_limit_meters(config) -> int:
+    """Лимит «рядом» (метры) из validation_config.geo.joinProximityMeters.
+
+    Ключ optional: нет конфига/ключа или значение не положительное целое —
+    фолбэк DEFAULT_JOIN_PROXIMITY_METERS (50 км). Никогда не бросает.
+    """
+    if not isinstance(config, dict):
+        return DEFAULT_JOIN_PROXIMITY_METERS
+    geo = config.get("geo")
+    if not isinstance(geo, dict):
+        return DEFAULT_JOIN_PROXIMITY_METERS
+    value = geo.get("joinProximityMeters")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return DEFAULT_JOIN_PROXIMITY_METERS
+    if value < 1:
+        return DEFAULT_JOIN_PROXIMITY_METERS
+    return value
 
 # Подвкладка «Активные» (TerminalScreen → папка «Командные»): чужие лобби,
 # в которые ещё можно вступить (сбор/готовность), и лимит выборки.
@@ -151,15 +174,19 @@ def _ensure_members_nearby(
     latitude: float,
     longitude: float,
     country: str | None,
+    limit_meters: int = DEFAULT_JOIN_PROXIMITY_METERS,
 ) -> None:
     """Правило «рядом» при вступлении: одна страна + ≤ лимита км до ВСЕХ.
 
+    limit_meters — validation_config.geo.joinProximityMeters (optional, по
+    умолчанию DEFAULT_JOIN_PROXIMITY_METERS = 50 км).
     Проверяются участники с сохранёнными join_*: сессии, созданные без GPS
     (legacy team-accept путь), не блокируются — сравнивать нечего.
     Ошибка 409 бросается ДО списания entry fee.
     """
     from geo_intel_offline import calculate_distance_km
 
+    limit_km = limit_meters / 1000.0
     for member in members:
         if (
             country is not None
@@ -178,12 +205,12 @@ def _ensure_members_nearby(
             member.join_latitude,
             member.join_longitude,
         )
-        if distance_km > PAIRWISE_PROXIMITY_LIMIT_KM:
+        if distance_km > limit_km:
             raise _mission_error(
                 409,
                 "Слишком далеко: "
                 f"{distance_km:.1f} км, лимит "
-                f"{PAIRWISE_PROXIMITY_LIMIT_KM:.0f} км.",
+                f"{limit_km:.0f} км.",
             )
 
 
@@ -438,7 +465,7 @@ def _list_active_team_sessions(
             )
             for member in members
         )
-        if max_distance_km > PAIRWISE_PROXIMITY_LIMIT_KM:
+        if max_distance_km > _join_proximity_limit_meters(config) / 1000.0:
             continue
 
         mission = session.get(Mission, team_session.mission_id)
@@ -831,6 +858,7 @@ def _join_team_session(
             latitude=join_geo["latitude"],
             longitude=join_geo["longitude"],
             country=join_geo["country"],
+            limit_meters=_join_proximity_limit_meters(config),
         )
     join_location_at = _utcnow() if join_geo["latitude"] is not None else None
 

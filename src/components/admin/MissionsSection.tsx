@@ -72,6 +72,9 @@ export type MissionForm = {
   // полей формы / значений по умолчанию.
   teamMinMembers: string
   teamMaxMembers: string
+  // CMS-поле validation_config.geo.joinProximityMeters (optional, метры):
+  // лимит «рядом» при create/join; отсутствие ключа — runtime-фолбэк 50000.
+  teamJoinProximityMeters: string
   sortOrder: string
   rewards: RewardForm[]
 }
@@ -123,6 +126,7 @@ const emptyForm = (): MissionForm => ({
   validationCorrectCombination: [''],
   teamMinMembers: '2',
   teamMaxMembers: '4',
+  teamJoinProximityMeters: '50000',
   sortOrder: '0',
   rewards: [emptyReward()],
 })
@@ -341,6 +345,14 @@ function formFromMission(mission: AdminMission): MissionForm {
         4,
       ),
     ),
+    // Optional-ключ: у старых миссий его нет — дефолт 50000 (fallback рантайма).
+    teamJoinProximityMeters: String(
+      getNestedNumber(
+        getMissionValidationConfig(mission),
+        ['geo', 'joinProximityMeters'],
+        50000,
+      ),
+    ),
     sortOrder: String(mission.sortOrder),
     rewards: mission.rewards.map((reward) => ({
       rewardType: reward.rewardType,
@@ -530,6 +542,16 @@ function formToPayload(
         'Макс. состав команды — целое ≥ 2 и не меньше минимального.',
       )
     }
+    const joinProximityMeters = parseInt(form.teamJoinProximityMeters, 10)
+    if (
+      !Number.isFinite(joinProximityMeters) ||
+      joinProximityMeters < 1000 ||
+      joinProximityMeters > 100000
+    ) {
+      throw new Error(
+        'Радиус сбора (joinProximityMeters) — целое от 1000 до 100000 метров.',
+      )
+    }
     // Остальные настройки — из других полей формы или фиксированные дефолты
     // контракта: цена входа = policyFee («Цена входа (ROOT)»), попытки = 3,
     // свежесть = 120 c, дедлайн = 300 c, fallback выключен.
@@ -564,6 +586,7 @@ function formToPayload(
         zoneId: selectedZone.slug,
         proofFreshnessSeconds: proofFreshness,
         pairwiseProximityMeters: 40,
+        joinProximityMeters,
         periodicCheckPolicy: { mode: 'none', intervalSeconds: 0 },
       },
       activation: {
@@ -2052,6 +2075,24 @@ export function MissionsSection({
                   disabled={!canWrite}
                   onChange={(e) =>
                     setDraftForm({ ...form, teamMaxMembers: e.target.value })
+                  }
+                />
+              </label>
+
+              <label className="admin-field">
+                <span>Радиус сбора, м (joinProximityMeters)</span>
+                <input
+                  type="number"
+                  min={1000}
+                  max={100000}
+                  step={1000}
+                  value={form.teamJoinProximityMeters}
+                  disabled={!canWrite}
+                  onChange={(e) =>
+                    setDraftForm({
+                      ...form,
+                      teamJoinProximityMeters: e.target.value,
+                    })
                   }
                 />
               </label>

@@ -32,6 +32,10 @@ _ALLOWED_GEO_KEYS = {
     "zoneId",
     "proofFreshnessSeconds",
     "pairwiseProximityMeters",
+    # Optional: лимит «рядом» при create/join в метрах. Отсутствие ключа —
+    # не ошибка (существующие миссии остаются валидными); runtime-фолбэк —
+    # 50000 (team_missions_service.DEFAULT_JOIN_PROXIMITY_METERS).
+    "joinProximityMeters",
     "periodicCheckPolicy",
 }
 _ALLOWED_PERIODIC_POLICY_KEYS = {"mode", "intervalSeconds"}
@@ -251,6 +255,14 @@ def validate_team_mission_validation_config(value: Any) -> dict[str, Any]:
         1,
         100_000,
     )
+    # Optional: если ключа нет — валидация проходит (runtime-фолбэк 50000).
+    if "joinProximityMeters" in geo:
+        _integer(
+            geo["joinProximityMeters"],
+            "validationConfig.geo.joinProximityMeters",
+            1,
+            100_000,
+        )
     periodic = _mapping(
         _required(
             geo,

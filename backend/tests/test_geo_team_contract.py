@@ -86,6 +86,33 @@ class GeoTeamMissionConfigurationTests(unittest.TestCase):
         with self.assertRaises(GeoTeamConfigurationError):
             validate_team_mission_validation_config(config)
 
+    def test_join_proximity_meters_is_optional_and_validated_when_present(self) -> None:
+        # Без ключа — ок (optional, runtime-фолбэк 50000).
+        config = valid_team_config()
+        self.assertNotIn("joinProximityMeters", config["geo"])
+        result = validate_team_mission_validation_config(config)
+        self.assertNotIn("joinProximityMeters", result["geo"])
+
+        # С корректным ключом — ок, значение сохранено.
+        config = valid_team_config()
+        config["geo"]["joinProximityMeters"] = 10_000
+        result = validate_team_mission_validation_config(config)
+        self.assertEqual(result["geo"]["joinProximityMeters"], 10_000)
+
+        # Границы диапазона.
+        for edge in (1, 100_000):
+            config = valid_team_config()
+            config["geo"]["joinProximityMeters"] = edge
+            validate_team_mission_validation_config(config)
+
+        # Некорректные значения — ошибка (0, отрицательное, вне диапазона,
+        # нецелое, не число).
+        for bad in (0, -1, 100_001, "50000", 1.5, True, None):
+            config = valid_team_config()
+            config["geo"]["joinProximityMeters"] = bad
+            with self.assertRaises(GeoTeamConfigurationError):
+                validate_team_mission_validation_config(config)
+
     def test_rejects_invalid_periodic_policy_combination(self) -> None:
         config = valid_team_config()
         config["geo"]["periodicCheckPolicy"] = {

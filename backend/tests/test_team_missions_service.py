@@ -1247,12 +1247,20 @@ class TeamMissionsServiceTests(unittest.TestCase):
     # (другие тесты класса создают лобби именно там — не мешаем друг другу).
     NOVOSIBIRSK = (55.0302, 82.9204)
 
-    def _proximity_mission(self, *, fee: int = 2, max_members: int | None = None) -> str:
+    def _proximity_mission(
+        self,
+        *,
+        fee: int = 2,
+        max_members: int | None = None,
+        join_proximity_meters: int | None = None,
+    ) -> str:
         """Командная миссия с заданной ценой входа (и лимитом состава)."""
         config = valid_team_config()
         config["economy"] = {"entryFeeRootAtomic": fee, "requiredItems": []}
         if max_members is not None:
             config["team"]["maxMembers"] = max_members
+        if join_proximity_meters is not None:
+            config["geo"]["joinProximityMeters"] = join_proximity_meters
         return self._make_team_mission(validation_config=config)
 
     def test_create_session_saves_join_location(self) -> None:
@@ -1369,6 +1377,100 @@ class TeamMissionsServiceTests(unittest.TestCase):
         self.assertIn("лимит 50 км", captured.exception.detail)
         self.assertEqual(self._root_balance(member), 10)
         self.assertIsNone(self._member_location(session_id, member))
+
+    def test_join_session_custom_join_proximity_limit_409(self) -> None:
+        """joinProximityMeters=10000: СПб (635 км) → 409 с «лимит 10 км»."""
+        creator = self._make_player()
+        member = self._make_player()
+        mission_id = self._proximity_mission(fee=2, join_proximity_meters=10_000)
+        self._seed_root_wallet(creator, 10)
+        self._seed_root_wallet(member, 10)
+        session_id = create_team_session_entrypoint(
+            creator,
+            mission_id,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+        )["id"]
+
+        with self.assertRaises(MissionEngineError) as captured:
+            join_team_session(
+                member,
+                session_id,
+                latitude=self.SAINT_PETERSBURG[0],
+                longitude=self.SAINT_PETERSBURG[1],
+            )
+
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertTrue(
+            captured.exception.detail.startswith("Слишком далеко: "),
+            captured.exception.detail,
+        )
+        self.assertIn("лимит 10 км", captured.exception.detail)
+        # Плата не списана, членство не создано.
+        self.assertEqual(self._root_balance(member), 10)
+        self.assertIsNone(self._member_location(session_id, member))
+
+    def test_join_session_custom_join_proximity_limit_within_succeeds(self) -> None:
+        """joinProximityMeters=10000: точка ~5 км от создателя → успех."""
+        creator = self._make_player()
+        member = self._make_player()
+        mission_id = self._proximity_mission(fee=2, join_proximity_meters=10_000)
+        self._seed_root_wallet(creator, 10)
+        self._seed_root_wallet(member, 10)
+        session_id = create_team_session_entrypoint(
+            creator,
+            mission_id,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+        )["id"]
+
+        result = join_team_session(
+            member,
+            session_id,
+            latitude=55.7558,
+            longitude=37.7073,  # ~5.2 км восточнее центра Москвы
+        )
+
+        self.assertEqual(result["memberCount"], 2)
+        self.assertEqual(self._root_balance(member), 8)
+        location = self._member_location(session_id, member)
+        self.assertIsNotNone(location)
+        self.assertAlmostEqual(location["latitude"], 55.7558)
+
+    def test_join_session_missing_join_proximity_key_falls_back_to_50km(self) -> None:
+        """Без geo.joinProximityMeters — фолбэк 50 км: СПб (635 км) → 409,
+        а точка рядом (0.4 км) проходит."""
+        creator = self._make_player()
+        member = self._make_player()
+        mission_id = self._proximity_mission(fee=2)  # ключ не добавляется
+        self._seed_root_wallet(creator, 10)
+        self._seed_root_wallet(member, 10)
+        session_id = create_team_session_entrypoint(
+            creator,
+            mission_id,
+            latitude=self.MOSCOW[0],
+            longitude=self.MOSCOW[1],
+        )["id"]
+
+        # Фолбэк 50 км: Москва → СПб (635 км) — 409 «лимит 50 км».
+        with self.assertRaises(MissionEngineError) as captured:
+            join_team_session(
+                member,
+                session_id,
+                latitude=self.SAINT_PETERSBURG[0],
+                longitude=self.SAINT_PETERSBURG[1],
+            )
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertIn("лимит 50 км", captured.exception.detail)
+
+        # Соседняя точка (0.4 км) в пределах фолбэка — успех.
+        join_team_session(
+            member,
+            session_id,
+            latitude=self.MOSCOW_NEARBY[0],
+            longitude=self.MOSCOW_NEARBY[1],
+        )
+        self.assertEqual(self._root_balance(member), 8)
 
     def test_join_proximity_respects_config_max_members(self) -> None:
         """maxMembers из validation_config.team: 2 → третий участник получает 409."""
