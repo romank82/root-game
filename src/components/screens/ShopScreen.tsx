@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Screen } from '../../types/game'
 import {
   listFallbackOffers,
@@ -19,6 +20,7 @@ export function ShopScreen({
   onScreenChange,
   onPurchaseComplete,
 }: ShopScreenProps) {
+  const { t } = useTranslation(['shop', 'common'])
   const [offers, setOffers] = useState<FallbackOffer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -52,7 +54,7 @@ export function ShopScreen({
       const result: FallbackPurchaseResult = await purchaseFallbackOffer(
         offer.entitlementId,
       )
-      setNotice(`Куплено. Баланс: ${result.rootBalance} ROOT.`)
+      setNotice(t('shop:notices.purchased', { balance: result.rootBalance }))
       // Обновить квоту офферов после покупки.
       const refreshed = await listFallbackOffers()
       setOffers(refreshed)
@@ -71,17 +73,17 @@ export function ShopScreen({
 
   return (
     <section className="shop">
-      <p className="eyebrow">МАГАЗИН / КЛЮЧИ</p>
-      <h2>Магазин</h2>
+      <p className="eyebrow">{t('shop:header.eyebrow')}</p>
+      <h2>{t('shop:header.title')}</h2>
 
-      {loading && <p>Загрузка…</p>}
+      {loading && <p>{t('common:loading')}</p>}
 
       <ErrorWithCode message={error} className="admin-alert admin-error" />
       {notice && <p className="admin-alert admin-notice">{notice}</p>}
 
       {!loading && visibleOffers.length === 0 && !error && (
         <article className="message-card">
-          <p>Магазин пуст. Провалите миссию — ключи появятся здесь.</p>
+          <p>{t('shop:empty.message')}</p>
         </article>
       )}
 
@@ -99,24 +101,20 @@ export function ShopScreen({
               {item.title}
             </h3>
             <p>
-              <code>{item.code}</code>
+              {t('shop:card.priceLabel')} <b>{offer.priceRoot} ROOT</b>
             </p>
 
             <p>
-              Цена: <b>{offer.priceRoot} ROOT</b>
-            </p>
-
-            <p>
-              В магазине: <b>{offer.remainingQuota} шт.</b>
+              {t('shop:card.stockLabel', { count: offer.remainingQuota })}
             </p>
 
             {soldOut && (
               <p className="admin-muted">
-                Распродано. Следующий провал добавит ключ.
+                {t('shop:card.soldOut')}
               </p>
             )}
             {!soldOut && offerDisabled && (
-              <p className="admin-muted">Оффер отключён.</p>
+              <p className="admin-muted">{t('shop:card.disabled')}</p>
             )}
 
             <button
@@ -129,8 +127,8 @@ export function ShopScreen({
               }
             >
               {purchasingId === offer.entitlementId
-                ? 'Покупка…'
-                : `Купить за ${offer.priceRoot} ROOT`}
+                ? t('shop:buttons.purchasing')
+                : t('shop:buttons.buy', { price: offer.priceRoot })}
             </button>
           </article>
         )
@@ -140,7 +138,7 @@ export function ShopScreen({
         className="back-button"
         onClick={() => onScreenChange('terminal')}
       >
-        ← ВЕРНУТЬСЯ В КОНТУР
+        {t('common:backToContour')}
       </button>
     </section>
   )
