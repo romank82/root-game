@@ -7,6 +7,7 @@ import {
   transferRoot,
   type SearchPlayerHit,
 } from '../../api/engineApi'
+import { ErrorWithCode } from '../ErrorWithCode'
 
 interface TransferScreenProps {
   onScreenChange: (screen: Screen) => void
@@ -148,7 +149,7 @@ export function TransferScreen({
         </p>
       )}
 
-      {error && <p className="repair-error">{error}</p>}
+      <ErrorWithCode message={error} className="repair-error" />
       {notice && <p className="mission-success-card">{notice}</p>}
 
       {selected === null ? (

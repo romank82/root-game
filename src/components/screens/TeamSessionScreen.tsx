@@ -15,6 +15,7 @@ import {
   type EngineTeamMessage,
   type EngineTeamSession,
 } from '../../api/engineApi'
+import { ErrorWithCode } from '../ErrorWithCode'
 import { CipherGame } from '../CipherGame'
 
 interface TeamSessionScreenProps {
@@ -606,7 +607,7 @@ export function TeamSessionScreen({
 
       {loading && <p>Загрузка…</p>}
 
-      {error && <p className="repair-error">{error}</p>}
+      <ErrorWithCode message={error} className="repair-error" />
       {notice && <p className="mission-success-card">{notice}</p>}
 
       {/* Sprint 8.x-4b-2b: сессия закончилась, но исход неизвестен (кто-то

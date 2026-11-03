@@ -17,6 +17,7 @@ import {
   type MyTonWallet,
   type PlayerWithdrawal,
 } from '../../api/engineApi'
+import { ErrorWithCode } from '../ErrorWithCode'
 
 interface ProfileScreenProps {
   onScreenChange: (screen: Screen) => void
@@ -771,7 +772,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       </div>
 
       {loading && <p>{t('common:loading')}</p>}
-      {error && <p className="repair-error">{error}</p>}
+      <ErrorWithCode message={error} className="repair-error" />
 
       {!loading && profile && (
         <>

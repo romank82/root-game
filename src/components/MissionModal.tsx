@@ -1,4 +1,5 @@
 import type { EngineMission } from '../api/engineApi'
+import { ErrorWithCode } from './ErrorWithCode'
 
 interface MissionModalProps {
   mission: EngineMission
@@ -132,15 +133,14 @@ export function MissionModal({
         )}
 
         {error && (
-          <p
+          <ErrorWithCode
+            message={error}
             style={{
               margin: '0 0 12px',
               color: '#ffd0d0',
               fontSize: 13,
             }}
-          >
-            {error}
-          </p>
+          />
         )}
 
         <div

@@ -7,6 +7,7 @@ import {
   type FallbackOffer,
   type FallbackPurchaseResult,
 } from '../../api/engineApi'
+import { ErrorWithCode } from '../ErrorWithCode'
 
 type ShopScreenProps = {
   inventory: EngineInventoryItem[]
@@ -75,7 +76,7 @@ export function ShopScreen({
 
       {loading && <p>Загрузка…</p>}
 
-      {error && <p className="admin-alert admin-error">{error}</p>}
+      <ErrorWithCode message={error} className="admin-alert admin-error" />
       {notice && <p className="admin-alert admin-notice">{notice}</p>}
 
       {!loading && visibleOffers.length === 0 && !error && (

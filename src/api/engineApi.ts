@@ -251,10 +251,34 @@ type SubmitPayload = {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
+// Sprint E-2: последний correlation_id из тела ошибки бэкенда. Бэкенд кладёт
+// его в тело каждого ответа об ошибке (E-0.1), поэтому фронт может показать
+// игроку «Код для поддержки» без чтения заголовка (CORS-expose не нужен).
+let lastCorrelationId: string | null = null
+
+export function getLastErrorCorrelationId(): string | null {
+  return lastCorrelationId
+}
+
+export function clearLastErrorCorrelationId(): void {
+  lastCorrelationId = null
+}
+
 async function readError(response: Response): Promise<string> {
   try {
-    const body = (await response.json()) as { detail?: string }
-    return body.detail ?? `HTTP ${response.status}`
+    const body = (await response.json()) as {
+      detail?: string | unknown
+      correlation_id?: string | null
+    }
+    if (body.correlation_id) {
+      lastCorrelationId = body.correlation_id
+    }
+    const detail = body.detail
+    // detail может быть массивом/объектом (Pydantic 422) — не рендерим как есть.
+    if (Array.isArray(detail) || (detail !== null && typeof detail === 'object')) {
+      return `HTTP ${response.status}`
+    }
+    return (detail as string | undefined) ?? `HTTP ${response.status}`
   } catch {
     return `HTTP ${response.status}`
   }
