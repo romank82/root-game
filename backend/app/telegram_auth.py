@@ -60,28 +60,28 @@ def verify_init_data(
     Never trust initDataUnsafe or a Telegram ID supplied separately by a browser.
     """
     if not init_data:
-        raise TelegramAuthError("Telegram initData is required.")
+        raise TelegramAuthError("Требуется авторизация Telegram. Откройте игру заново.")
 
     if not bot_token:
         raise TelegramAuthError(
-            "Telegram authentication is not configured on the server.",
+            "Авторизация Telegram временно недоступна. Попробуйте позже.",
             status_code=503,
         )
 
     try:
         pairs = parse_qsl(init_data, keep_blank_values=True, strict_parsing=True)
     except ValueError as error:
-        raise TelegramAuthError("Telegram initData has an invalid format.") from error
+        raise TelegramAuthError("Ошибка авторизации Telegram. Откройте игру заново.") from error
 
     values: dict[str, str] = {}
     for key, value in pairs:
         if key in values:
-            raise TelegramAuthError("Telegram initData contains duplicate fields.")
+            raise TelegramAuthError("Ошибка авторизации Telegram. Откройте игру заново.")
         values[key] = value
 
     received_hash = values.pop("hash", None)
     if not received_hash:
-        raise TelegramAuthError("Telegram initData signature is missing.")
+        raise TelegramAuthError("Ошибка авторизации Telegram. Откройте игру заново.")
 
     data_check_string = "\n".join(
         f"{key}={values[key]}" for key in sorted(values)
@@ -98,19 +98,23 @@ def verify_init_data(
     ).hexdigest()
 
     if not hmac.compare_digest(expected_hash, received_hash):
-        raise TelegramAuthError("Telegram initData signature is invalid.")
+        raise TelegramAuthError("Ошибка авторизации Telegram. Откройте игру заново.")
 
     try:
         auth_date = int(values["auth_date"])
     except (KeyError, TypeError, ValueError) as error:
-        raise TelegramAuthError("Telegram auth_date is missing or invalid.") from error
+        raise TelegramAuthError("Ошибка авторизации Telegram. Откройте игру заново.") from error
 
     now = int(time.time())
     if auth_date > now + 60:
-        raise TelegramAuthError("Telegram auth_date is unexpectedly in the future.")
+        raise TelegramAuthError(
+            "Неверное время авторизации Telegram. Проверьте время на устройстве."
+        )
 
     if now - auth_date > max_age_seconds:
-        raise TelegramAuthError("Telegram authorization has expired. Reopen the app.")
+        raise TelegramAuthError(
+            "Сессия авторизации Telegram истекла. Откройте игру заново."
+        )
 
     try:
         raw_user: Any = json.loads(values["user"])
@@ -122,10 +126,14 @@ def verify_init_data(
         ValueError,
         json.JSONDecodeError,
     ) as error:
-        raise TelegramAuthError("Telegram user data is missing or invalid.") from error
+        raise TelegramAuthError(
+            "Не удалось получить данные Telegram. Откройте игру заново."
+        ) from error
 
     if not telegram_id.isdigit() or not first_name:
-        raise TelegramAuthError("Telegram user data is incomplete.")
+        raise TelegramAuthError(
+            "Не удалось получить данные Telegram. Откройте игру заново."
+        )
 
     username_raw = raw_user.get("username")
     username = str(username_raw).strip() if username_raw else None
