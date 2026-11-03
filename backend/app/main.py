@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -147,6 +150,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Correlation-ID"],
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -214,6 +218,88 @@ async def correlation_id_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Correlation-ID"] = correlation_id
     return response
+
+
+def _correlation_id_of(request: Request) -> str | None:
+    """Достать correlation_id из request.state.audit_context (E-0.1).
+
+    Устанавливается correlation_id_middleware ДО обработчиков ошибок, поэтому
+    здесь он всегда доступен; fallback на None нужен лишь для запросов,
+    которые по какой-то причине миновали middleware.
+    """
+    return (
+        getattr(getattr(request, "state", None), "audit_context", {}).get(
+            "correlation_id"
+        )
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+):
+    """422 (Pydantic) — не отдавать массив, отдать русскую строку + correlation_id."""
+    correlation_id = _correlation_id_of(request)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Проверьте введённые данные.",
+            "correlation_id": correlation_id,
+        },
+        headers={"X-Correlation-ID": correlation_id} if correlation_id else None,
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """4xx/5xx от HTTPException — русские дефолтные строки + correlation_id.
+
+    Зарегистрирован на starlette.exceptions.HTTPException, а не на
+    fastapi.HTTPException: именно starlette-вариант бросает роутер для
+    дефолтных 404 «Not Found» / 405 «Method Not Allowed». fastapi.HTTPException
+    — его подкласс, поэтому оба случая покрываются одним handler'ом.
+
+    Кастомные русские detail (MissionEngineError → «Недостаточно ROOT» и др.)
+    проходят как есть — не ломаем существующие тексты игровых endpoint'ов.
+    """
+    correlation_id = _correlation_id_of(request)
+    detail = exc.detail
+    if isinstance(detail, (list, dict)):
+        detail = "Проверьте введённые данные."
+    if detail == "Not Found":
+        detail = "Не найдено."
+    elif detail == "Method Not Allowed":
+        detail = "Действие недоступно."
+    elif detail == "Internal Server Error":
+        detail = "Сервер занят. Попробуйте ещё раз."
+    # Сохраняем заголовки исходного исключения (например, Retry-After), если они есть.
+    headers = dict(exc.headers) if exc.headers else {}
+    if correlation_id:
+        headers["X-Correlation-ID"] = correlation_id
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": detail, "correlation_id": correlation_id},
+        headers=headers or None,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Необработанный 500 — русский текст + correlation_id в теле.
+
+    Логирование в AppError выполняет app_errors_middleware (13.4-b) ДО этого
+    handler'а (middleware стоит над exception handlers), поэтому здесь запись
+    НЕ дублируется — только формируем ответ игроку.
+    """
+    correlation_id = _correlation_id_of(request)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Сервер занят. Попробуйте ещё раз.",
+            "correlation_id": correlation_id,
+        },
+        headers={"X-Correlation-ID": correlation_id} if correlation_id else None,
+    )
 
 
 class MissionSubmitPayload(BaseModel):
