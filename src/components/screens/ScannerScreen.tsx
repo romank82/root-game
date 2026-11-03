@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import type {
   EngineMission,
   EngineSegment,
@@ -165,7 +167,7 @@ function parseCodeRepairContent(
   }
 }
 
-function formatAwarded(response: MissionSubmission): string {
+function formatAwarded(response: MissionSubmission, t: TFunction): string {
   const parts: string[] = []
 
   if (response.awarded.root > 0) {
@@ -178,7 +180,7 @@ function formatAwarded(response: MissionSubmission): string {
 
   return parts.length > 0
     ? parts.join(' · ')
-    : 'Прогресс подтверждён сервером.'
+    : t('scanner:ar.noAwards')
 }
 
 export function ScannerScreen({
@@ -190,6 +192,7 @@ export function ScannerScreen({
   geoError,
   onExpireMission,
 }: ScannerScreenProps) {
+  const { t } = useTranslation(['scanner', 'common'])
   const [distanceToSegment, setDistanceToSegment] = useState<number | null>(null)
   const [isCheckingLocation, setIsCheckingLocation] = useState(false)
   const [locationError, setLocationError] = useState('')
@@ -230,7 +233,7 @@ export function ScannerScreen({
   if (spawnMission) {
     return (
       <section className="segment-screen">
-        <p className="eyebrow">АКТИВНАЯ МИССИЯ / {spawnMission.id.toUpperCase()}</p>
+        <p className="eyebrow">{t('scanner:header.activeMissionEyebrow')}</p>
 
         <div className="segment-heading">
           <div>
@@ -243,8 +246,8 @@ export function ScannerScreen({
           <section className="location-status">
             <span className="location-status-icon">⌖</span>
             <div>
-              <strong>{geoError ? 'ГЕОЛОКАЦИЯ НЕДОСТУПНА' : 'ОПРЕДЕЛЯЕМ ПОЗИЦИЮ…'}</strong>
-              <p>{geoError ?? 'Разрешите геолокацию, чтобы увидеть радар.'}</p>
+              <strong>{geoError ? t('scanner:gps.unavailableTitle') : t('scanner:gps.locatingTitle')}</strong>
+              <p>{geoError ?? t('scanner:gps.permissionHint')}</p>
             </div>
           </section>
         ) : (
@@ -256,7 +259,7 @@ export function ScannerScreen({
                   className={`layer-switch-btn layer-switch-${layer}${selectedLayer === layer ? ' is-active' : ''}`}
                   onClick={() => setSelectedLayer(layer)}
                 >
-                  {layer === 'solo' ? 'СОЛО' : layer === 'team' ? 'КОМАНДА' : 'СЮЖЕТ'}
+                  {layer === 'solo' ? t('scanner:header.layers.solo') : layer === 'team' ? t('scanner:header.layers.team') : t('scanner:header.layers.story')}
                 </button>
               ))}
             </div>
@@ -264,7 +267,7 @@ export function ScannerScreen({
             {spawnMission.deadlineAt && (
               <MissionTimer
                 deadlineAt={spawnMission.deadlineAt}
-                label="до конца задания"
+                label={t('scanner:header.timerLabel')}
                 onClick={() => void onExpireMission(spawnMission.id)}
               />
             )}
@@ -275,14 +278,14 @@ export function ScannerScreen({
               playerAccuracy={geoPosition.accuracy}
               targetLat={spawnMission.spawn!.latitude}
               targetLng={spawnMission.spawn!.longitude}
-              hint="Идите по радару. Когда приблизитесь — откройте камеру."
+              hint={t('scanner:navigation.radarHint')}
               color={MISSION_LAYER_COLORS[selectedLayer]}
             />
             <button
               className="ar-start-button"
               onClick={() => onScreenChange('camera-test')}
             >
-              ОТКРЫТЬ КАМЕРУ →
+              {t('scanner:navigation.openCamera')}
             </button>
           </>
         )}
@@ -291,7 +294,7 @@ export function ScannerScreen({
           className="back-button"
           onClick={() => onScreenChange('terminal')}
         >
-          ← ВЕРНУТЬСЯ В КОНТУР
+          {t('common:backToContour')}
         </button>
       </section>
     )
@@ -300,19 +303,16 @@ export function ScannerScreen({
   if (!activeMission || !activeSegment || !segmentContent || !codeRepairContent) {
     return (
       <section className="segment-screen">
-        <p className="eyebrow">СКАНЕР / CMS-СЕГМЕНТ НЕДОСТУПЕН</p>
+        <p className="eyebrow">{t('scanner:errors.cmsUnavailableEyebrow')}</p>
         <section className="location-status">
           <span className="location-status-icon">⌖</span>
           <div>
-            <strong>НЕТ ДОСТУПНОЙ ТОЧКИ СКАНИРОВАНИЯ</strong>
-            <p>
-              Опубликованный Segment с доступной scanner-миссией ещё не получен
-              из игрового bootstrap либо содержит некорректный public content.
-            </p>
+            <strong>{t('scanner:errors.noScanPointTitle')}</strong>
+            <p>{t('scanner:errors.noScanPointBody')}</p>
           </div>
         </section>
         <button className="back-button" onClick={() => onScreenChange('terminal')}>
-          ← ВЕРНУТЬСЯ В КОНТУР
+          {t('common:backToContour')}
         </button>
       </section>
     )
@@ -330,7 +330,7 @@ export function ScannerScreen({
 
   function checkPlayerLocation() {
     if (!navigator.geolocation) {
-      setLocationError('Геолокация не поддерживается этим устройством.')
+      setLocationError(t('scanner:gps.notSupported'))
       return
     }
 
@@ -352,15 +352,15 @@ export function ScannerScreen({
         setIsCheckingLocation(false)
         if (error.code === error.PERMISSION_DENIED) {
           setLocationError(
-            'Доступ к геолокации запрещён. Разрешите его в настройках браузера или Telegram.',
+            t('scanner:gps.permissionDenied'),
           )
         } else if (error.code === error.POSITION_UNAVAILABLE) {
           setLocationError(
-            'Не удалось определить позицию. Проверьте GPS, интернет и настройки геолокации.',
+            t('scanner:gps.positionUnavailable'),
           )
         } else {
           setLocationError(
-            'Не удалось получить геопозицию. Попробуйте ещё раз через несколько секунд.',
+            t('scanner:gps.positionError'),
           )
         }
       },
@@ -393,7 +393,7 @@ export function ScannerScreen({
     })
 
     if (!response) {
-      setRepairError('СЕРВЕР НЕДОСТУПЕН. ПРОВЕРЬТЕ ПОДКЛЮЧЕНИЕ.')
+      setRepairError(t('scanner:repair.serverUnavailable'))
       return
     }
 
@@ -401,29 +401,28 @@ export function ScannerScreen({
       setRepairError(
         response.message ??
           repair.wrongAnswerText ??
-          'СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ И ВОССТАНОВИТЕ ЕЁ ЗАНОВО.',
+          t('scanner:repair.structureBroken'),
       )
       return
     }
 
     setRepairError('')
-    setConfirmedAward(formatAwarded(response))
+    setConfirmedAward(formatAwarded(response, t))
   }
 
   return (
     <section className="segment-screen">
       <p className="eyebrow">
-        АКТИВНАЯ МИССИЯ / {mission.id.toUpperCase()}
+        {t('scanner:header.activeMissionEyebrow')}
       </p>
 
       <div className="segment-heading">
         <div>
-          <span className="segment-type">{content.type}</span>
           <h2>{mission.title}</h2>
           <p>{mission.description}</p>
         </div>
         <div className="segment-code">
-          <span>ИДЕНТИФИКАТОР</span>
+          <span>{t('scanner:params.codeLabel')}</span>
           <strong>{content.code}</strong>
         </div>
       </div>
@@ -440,24 +439,20 @@ export function ScannerScreen({
         </div>
 
         <div className="segment-details">
-          <span className="file-label">ПАРАМЕТРЫ МИССИИ</span>
+          <span className="file-label">{t('scanner:params.title')}</span>
           <dl className="segment-stats">
             <div>
-              <dt>РАДИУС ПОИСКА</dt>
+              <dt>{t('scanner:params.searchRadius')}</dt>
               <dd>{content.searchRadiusMeters} м</dd>
             </div>
             <div>
-              <dt>SAFE SCAN POINT</dt>
+              <dt>{t('scanner:params.safeScanPoint')}</dt>
               <dd>{content.safeScanRadiusMeters} м</dd>
-            </div>
-            <div>
-              <dt>ТИП СЦЕНЫ</dt>
-              <dd>{content.scenePreset}</dd>
             </div>
           </dl>
           {repair.rewardPreviewText && (
             <p className="segment-item-reward">
-              ПРЕДПРОСМОТР НАГРАДЫ: {repair.rewardPreviewText}
+              {t('scanner:params.rewardPreview')} {repair.rewardPreviewText}
             </p>
           )}
         </div>
@@ -465,9 +460,9 @@ export function ScannerScreen({
 
       <section className="location-panel">
         <div>
-          <span className="file-label">НАВИГАЦИЯ И ПРОВЕРКА ПОЗИЦИИ</span>
-          <h3>Найдите безопасную точку сканирования</h3>
-          <p>Проверьте расстояние на устройстве. Эта навигационная проверка не подтверждает действие на сервере.</p>
+          <span className="file-label">{t('scanner:navigation.title')}</span>
+          <h3>{t('scanner:navigation.findPoint')}</h3>
+          <p>{t('scanner:navigation.checkHint')}</p>
         </div>
         <div className="location-actions">
           <button
@@ -479,7 +474,7 @@ export function ScannerScreen({
               )
             }
           >
-            ОТКРЫТЬ МАРШРУТ →
+            {t('scanner:navigation.openRoute')}
           </button>
           <button
             className="location-button"
@@ -487,8 +482,8 @@ export function ScannerScreen({
             disabled={isCheckingLocation}
           >
             {isCheckingLocation
-              ? 'ОПРЕДЕЛЯЕМ ПОЗИЦИЮ...'
-              : 'ПРОВЕРИТЬ ПОЗИЦИЮ'}
+              ? t('scanner:navigation.locating')
+              : t('scanner:navigation.checkPosition')}
           </button>
         </div>
       </section>
@@ -502,7 +497,7 @@ export function ScannerScreen({
           <>
             <span className="location-status-icon">!</span>
             <div>
-              <strong>ОШИБКА ГЕОЛОКАЦИИ</strong>
+              <strong>{t('scanner:gps.errorTitle')}</strong>
               <p>{locationError}</p>
             </div>
           </>
@@ -510,26 +505,28 @@ export function ScannerScreen({
           <>
             <span className="location-status-icon">⌖</span>
             <div>
-              <strong>НАВИГАЦИОННАЯ ПРОВЕРКА НЕ ВЫПОЛНЕНА</strong>
-              <p>Проверьте расстояние до точки на устройстве. Серверная geo-проверка появится в отдельном runtime API.</p>
+              <strong>{t('scanner:navigation.notCheckedTitle')}</strong>
+              <p>{t('scanner:navigation.notCheckedBody')}</p>
             </div>
           </>
         ) : canStartArSearch ? (
           <>
             <span className="location-status-icon">✓</span>
             <div>
-              <strong>ТОЧКА ДОСТУПНА ДЛЯ ЛОКАЛЬНОЙ НАВИГАЦИИ</strong>
-              <p>Расстояние на устройстве: {distanceToSegment} м. Оно не является серверным LocationProof.</p>
+              <strong>{t('scanner:navigation.pointAvailableTitle')}</strong>
+              <p>{t('scanner:navigation.pointAvailableBody', { distance: distanceToSegment })}</p>
             </div>
           </>
         ) : (
           <>
             <span className="location-status-icon">⌖</span>
             <div>
-              <strong>ТОЧКА СКАНИРОВАНИЯ СЛИШКОМ ДАЛЕКО</strong>
+              <strong>{t('scanner:navigation.tooFarTitle')}</strong>
               <p>
-                Расстояние: {distanceToSegment} м. Подойдите ближе чем на{' '}
-                {content.safeScanRadiusMeters} м.
+                {t('scanner:navigation.tooFarBody', {
+                  distance: distanceToSegment,
+                  radius: content.safeScanRadiusMeters,
+                })}
               </p>
             </div>
           </>
@@ -542,17 +539,17 @@ export function ScannerScreen({
           onClick={startArSearch}
           disabled={!canStartArSearch}
         >
-          {canStartArSearch ? 'ЗАПУСТИТЬ AR-ПОИСК' : 'AR-ПОИСК ЗАБЛОКИРОВАН'}
+          {canStartArSearch ? t('scanner:ar.start') : t('scanner:ar.blocked')}
         </button>
       ) : confirmedAward ? (
         <section className="mission-success-card">
-          <span className="file-label">ПАКЕТ ВОССТАНОВЛЕН</span>
+          <span className="file-label">{t('scanner:ar.successLabel')}</span>
           <div className="mission-success-symbol">✓</div>
-          <h3>СЕГМЕНТ СТАБИЛИЗИРОВАН</h3>
-          <p>Прогресс и награды подтверждены сервером.</p>
+          <h3>{t('scanner:ar.successTitle')}</h3>
+          <p>{t('scanner:ar.successBody')}</p>
           <div className="mission-reward-grid">
             <div>
-              <span>ПОЛУЧЕНО</span>
+              <span>{t('scanner:ar.receivedLabel')}</span>
               <strong>{confirmedAward}</strong>
             </div>
           </div>
@@ -560,9 +557,9 @@ export function ScannerScreen({
       ) : isCodeRepairOpen ? (
         <section className="code-repair-panel">
           <span className="file-label">
-            {repair.label ?? 'CODE REPAIR'}
+            {repair.label ?? t('scanner:repair.defaultLabel')}
           </span>
-          <h3>Восстановите повреждённую строку</h3>
+          <h3>{t('scanner:repair.title')}</h3>
           {repair.instruction && (
             <p>{repair.instruction}</p>
           )}
@@ -598,7 +595,7 @@ export function ScannerScreen({
                 setRepairError('')
               }}
             >
-              ОЧИСТИТЬ
+              {t('scanner:repair.clear')}
             </button>
             <button
               className="repair-submit-button"
@@ -607,13 +604,13 @@ export function ScannerScreen({
                 repairSequence.length !== repair.maxBlocks
               }
             >
-              ПРОВЕРИТЬ КОД →
+              {t('scanner:repair.submit')}
             </button>
           </div>
         </section>
       ) : (
         <section className="ar-placeholder">
-          <span className="file-label">AR-СЕССИЯ ИНИЦИАЛИЗИРОВАНА</span>
+          <span className="file-label">{t('scanner:ar.sessionInitialized')}</span>
           <div
             className={`ar-placeholder-frame ${
               isSegmentFaceLocked ? 'face-locked' : ''
@@ -646,40 +643,40 @@ export function ScannerScreen({
             <div className="ar-reticle">+</div>
             <span className="ar-scan-line" />
             {isSegmentFaceLocked && (
-              <span className="face-lock-status">ГРАНЬ ЗАФИКСИРОВАНА</span>
+              <span className="face-lock-status">{t('scanner:ar.faceLocked')}</span>
             )}
           </div>
           {!isSegmentFaceLocked ? (
             <>
-              <h3>Наведите прицел на грань Сегмента</h3>
-              <p>Зафиксируйте грань виртуального куба.</p>
+              <h3>{t('scanner:ar.aimTitle')}</h3>
+              <p>{t('scanner:ar.aimBody')}</p>
               <button
                 className="ar-action-button"
                 onClick={() => setIsSegmentFaceLocked(true)}
               >
-                ЗАФИКСИРОВАТЬ ГРАНЬ
+                {t('scanner:ar.lockFace')}
               </button>
             </>
           ) : !virtualQrRevealed ? (
             <>
-              <h3>Грань синхронизирована</h3>
-              <p>Запустите визуальное извлечение QR-маркера.</p>
+              <h3>{t('scanner:ar.syncedTitle')}</h3>
+              <p>{t('scanner:ar.syncedBody')}</p>
               <button
                 className="ar-action-button"
                 onClick={() => setVirtualQrRevealed(true)}
               >
-                ПРОЯВИТЬ QR-МАРКЕР
+                {t('scanner:ar.revealQr')}
               </button>
             </>
           ) : (
             <>
-              <h3>Виртуальный QR-маркер извлечён</h3>
-              <p>Откройте проверку кодовой структуры. Результат и награды подтверждает сервер.</p>
+              <h3>{t('scanner:ar.qrRevealedTitle')}</h3>
+              <p>{t('scanner:ar.qrRevealedBody')}</p>
               <button
                 className="ar-action-button"
                 onClick={() => setIsCodeRepairOpen(true)}
               >
-                ИЗВЛЕЧЬ ДАННЫЕ →
+                {t('scanner:ar.extractData')}
               </button>
             </>
           )}
@@ -690,7 +687,7 @@ export function ScannerScreen({
         className="back-button"
         onClick={() => onScreenChange('terminal')}
       >
-        ← ВЕРНУТЬСЯ В КОНТУР
+        {t('common:backToContour')}
       </button>
     </section>
   )
