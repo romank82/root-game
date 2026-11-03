@@ -80,6 +80,8 @@ export function MonitoringSection(_props: MonitoringSectionProps) {
   const [errorsError, setErrorsError] = useState('')
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all')
   const [errorsPeriod, setErrorsPeriod] = useState<PeriodFilter>('all')
+  const [correlationIdInput, setCorrelationIdInput] = useState('')
+  const [correlationIdFilter, setCorrelationIdFilter] = useState('')
   const [errorsOffset, setErrorsOffset] = useState(0)
   const [errorsReload, setErrorsReload] = useState(0)
 
@@ -101,6 +103,7 @@ export function MonitoringSection(_props: MonitoringSectionProps) {
     getMonitoringErrors({
       severity: severityFilter === 'all' ? undefined : severityFilter,
       period: errorsPeriod,
+      correlationId: correlationIdFilter.trim() || undefined,
       limit: PAGE_SIZE,
       offset: errorsOffset,
     })
@@ -127,7 +130,7 @@ export function MonitoringSection(_props: MonitoringSectionProps) {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [severityFilter, errorsPeriod, errorsOffset, errorsReload])
+  }, [severityFilter, errorsPeriod, correlationIdFilter, errorsOffset, errorsReload])
 
   useEffect(() => {
     let cancelled = false
@@ -237,6 +240,38 @@ export function MonitoringSection(_props: MonitoringSectionProps) {
               ))}
             </select>
           </label>
+          <label style={{ flex: '1 1 260px' }}>
+            Код ошибки (correlation_id)
+            <input
+              type="text"
+              placeholder="Например: 3a5b941b…"
+              value={correlationIdInput}
+              onChange={(event) => setCorrelationIdInput(event.target.value)}
+            />
+          </label>
+          <button
+            className="admin-primary"
+            onClick={() => {
+              setCorrelationIdFilter(correlationIdInput.trim())
+              setErrorsOffset(0)
+              setErrorsReload((tick) => tick + 1)
+            }}
+            disabled={errorsLoading}
+          >
+            Найти
+          </button>
+          <button
+            className="admin-secondary"
+            onClick={() => {
+              setCorrelationIdInput('')
+              setCorrelationIdFilter('')
+              setErrorsOffset(0)
+              setErrorsReload((tick) => tick + 1)
+            }}
+            disabled={errorsLoading}
+          >
+            Сбросить
+          </button>
           <button
             className="admin-primary"
             onClick={() => {

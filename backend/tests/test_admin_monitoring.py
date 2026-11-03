@@ -141,10 +141,11 @@ class AdminMonitoringTests(unittest.TestCase):
         error_type: str = "mission.accept_failed",
         message: str = "boom",
         created_at: datetime | None = None,
+        correlation_id: str | None = None,
     ) -> None:
         error = AppError(
             id=f"app-error-{uuid.uuid4().hex[:16]}",
-            correlation_id=uuid.uuid4().hex,
+            correlation_id=correlation_id or uuid.uuid4().hex,
             severity=severity,
             error_type=error_type,
             message=message,
@@ -210,6 +211,22 @@ class AdminMonitoringTests(unittest.TestCase):
         self.assertEqual(error_only["total"], 1)
         self.assertEqual(len(error_only["errors"]), 1)
         self.assertEqual(error_only["errors"][0]["severity"], "error")
+
+    def test_errors_correlation_id_filter(self) -> None:
+        """Поиск по correlation_id: точное совпадение -> 1; несуществующий -> 0."""
+        target = "deadbeef" * 4  # 32 hex-символа, как uuid4().hex
+        with self.SessionLocal.begin() as session:
+            self._add_error(session, correlation_id=target)
+            self._add_error(session)  # случайный correlation_id
+
+        found = self._call_errors(correlation_id=target)
+        self.assertEqual(found["total"], 1)
+        self.assertEqual(len(found["errors"]), 1)
+        self.assertEqual(found["errors"][0]["correlationId"], target)
+
+        missing = self._call_errors(correlation_id="f" * 32)
+        self.assertEqual(missing["total"], 0)
+        self.assertEqual(len(missing["errors"]), 0)
 
     def test_events_list_and_filters(self) -> None:
         """3 PlayerEvent: list -> 3; event_type -> 1; player_id -> 3."""

@@ -96,9 +96,10 @@ def list_admin_monitoring_errors(
     period: str = "all",
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
+    correlation_id: str | None = None,
     _admin: AdminUser = Depends(require_permission(PLAYERS_READ_PERMISSION)),
 ) -> dict[str, Any]:
-    """Список AppError (13.5-a): severity + period + пагинация.
+    """Список AppError (13.5-a): severity + period + correlation_id + пагинация.
 
     Сортировка created_at desc, id desc (детерминированный порядок).
     """
@@ -115,6 +116,8 @@ def list_admin_monitoring_errors(
     filters = []
     if severity is not None:
         filters.append(AppError.severity == severity)
+    if correlation_id:
+        filters.append(AppError.correlation_id == correlation_id)
     period_start = _period_start(period)
     if period_start is not None:
         filters.append(AppError.created_at >= period_start)

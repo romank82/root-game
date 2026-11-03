@@ -1922,6 +1922,7 @@ export async function getMonitoringErrors(
   options: {
     severity?: string
     period?: string
+    correlationId?: string
     limit?: number
     offset?: number
   } = {},
@@ -1929,6 +1930,7 @@ export async function getMonitoringErrors(
   const params = new URLSearchParams()
   if (options.severity) params.set('severity', options.severity)
   if (options.period) params.set('period', options.period)
+  if (options.correlationId) params.set('correlation_id', options.correlationId)
   if (options.limit !== undefined) params.set('limit', String(options.limit))
   if (options.offset !== undefined) params.set('offset', String(options.offset))
   const query = params.toString() ? `?${params.toString()}` : ''
