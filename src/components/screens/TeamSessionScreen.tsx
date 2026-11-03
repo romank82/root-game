@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Screen } from '../../types/game'
 import {
   createTeamSession,
@@ -29,14 +30,15 @@ interface TeamSessionScreenProps {
 
 const TEAM_MISSION_LAYER = 'team'
 
-const SESSION_STATUS_LABELS: Record<string, string> = {
-  collecting: 'Сбор команды',
-  ready_to_start: 'Все готовы — ожидание авто-старта',
-  active: 'Игра идёт',
-  succeeded: 'Успех',
-  failed: 'Провал',
-  expired: 'Истекла',
-  cancelled_before_start: 'Отменена до старта',
+// T-2a: статусы сессии → ключи i18n (сами тексты — в team.json).
+const SESSION_STATUS_KEYS: Record<string, string> = {
+  collecting: 'team:status.collecting',
+  ready_to_start: 'team:status.readyToStart',
+  active: 'team:status.active',
+  succeeded: 'team:status.succeeded',
+  failed: 'team:status.failed',
+  expired: 'team:status.expired',
+  cancelled_before_start: 'team:status.cancelledBeforeStart',
 }
 
 function listTeamMissions(all: EngineMission[]): EngineMission[] {
@@ -58,6 +60,7 @@ export function TeamSessionScreen({
   missions,
   presetMissionId,
 }: TeamSessionScreenProps) {
+  const { t } = useTranslation(['team', 'common'])
   // Активная сессия игрока (collecting/ready_to_start/active) или null.
   const [session, setSession] = useState<EngineTeamSession | null>(null)
   const [teamMissionsList, setTeamMissionsList] = useState<EngineMission[]>([])
@@ -328,9 +331,7 @@ export function TeamSessionScreen({
     const previous = prevWaveStatusRef.current
     prevWaveStatusRef.current = waveStatusValue
     if (previous === 'playing' && waveStatusValue === 'failed') {
-      setWaveFailedNotice(
-        'Член команды провалил попытку. Переходим на следующую волну...',
-      )
+      setWaveFailedNotice(t('team:waves.failedNotice'))
     }
   }, [waveStatusValue, waveStatusActive])
 
@@ -347,7 +348,7 @@ export function TeamSessionScreen({
     setNotice(null)
 
     if (!selectedMissionId) {
-      setError('Выберите командную миссию.')
+      setError(t('team:notices.noMissionSelected'))
       return
     }
 
@@ -363,7 +364,7 @@ export function TeamSessionScreen({
         coords.accuracy,
       )
       setSession(created)
-      setNotice('Сессия создана. Друзья могут присоединиться по ID сессии.')
+      setNotice(t('team:notices.created'))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -380,7 +381,7 @@ export function TeamSessionScreen({
     try {
       const updated = await markTeamSessionReady(session.id)
       setSession(updated)
-      setNotice('Вы готовы. Когда все отметятся и будут в зоне — старт автоматически.')
+      setNotice(t('team:notices.ready'))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -399,17 +400,17 @@ export function TeamSessionScreen({
       const result = await submitTeamWave(session.id, sequence)
       accepted = result.accepted
       if (!result.accepted) {
-        setWaveError(result.message ?? 'Неверная комбинация.')
+        setWaveError(result.message ?? t('team:errors.wrongCombination'))
       } else if (result.sessionStatus === 'succeeded') {
         const rootText =
           result.awarded && result.awarded.root > 0
             ? ` +${result.awarded.root} ROOT`
             : ''
-        setWaveSuccess(`Миссия пройдена!${rootText}`)
+        setWaveSuccess(t('team:notices.missionPassed', { root: rootText }))
       } else {
         // Верно, но сыграли не все: волна остаётся 'playing' (ждём
         // остальных — плашка/блокировка в шаге 8.x-4b-2b).
-        setWaveSuccess('Верно!')
+        setWaveSuccess(t('team:notices.correct'))
       }
 
       // Sprint 8.x-4b-2b: фиксация исхода для финального экрана. /me отдаёт
@@ -458,7 +459,7 @@ export function TeamSessionScreen({
   function getCurrentPosition(): Promise<GeolocationPosition> {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
-        reject(new Error('Геолокация не поддерживается устройством.'))
+        reject(new Error(t('team:errors.geoUnsupported')))
         return
       }
       navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -485,11 +486,11 @@ export function TeamSessionScreen({
         geoErr instanceof GeolocationPositionError ? geoErr.code : null
       const message =
         code === 1
-          ? 'Отказано в доступе к геолокации. Разрешите доступ и повторите.'
+          ? t('team:errors.geoDenied')
           : code === 2
-            ? 'Не удалось определить местоположение. Повторите попытку.'
+            ? t('team:errors.geoUnavailable')
             : code === 3
-              ? 'Таймаут геолокации. Повторите попытку.'
+              ? t('team:errors.geoTimeout')
               : (geoErr as Error).message
       throw new Error(message)
     }
@@ -520,11 +521,11 @@ export function TeamSessionScreen({
           geoErr instanceof GeolocationPositionError ? geoErr.code : null
         const geoMessage =
           code === 1
-            ? 'Отказано в доступе к геолокации. Разрешите доступ и повторите.'
+            ? t('team:errors.geoDenied')
             : code === 2
-              ? 'Не удалось определить местоположение. Повторите попытку.'
+              ? t('team:errors.geoUnavailable')
               : code === 3
-                ? 'Таймаут геолокации. Повторите попытку.'
+                ? t('team:errors.geoTimeout')
                 : (geoErr as Error).message
         throw new Error(geoMessage)
       }
@@ -537,10 +538,10 @@ export function TeamSessionScreen({
       )
       if (result.verified) {
         setLocationOk(true)
-        setLocationNotice('Присутствие подтверждено.')
+        setLocationNotice(t('team:notices.locationOk'))
       } else {
         setLocationOk(false)
-        setLocationNotice('Вы вне зоны миссии. Подойдите ближе и попробуйте снова.')
+        setLocationNotice(t('team:notices.locationOut'))
       }
 
       // Свежее состояние сессии (возможен авто-старт/смена статуса).
@@ -552,7 +553,7 @@ export function TeamSessionScreen({
       }
     } catch (err) {
       setLocationOk(false)
-      setLocationNotice(`Ошибка: ${(err as Error).message}`)
+      setLocationNotice((err as Error).message)
     }
   }
 
@@ -571,7 +572,7 @@ export function TeamSessionScreen({
       setMessages(result.messages)
       setMessagesHasMore(result.hasMore)
     } catch {
-      setChatError('Не удалось отправить сообщение.')
+      setChatError(t('team:chat.sendFailed'))
     } finally {
       setSending(false)
     }
@@ -594,7 +595,7 @@ export function TeamSessionScreen({
       setMessages((prev) => [...prev, ...result.messages])
       setMessagesHasMore(result.hasMore)
     } catch {
-      setChatError('Не удалось загрузить историю чата.')
+      setChatError(t('team:chat.historyFailed'))
     } finally {
       setMessagesBusy(false)
     }
@@ -602,10 +603,10 @@ export function TeamSessionScreen({
 
   return (
     <section className="inventory">
-      <p className="eyebrow">КОМАНДНАЯ МИССИЯ / СЕССИЯ</p>
-      <h2>Командные сессии</h2>
+      <p className="eyebrow">{t('team:header.eyebrow')}</p>
+      <h2>{t('team:header.title')}</h2>
 
-      {loading && <p>Загрузка…</p>}
+      {loading && <p>{t('common:loading')}</p>}
 
       <ErrorWithCode message={error} className="repair-error" />
       {notice && <p className="mission-success-card">{notice}</p>}
@@ -615,30 +616,30 @@ export function TeamSessionScreen({
           /me. Не оставляем пустоту и не провоцируем создание новой сессии. */}
       {!loading && session === null && finalStatus === null && sessionEnded && (
         <div className="gas-block">
-          <h3>Сессия завершена</h3>
-          <p>Спасибо за игру! Командная сессия завершена.</p>
+          <h3>{t('team:final.endedTitle')}</h3>
+          <p>{t('team:final.endedMessage')}</p>
           <button
             type="button"
             className="primary-button"
             onClick={() => onScreenChange('terminal')}
           >
-            ВЕРНУТЬСЯ В КОНТУР
+            {t('common:backToContour')}
           </button>
         </div>
       )}
 
       {!loading && session === null && finalStatus === null && !sessionEnded && (
         <div className="gas-block">
-          <h3>Создать сессию</h3>
+          <h3>{t('team:create.title')}</h3>
 
           <label>
-            Миссия
+            {t('team:create.missionLabel')}
             <select
               value={selectedMissionId}
               disabled={creating}
               onChange={(e) => setSelectedMissionId(e.target.value)}
             >
-              <option value="">Выберите командную миссию</option>
+              <option value="">{t('team:create.missionPlaceholder')}</option>
               {teamMissionsList.map((mission) => (
                 <option key={mission.id} value={mission.id}>
                   {mission.title}
@@ -648,7 +649,7 @@ export function TeamSessionScreen({
           </label>
 
           {teamMissionsList.length === 0 && (
-            <p className="admin-muted">Командных миссий пока нет.</p>
+            <p className="admin-muted">{t('team:create.noMissions')}</p>
           )}
 
           <button
@@ -657,7 +658,7 @@ export function TeamSessionScreen({
             disabled={creating || teamMissionsList.length === 0}
             onClick={handleCreate}
           >
-            {creating ? 'Создаём…' : 'Создать сессию'}
+            {creating ? t('team:create.creating') : t('team:create.submit')}
           </button>
         </div>
       )}
@@ -671,30 +672,34 @@ export function TeamSessionScreen({
           Кнопка возврата — в контур (миссии/терминал). */}
       {!loading && finalStatus === 'succeeded' && (
         <div className="mission-success-card">
-          <h3>МИССИЯ ПРОЙДЕНА</h3>
+          <h3>{t('team:final.succeededTitle')}</h3>
           {session?.memberCount != null && session.memberCount > 0 && (
-            <p>Вся команда прошла волны.</p>
+            <p>{t('team:final.succeededMessage')}</p>
           )}
           {lastAwarded !== null && (
             <>
               {lastAwarded.root > 0 && (
-                <p>Награда: +{lastAwarded.root} ROOT</p>
+                <p>{t('team:final.reward', { amount: lastAwarded.root })}</p>
               )}
               {lastAwarded.items.length > 0 && (
                 <p>
-                  Предметы:{' '}
+                  {t('team:final.itemsLabel')}{' '}
                   {lastAwarded.items
                     .map((item) => `${item.title} ×${item.quantity}`)
                     .join(', ')}
                 </p>
               )}
               {lastAwarded.storyNodeIds.length > 0 && (
-                <p>Открыто сюжетных узлов: {lastAwarded.storyNodeIds.length}</p>
+                <p>
+                  {t('team:final.storyNodes', {
+                    count: lastAwarded.storyNodeIds.length,
+                  })}
+                </p>
               )}
             </>
           )}
           {/* Sprint 6.6-b: после финала чат закрыт (бэкенд отдаёт 409). */}
-          <p className="admin-muted">Чат закрыт.</p>
+          <p className="admin-muted">{t('team:final.chatClosed')}</p>
           <button
             type="button"
             className="primary-button"
@@ -707,31 +712,35 @@ export function TeamSessionScreen({
 
       {!loading && finalStatus === 'failed' && (
         <div className="repair-error">
-          <h3>МИССИЯ ПРОВАЛЕНА</h3>
-          <p>Одна из попыток команды провалена. Волны исчерпаны.</p>
+          <h3>{t('team:final.failedTitle')}</h3>
+          <p>{t('team:final.failedMessage')}</p>
           {/* Sprint 8.x-4-final-status-2: игрок мог честно пройти свои волны,
               пока команда не провалилась — его награды остаются и показываются
               (из снапшота submit-wave / /last). */}
           {lastAwarded !== null && (
             <>
               {lastAwarded.root > 0 && (
-                <p>Награда: +{lastAwarded.root} ROOT</p>
+                <p>{t('team:final.reward', { amount: lastAwarded.root })}</p>
               )}
               {lastAwarded.items.length > 0 && (
                 <p>
-                  Предметы:{' '}
+                  {t('team:final.itemsLabel')}{' '}
                   {lastAwarded.items
                     .map((item) => `${item.title} ×${item.quantity}`)
                     .join(', ')}
                 </p>
               )}
               {lastAwarded.storyNodeIds.length > 0 && (
-                <p>Открыто сюжетных узлов: {lastAwarded.storyNodeIds.length}</p>
+                <p>
+                  {t('team:final.storyNodes', {
+                    count: lastAwarded.storyNodeIds.length,
+                  })}
+                </p>
               )}
             </>
           )}
           {/* Sprint 6.6-b: после финала чат закрыт (бэкенд отдаёт 409). */}
-          <p className="admin-muted">Чат закрыт.</p>
+          <p className="admin-muted">{t('team:final.chatClosed')}</p>
           <button
             type="button"
             className="primary-button"
@@ -744,11 +753,13 @@ export function TeamSessionScreen({
 
       {!loading && session !== null && (
         <div className="gas-block">
-          <h3>{session.missionTitle ?? session.mission_id}</h3>
+          <h3>{session.missionTitle ?? t('team:final.missionFallback')}</h3>
 
           <p>
-            Статус:{' '}
-            <b>{SESSION_STATUS_LABELS[session.status] ?? session.status}</b>
+            {t('team:status.label')}{' '}
+            <b>
+              {t(SESSION_STATUS_KEYS[session.status] ?? 'team:status.unknown')}
+            </b>
           </p>
           <p>
             Участников: <b>{session.memberCount}</b>
@@ -763,23 +774,17 @@ export function TeamSessionScreen({
                   disabled={readyBusy}
                   onClick={handleReady}
                 >
-                  {readyBusy ? 'Отправка…' : 'Ready — я готов(а)'}
+                  {readyBusy ? t('team:ready.busy') : t('team:ready.button')}
                 </button>
               )}
               {session.myStatus === 'ready' && (
-                <p>
-                  Вы отметились ({String(!!session.myReadyAt)}). Ждём остальных
-                  участников.
-                </p>
+                <p>{t('team:ready.confirmed')}</p>
               )}
             </>
           )}
 
           {session.status === 'ready_to_start' && (
-            <p>
-              Все готовы. Как только у всех участников будет свежая отметка
-              присутствия в зоне миссии — игра начнётся автоматически.
-            </p>
+            <p>{t('team:ready.waitingStart')}</p>
           )}
 
           {/* Sprint 8.x-4-ux-fix: кнопка «ОТМЕТИТЬ ПРИСУТСТВИЕ» удалена (костыль
@@ -787,20 +792,22 @@ export function TeamSessionScreen({
               Сообщения (подтверждено / вне зоны / ошибка) — текстом. */}
           {session.status === 'ready_to_start' &&
             locationNotice && (
-              <p
+              <ErrorWithCode
+                message={locationNotice}
                 className={
                   locationOk ? 'mission-success-card' : 'repair-error'
                 }
-              >
-                {locationNotice}
-              </p>
+              />
             )}
 
           {session.status === 'active' && (
             <>
               {/* Счётчик — как в solo (cipher-timer), переиспользуем класс. */}
               <div className="cipher-timer">
-                ПОПЫТКА {session.currentWave} / {session.maxWaves}
+                {t('team:waves.attempt', {
+                  current: session.currentWave,
+                  max: session.maxWaves,
+                })}
               </div>
 
               {/* Sprint 8.x-4b-2b: плашка «член команды провалил попытку»
@@ -816,8 +823,11 @@ export function TeamSessionScreen({
                    CipherGame не сработает. */
                 <p className="admin-muted">
                   {session.wavePlayedCount < session.memberCount
-                    ? `Вы сыграли. Ждём других игроков: ${session.wavePlayedCount}/${session.memberCount}.`
-                    : 'Вы сыграли. Ждём остальных участников.'}
+                    ? t('team:waves.playedWaiting', {
+                        played: session.wavePlayedCount,
+                        total: session.memberCount,
+                      })
+                    : t('team:waves.playedAllDone')}
                 </p>
               ) : session.cipherSession ? (
                 <CipherGame
@@ -835,7 +845,7 @@ export function TeamSessionScreen({
                   title="КОМАНДНАЯ МИНИ-ИГРА"
                 />
               ) : (
-                <p>Игровая сессия завершена.</p>
+                <p>{t('team:waves.gameEnded')}</p>
               )}
 
               {waveSuccess && !session.myWavePlayed && (
@@ -849,12 +859,12 @@ export function TeamSessionScreen({
               курсором before=createdAt самого старого сообщения. */}
           {chatOpen && (
             <div className="gas-block">
-              <h3>ЧАТ КОМАНДЫ</h3>
+              <h3>{t('team:chat.title')}</h3>
 
               {chatError && <p className="repair-error">{chatError}</p>}
 
               {messages.length === 0 ? (
-                <p className="admin-muted">Сообщений пока нет.</p>
+                <p className="admin-muted">{t('team:chat.empty')}</p>
               ) : (
                 messages.map((message) => (
                   <article className="message-card" key={message.id}>
@@ -875,17 +885,17 @@ export function TeamSessionScreen({
                   disabled={messagesBusy}
                   onClick={() => void handleShowMoreMessages()}
                 >
-                  {messagesBusy ? 'Загрузка…' : 'ПОКАЗАТЬ ЕЩЁ'}
+                  {messagesBusy ? t('common:loading') : t('team:chat.showMore')}
                 </button>
               )}
 
               <label>
-                Сообщение
+                {t('team:chat.messageLabel')}
                 <input
                   type="text"
                   value={messageText}
                   maxLength={1000}
-                  placeholder="Написать команде"
+                  placeholder={t('team:chat.messagePlaceholder')}
                   onChange={(event) => {
                     setMessageText(event.target.value)
                     setChatError(null)
@@ -899,7 +909,7 @@ export function TeamSessionScreen({
                 disabled={sending || messageText.trim().length === 0}
                 onClick={() => void handleSendMessage()}
               >
-                {sending ? 'Отправка…' : 'ОТПРАВИТЬ'}
+                {sending ? t('team:chat.sending') : t('team:chat.send')}
               </button>
             </div>
           )}
