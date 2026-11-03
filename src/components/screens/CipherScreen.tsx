@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import type { EngineMission, MissionSubmission } from '../../api/engineApi'
 import type { Screen } from '../../types/game'
 import { useActiveMission } from '../../hooks/useActiveMission'
@@ -219,7 +221,7 @@ function buildDrums(
 
 // ---------- Оформление награды ----------
 
-function formatAwarded(response: MissionSubmission): string {
+function formatAwarded(response: MissionSubmission, t: TFunction): string {
   const parts: string[] = []
 
   if (response.awarded.root > 0) {
@@ -232,7 +234,7 @@ function formatAwarded(response: MissionSubmission): string {
 
   return parts.length > 0
     ? parts.join(' · ')
-    : 'Прогресс подтверждён сервером.'
+    : t('cipher:success.noAwards')
 }
 export function CipherScreen({
   missions,
@@ -240,6 +242,7 @@ export function CipherScreen({
   onSubmitMission,
   onExpireMission,
 }: CipherScreenProps) {
+  const { t } = useTranslation(['cipher', 'common'])
   const [gameDrums, setGameDrums] = useState<string[][]>([])
   const [gameIndices, setGameIndices] = useState<number[]>([])
   const [resetSignal, setResetSignal] = useState(0)
@@ -298,11 +301,11 @@ export function CipherScreen({
 
     setSubmitting(false)
     if (!response) {
-      setError('СЕРВЕР НЕДОСТУПЕН. ПРОВЕРЬТЕ ПОДКЛЮЧЕНИЕ.')
+      setError(t('cipher:errors.serverUnavailable'))
       return
     }
     if (!response.accepted) {
-      setError(response.message ?? content?.wrongAnswerText ?? 'НЕВЕРНО, ПОПРОБУЙ ЕЩЁ')
+      setError(response.message ?? content?.wrongAnswerText ?? t('cipher:game.wrongFallback'))
       // Sprint 8.14 (fix): новая попытка — свежий таймер и позиции барабанов
       // (CipherGame пересобирается по resetSignal).
       setTimedOut(false)
@@ -310,7 +313,7 @@ export function CipherScreen({
       return
     }
 
-    setSuccessAward(formatAwarded(response))
+    setSuccessAward(formatAwarded(response, t))
     // Запоминаем тексты из content ДО того, как mission станет null
     setSuccessTitle(content?.successTitle ?? null)
     setSuccessText(content?.successText ?? null)
@@ -334,17 +337,17 @@ export function CipherScreen({
   if (successAward) {
     return (
       <section className="segment-screen">
-        <p className="eyebrow">АКТИВНАЯ МИССИЯ / ЗАВЕРШЕНА</p>
+        <p className="eyebrow">{t('cipher:header.completedEyebrow')}</p>
         <section className="mission-success-card">
-          <span className="file-label">ЗАМОК ОТКРЫТ</span>
+          <span className="file-label">{t('cipher:success.label')}</span>
           <div className="mission-success-symbol">✓</div>
-          <h3>{successTitle ?? 'Комбинация принята'}</h3>
+          <h3>{successTitle ?? t('cipher:success.titleFallback')}</h3>
           <p>
-            {successText ?? 'Прогресс и награды подтверждены сервером.'}
+            {successText ?? t('cipher:success.textFallback')}
           </p>
           <div className="mission-reward-grid">
             <div>
-              <span>ПОЛУЧЕНО</span>
+              <span>{t('cipher:success.receivedLabel')}</span>
               <strong>{successAward}</strong>
             </div>
           </div>
@@ -352,7 +355,7 @@ export function CipherScreen({
             className="repair-submit-button"
             onClick={() => onScreenChange('terminal')}
           >
-            В КОНТУР →
+            {t('cipher:buttons.backToContour')}
           </button>
         </section>
       </section>
@@ -362,17 +365,17 @@ export function CipherScreen({
   if (timedOut) {
     return (
       <section className="segment-screen">
-        <p className="eyebrow">АКТИВНАЯ МИССИЯ / ВРЕМЯ ВЫШЛО</p>
+        <p className="eyebrow">{t('cipher:header.timeUpEyebrow')}</p>
         <section className="mission-success-card">
-          <span className="file-label">ВРЕМЯ ВЫШЛО</span>
+          <span className="file-label">{t('cipher:timeUp.label')}</span>
           <div className="mission-success-symbol">!</div>
-          <h3>Комбинация не собрана</h3>
-          <p>{content?.wrongAnswerText ?? 'Попытка не засчитана.'}</p>
+          <h3>{t('cipher:timeUp.title')}</h3>
+          <p>{content?.wrongAnswerText ?? t('cipher:timeUp.wrongFallback')}</p>
           <button
             className="repair-submit-button"
             onClick={() => onScreenChange('terminal')}
           >
-            В КОНТУР →
+            {t('cipher:buttons.backToContour')}
           </button>
         </section>
       </section>
@@ -383,19 +386,16 @@ export function CipherScreen({
   if (!mission || !content) {
     return (
       <section className="segment-screen">
-        <p className="eyebrow">CIPHER / МИНИ-ИГРА НЕДОСТУПНА</p>
+        <p className="eyebrow">{t('cipher:errors.noMissionEyebrow')}</p>
         <section className="location-status">
           <span className="location-status-icon">⌖</span>
           <div>
-            <strong>НЕТ АКТИВНОЙ МИССИИ CIPHER</strong>
-            <p>
-              Опубликованная миссия кодового замка ещё не получена из игрового
-              bootstrap либо содержит некорректный public content.
-            </p>
+            <strong>{t('cipher:errors.noMissionTitle')}</strong>
+            <p>{t('cipher:errors.noMissionBody')}</p>
           </div>
         </section>
         <button className="back-button" onClick={() => onScreenChange('terminal')}>
-          ← ВЕРНУТЬСЯ В КОНТУР
+          {t('common:backToContour')}
         </button>
       </section>
     )
@@ -410,26 +410,27 @@ export function CipherScreen({
 
   const attemptLabel =
     maxAttempts !== null
-      ? `ПОПЫТКА ${currentAttempt} / ${maxAttempts}${
-          isLastAttempt ? ' (ПОСЛЕДНЯЯ)' : ''
-        }`
-      : `ПОПЫТКА ${currentAttempt}`
+      ? `${t('cipher:timer.attemptOfMax', {
+          current: currentAttempt,
+          max: maxAttempts,
+        })}${isLastAttempt ? t('cipher:timer.attemptLastMark') : ''}`
+      : t('cipher:timer.attemptCurrent', { current: currentAttempt })
 
   // 3. Иначе — игровой UI.
   return (
     <section className="segment-screen">
-      <p className="eyebrow">АКТИВНАЯ МИССИЯ / {mission.id.toUpperCase()}</p>
+      <p className="eyebrow">{t('cipher:header.activeMissionEyebrow')}</p>
 
       {mission.deadlineAt && (
         <MissionTimer
           deadlineAt={mission.deadlineAt}
-          label="до конца задания"
+          label={t('cipher:header.timerLabel')}
           onClick={() => onExpireMission(mission.id)}
         />
       )}
 
       <button className="back-button" onClick={() => onScreenChange('terminal')}>
-        ← ВЕРНУТЬСЯ В КОНТУР
+        {t('common:backToContour')}
       </button>
 
       <div className="segment-heading">

@@ -1,1 +1,42 @@
-{}
+{
+  "header": {
+    "activeMissionEyebrow": "АКТИВНАЯ МИССИЯ",
+    "completedEyebrow": "АКТИВНАЯ МИССИЯ / ЗАВЕРШЕНА",
+    "timeUpEyebrow": "АКТИВНАЯ МИССИЯ / ВРЕМЯ ВЫШЛО",
+    "timerLabel": "до конца задания"
+  },
+  "game": {
+    "correctCombinationAria": "Правильная комбинация",
+    "wrongFallback": "НЕВЕРНО, ПОПРОБУЙ ЕЩЁ"
+  },
+  "timer": {
+    "seconds": "⏱ {{seconds}} сек",
+    "attemptCurrent": "ПОПЫТКА {{current}}",
+    "attemptOfMax": "ПОПЫТКА {{current}} / {{max}}",
+    "attemptLastMark": " (ПОСЛЕДНЯЯ)"
+  },
+  "success": {
+    "label": "ЗАМОК ОТКРЫТ",
+    "titleFallback": "Комбинация принята",
+    "textFallback": "Прогресс и награды подтверждены сервером.",
+    "receivedLabel": "ПОЛУЧЕНО",
+    "noAwards": "Прогресс подтверждён сервером."
+  },
+  "timeUp": {
+    "label": "ВРЕМЯ ВЫШЛО",
+    "title": "Комбинация не собрана",
+    "wrongFallback": "Попытка не засчитана."
+  },
+  "errors": {
+    "serverUnavailable": "СЕРВЕР НЕДОСТУПЕН. ПРОВЕРЬТЕ ПОДКЛЮЧЕНИЕ.",
+    "noMissionEyebrow": "CIPHER / МИНИ-ИГРА НЕДОСТУПНА",
+    "noMissionTitle": "НЕТ АКТИВНОЙ МИССИИ CIPHER",
+    "noMissionBody": "Опубликованная миссия кодового замка ещё не получена из игрового bootstrap либо содержит некорректный public content."
+  },
+  "buttons": {
+    "reset": "ЗАНОВО",
+    "submit": "ГОТОВО →",
+    "submitting": "ПРОВЕРЯЕМ…",
+    "backToContour": "В КОНТУР →"
+  }
+}

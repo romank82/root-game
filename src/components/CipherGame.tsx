@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type TouchEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 
 // Sprint 8.x-4a: переиспользуемая игровая часть cipher (solo + team).
 // Получает готовые данные игры (drums, correctCode, timeLimitSeconds) и НЕ
@@ -28,7 +29,6 @@ export interface CipherGameProps {
   onReset?: () => void
   // Опциональные тексты для team-экрана (solo их не передаёт).
   title?: string
-  wrongText?: string
   // Текст ошибки последней попытки (рендерится как в CipherScreen solo).
   error?: string | null
 }
@@ -44,9 +44,9 @@ export function CipherGame({
   onTimeout,
   onReset,
   title,
-  wrongText,
   error,
 }: CipherGameProps) {
+  const { t } = useTranslation(['cipher'])
   // Позиции барабанов и обратный отсчёт попытки — внутреннее состояние игры.
   const [indices, setIndices] = useState<number[]>([])
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
@@ -139,7 +139,7 @@ export function CipherGame({
       )}
 
       {/* Правильный код показан открыто — игра на скорость (не на угадывание). */}
-      <div className="cipher-combination" aria-label="Правильная комбинация">
+      <div className="cipher-combination" aria-label={t('cipher:game.correctCombinationAria')}>
         {correctCode.map((char, index) => (
           <span key={`${char}-${index}`} className="cipher-combination-char">
             {char}
@@ -151,7 +151,7 @@ export function CipherGame({
         <div
           className={`cipher-timer${timeLeft <= 10 ? ' cipher-timer-critical' : ''}`}
         >
-          ⏱ {Math.max(timeLeft, 0)} сек
+          {t('cipher:timer.seconds', { seconds: Math.max(timeLeft, 0) })}
         </div>
       )}
 
@@ -181,7 +181,7 @@ export function CipherGame({
         })}
       </div>
 
-      {(error || wrongText) && <p className="repair-error">{error ?? wrongText}</p>}
+      {error && <p className="repair-error">{error}</p>}
 
       <div className="repair-actions">
         <button
@@ -194,14 +194,14 @@ export function CipherGame({
             }
           }}
         >
-          ЗАНОВО
+          {t('cipher:buttons.reset')}
         </button>
         <button
           className="repair-submit-button"
           onClick={() => onSubmit(sequence)}
           disabled={isSubmitting || drums.length === 0}
         >
-          {isSubmitting ? 'ПРОВЕРЯЕМ…' : 'ГОТОВО →'}
+          {isSubmitting ? t('cipher:buttons.submitting') : t('cipher:buttons.submit')}
         </button>
       </div>
     </>
