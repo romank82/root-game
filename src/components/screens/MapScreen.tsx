@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet'
 import type { Map as LeafletMap } from 'leaflet'
 import type { EngineMission } from '../../api/engineApi'
@@ -39,6 +40,7 @@ interface MapScreenProps {
 }
 
 export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
+  const { t } = useTranslation(['map'])
   // Показываем только активную (ближайшую) миссию. Остальные — в других экранах.
   const activeMission = useActiveMission(missions, geoPosition)
   const mapRef = useRef<LeafletMap | null>(null)
@@ -49,14 +51,14 @@ export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
         <div className="map-loading-box">
           {geoError ? (
             <>
-              <p className="map-loading-title">ОШИБКА ГЕОЛОКАЦИИ</p>
+              <p className="map-loading-title">{t('map:gps.errorTitle')}</p>
               <p className="map-loading-text">{geoError}</p>
             </>
           ) : (
             <>
-              <p className="map-loading-title">ОПРЕДЕЛЯЕМ ВАШУ ПОЗИЦИЮ…</p>
+              <p className="map-loading-title">{t('map:gps.locatingTitle')}</p>
               <p className="map-loading-text">
-                Разрешите геолокацию, чтобы увидеть карту и зоны миссий.
+                {t('map:gps.permissionHint')}
               </p>
             </>
           )}
@@ -128,7 +130,7 @@ export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
           className="map-overlay-button map-overlay-button-compact"
           onClick={centerOnPlayer}
         >
-          ⌖ На игрока
+          {t('map:controls.centerOnPlayer')}
         </button>
         <div className="map-overlay-info">
           {geoPosition.lat.toFixed(5)}, {geoPosition.lng.toFixed(5)}
