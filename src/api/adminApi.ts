@@ -1,6 +1,9 @@
 export type AdminRole = 'super_admin' | 'owner' | 'editor' | 'viewer' | 'admin'
 export type AdminMissionStatus = 'draft' | 'published'
 
+// Sprint Trans-3a: статус ручного перевода контента миссии (admin API Trans-2b-2).
+export type MissionTranslationStatus = 'none' | 'partial' | 'complete'
+
 export type AdminUser = {
   id: string
   username: string
@@ -39,6 +42,9 @@ export type AdminMission = {
   content: Record<string, unknown>
   validationConfig: Record<string, unknown>
   status: AdminMissionStatus
+  // Sprint Trans-3a: пересчитанный сервером статус переводов. Поле optional,
+  // чтобы старые ответы/моки без него оставались валидными.
+  translationStatus?: MissionTranslationStatus
   sortOrder: number
   rewards: AdminReward[]
   createdAt: string | null
@@ -71,6 +77,29 @@ export type AdminMissionPayload = {
     reward_value?: Record<string, unknown>
     sort_order?: number
   }>
+}
+
+// Sprint Trans-3a: переводы контента миссии (admin API Trans-2b-2).
+// contentUi — словарь content.ui-ключей: строки текста + blocks (string[]) для
+// code_repair; технические ключи (alphabet/combination/drumCount) не переводятся.
+export type MissionTranslation = {
+  title?: string
+  description?: string
+  contentUi?: Record<string, string | string[]>
+}
+
+export type MissionTranslations = Record<string, MissionTranslation>
+
+export type MissionTranslationsResponse = {
+  missionId: string
+  translations: MissionTranslations
+  translationStatus: MissionTranslationStatus
+  supportedLanguages: string[]
+  requiredContentUiKeys: string[]
+}
+
+export type MissionTranslationsPayload = {
+  translations: MissionTranslations
 }
 
 const API_BASE_URL =
@@ -216,6 +245,40 @@ export async function unpublishAdminMission(
 
   const body = (await response.json()) as { mission: AdminMission }
   return body.mission
+}
+
+export async function getMissionTranslations(
+  missionId: string,
+): Promise<MissionTranslationsResponse> {
+  const response = await adminFetch(
+    `/api/v1/admin/missions/${missionId}/translations`,
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<MissionTranslationsResponse>
+}
+
+export async function putMissionTranslations(
+  missionId: string,
+  payload: MissionTranslationsPayload,
+): Promise<MissionTranslationsResponse> {
+  const response = await adminFetch(
+    `/api/v1/admin/missions/${missionId}/translations`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<MissionTranslationsResponse>
 }
 
 export type AdminSystemSetting = {
