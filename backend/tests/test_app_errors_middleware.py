@@ -181,8 +181,15 @@ class AppErrorsMiddlewareTests(unittest.TestCase):
         self.assertEqual(row.message, "boom")
         self.assertEqual(
             row.safe_context,
-            {"method": "GET", "path": "/x", "status": 500},
+            {"method": "GET", "path": "/x"},
         )
+        # M-2b: структурированные поля (endpoint/status_code/stack).
+        self.assertEqual(row.endpoint, "/x")
+        self.assertEqual(row.status_code, 500)
+        self.assertIsNone(row.player_id, "player_id заполняется в M-2c")
+        self.assertIsNotNone(row.stack)
+        self.assertIn("RuntimeError", row.stack)
+        self.assertLessEqual(len(row.stack), 4000)
 
     def test_4xx_not_written(self) -> None:
         """HTTPException (4xx) пробрасывается, AppError НЕ пишется."""

@@ -1026,11 +1026,21 @@ class AppError(TimestampMixin, Base):
     severity: Mapped[str] = mapped_column(
         String(16), nullable=False, index=True
     )
-    error_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    error_type: Mapped[str] = mapped_column(
+        String(128), nullable=False, index=True
+    )
     message: Mapped[str] = mapped_column(String(512), nullable=False)
     safe_context: Mapped[dict | None] = mapped_column(
         JSON, nullable=True, default=None
     )
+    endpoint: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, index=True
+    )
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    player_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    stack: Mapped[str | None] = mapped_column(Text, nullable=True)
     __table_args__ = (
         CheckConstraint(
             "severity IN ('error','critical')",

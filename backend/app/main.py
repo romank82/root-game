@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -190,8 +191,11 @@ async def app_errors_middleware(request: Request, call_next):
                     safe_context={
                         "method": request.method,
                         "path": request.url.path,
-                        "status": 500,
                     },
+                    endpoint=request.url.path,
+                    status_code=500,
+                    player_id=None,
+                    stack=traceback.format_exc()[:4000],
                 )
         except Exception as log_error:  # noqa: BLE001 — лог не важнее ответа
             logger.warning("app_error record failed: %s", log_error)
