@@ -289,6 +289,18 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         description="Зарезервированный флаг для development-инструмента сброса demo-данных вне production (публичный reset удалён в 3.11.a).",
         is_sensitive=True,
     ),
+    "monitoring.global_threshold": SystemSettingDefinition(
+        key="monitoring.global_threshold",
+        value_type="integer",
+        default_value=100,
+        category="monitoring",
+        title="Глобальный порог ошибок группы",
+        description=(
+            "Минимальное число ошибок в группе (COUNT(*)), начиная с которого "
+            "группа помечается isGlobal в /admin/monitoring/error-groups."
+        ),
+        is_sensitive=False,
+    ),
 }
 
 

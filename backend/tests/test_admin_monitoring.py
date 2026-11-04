@@ -33,7 +33,7 @@ from unittest.mock import patch
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from app.models import AppError, GamePlayer, PlayerEvent
+from app.models import AppError, GamePlayer, PlayerEvent, SystemSetting
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2] / "backend"
 
@@ -442,3 +442,72 @@ class AdminMonitoringTests(unittest.TestCase):
         )
         self.assertEqual(self._call_errors(error_type="B")["total"], 1)
         self.assertEqual(self._call_errors(error_type="C")["total"], 0)
+
+    def test_error_groups_is_global(self) -> None:
+        """M-5: isGlobal = count >= monitoring.global_threshold (CMS-first).
+
+        2 группы: A count=3, B count=2.
+        - threshold=3 -> A True, B False;
+        - threshold=2 -> оба True;
+        - threshold=10 -> оба False;
+        - удалить строку -> default 100 -> оба False.
+        """
+        with self.SessionLocal.begin() as session:
+            for _ in range(3):
+                self._add_error(
+                    session, error_type="A", endpoint="/x", status_code=500
+                )
+            for _ in range(2):
+                self._add_error(
+                    session, error_type="B", endpoint="/y", status_code=500
+                )
+
+        def _set_threshold(value: int | None) -> None:
+            with self.SessionLocal.begin() as session:
+                setting = session.get(SystemSetting, "monitoring.global_threshold")
+                if value is None:
+                    if setting is not None:
+                        session.delete(setting)
+                    return
+                if setting is None:
+                    session.add(
+                        SystemSetting(
+                            key="monitoring.global_threshold",
+                            value_json=value,
+                            value_type="integer",
+                            category="monitoring",
+                            title="Глобальный порог ошибок группы",
+                            is_sensitive=False,
+                            status="active",
+                        )
+                    )
+                else:
+                    setting.value_json = value
+
+        def _groups_by_type() -> dict:
+            result = self._call_error_groups(period="all")
+            return {group["errorType"]: group for group in result["groups"]}
+
+        try:
+            _set_threshold(3)
+            groups = _groups_by_type()
+            self.assertTrue(groups["A"]["isGlobal"])  # 3 >= 3
+            self.assertFalse(groups["B"]["isGlobal"])  # 2 < 3
+
+            _set_threshold(2)
+            groups = _groups_by_type()
+            self.assertTrue(groups["A"]["isGlobal"])  # 3 >= 2
+            self.assertTrue(groups["B"]["isGlobal"])  # 2 >= 2
+
+            _set_threshold(10)
+            groups = _groups_by_type()
+            self.assertFalse(groups["A"]["isGlobal"])  # 3 < 10
+            self.assertFalse(groups["B"]["isGlobal"])  # 2 < 10
+
+            _set_threshold(None)
+            groups = _groups_by_type()
+            self.assertFalse(groups["A"]["isGlobal"])  # default 100
+            self.assertFalse(groups["B"]["isGlobal"])
+        finally:
+            # Восстановить default в общей temp-БД (setUp system_settings не чистит).
+            _set_threshold(100)

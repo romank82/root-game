@@ -33,7 +33,8 @@ from sqlalchemy import func, select
 
 from app.admin_access import require_permission
 from app.db import SessionLocal
-from app.models import AdminUser, AppError, PlayerEvent
+from app.models import AdminUser, AppError, PlayerEvent, SystemSetting
+from app.system_settings_catalog import get_definition
 
 router = APIRouter(
     prefix="/api/v1/admin/monitoring",
@@ -203,6 +204,15 @@ def list_admin_monitoring_error_groups(
     last_seen = func.max(AppError.created_at).label("last_seen")
 
     with SessionLocal() as session:  # read-only, не begin()
+        # M-5: порог isGlobal (CMS-first, fallback на default каталога).
+        setting_row = session.get(SystemSetting, "monitoring.global_threshold")
+        definition = get_definition("monitoring.global_threshold")
+        global_threshold = (
+            setting_row.value_json
+            if setting_row is not None
+            else (definition.default_value if definition is not None else 100)
+        )
+
         # total = число групп (после HAVING).
         total_stmt = (
             select(
@@ -254,6 +264,7 @@ def list_admin_monitoring_error_groups(
                 "statusCode": row.status_code,
                 "count": row.count,
                 "affectedPlayers": row.affected_players,
+                "isGlobal": row.count >= global_threshold,
                 "firstSeen": (
                     row.first_seen.isoformat() if row.first_seen else None
                 ),
