@@ -160,7 +160,7 @@ class AppErrorsMiddlewareTests(unittest.TestCase):
         request = self._request(
             method="GET",
             path="/x",
-            audit_context={"correlation_id": "corr-123"},
+            audit_context={"correlation_id": "corr-123", "player_id": "player-abc"},
         )
 
         with self.assertRaises(RuntimeError):
@@ -186,10 +186,69 @@ class AppErrorsMiddlewareTests(unittest.TestCase):
         # M-2b: структурированные поля (endpoint/status_code/stack).
         self.assertEqual(row.endpoint, "/x")
         self.assertEqual(row.status_code, 500)
-        self.assertIsNone(row.player_id, "player_id заполняется в M-2c")
+        self.assertEqual(row.player_id, "player-abc")
         self.assertIsNotNone(row.stack)
         self.assertIn("RuntimeError", row.stack)
         self.assertLessEqual(len(row.stack), 4000)
+
+    def test_correlation_middleware_player_id_from_cookie(self) -> None:
+        """M-2c: correlation_id_middleware кладёт player_id из cookie в audit_context.
+
+        Три случая одним тестом:
+          1. валидная cookie -> player_id из подписанного токена;
+          2. нет cookie -> player_id = None;
+          3. невалидная cookie -> player_id = None (try/except, без raise).
+        """
+        from app.telegram_auth import create_session_token
+
+        secret = "test-session-secret"
+        token = create_session_token("player-test", secret, 3600)
+        main_module = self._main_module
+        cookie_name = main_module.SESSION_COOKIE_NAME
+
+        def _correlation_request(cookies: dict) -> SimpleNamespace:
+            return SimpleNamespace(
+                state=SimpleNamespace(),
+                cookies=cookies,
+                client=None,
+                headers={"user-agent": "test-agent"},
+            )
+
+        async def _call_next_ok(_request):
+            return SimpleNamespace(headers={})
+
+        with patch.object(
+            main_module,
+            "settings",
+            SimpleNamespace(game_session_secret=secret),
+        ):
+            # 1) Валидная cookie -> player_id из токена.
+            request = _correlation_request({cookie_name: token})
+            response = asyncio.run(
+                main_module.correlation_id_middleware(request, _call_next_ok)
+            )
+            self.assertEqual(
+                request.state.audit_context["player_id"], "player-test"
+            )
+            self.assertIn("X-Correlation-ID", response.headers)
+
+            # 2) Нет cookie -> player_id None.
+            request_without = _correlation_request({})
+            asyncio.run(
+                main_module.correlation_id_middleware(
+                    request_without, _call_next_ok
+                )
+            )
+            self.assertIsNone(request_without.state.audit_context["player_id"])
+
+            # 3) Невалидная cookie -> player_id None (try/except).
+            request_invalid = _correlation_request({cookie_name: "garbage"})
+            asyncio.run(
+                main_module.correlation_id_middleware(
+                    request_invalid, _call_next_ok
+                )
+            )
+            self.assertIsNone(request_invalid.state.audit_context["player_id"])
 
     def test_4xx_not_written(self) -> None:
         """HTTPException (4xx) пробрасывается, AppError НЕ пишется."""

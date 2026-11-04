@@ -194,7 +194,9 @@ async def app_errors_middleware(request: Request, call_next):
                     },
                     endpoint=request.url.path,
                     status_code=500,
-                    player_id=None,
+                    player_id=getattr(
+                        getattr(request, "state", None), "audit_context", {}
+                    ).get("player_id"),
                     stack=traceback.format_exc()[:4000],
                 )
         except Exception as log_error:  # noqa: BLE001 — лог не важнее ответа
@@ -211,12 +213,28 @@ async def correlation_id_middleware(request: Request, call_next):
     control an authoritative audit trace identifier.
     """
     correlation_id = uuid4().hex
+
+    # M-2c: player_id из подписанной cookie — для журнала ошибок и аудита.
+    # verify_session_token без побочных эффектов (HMAC, без БД/commit/raise):
+    # при отсутствии/невалидности cookie player_id = None.
+    player_id = None
+    session_token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    if session_token:
+        try:
+            player_id = verify_session_token(
+                session_token=session_token,
+                session_secret=settings.game_session_secret,
+            )
+        except TelegramAuthError:
+            player_id = None
+
     request.state.audit_context = {
         "correlation_id": correlation_id,
         # Do not trust X-Forwarded-For unless a separately configured trusted
         # reverse-proxy policy is introduced.
         "ip_address": request.client.host if request.client else None,
         "user_agent": (request.headers.get("user-agent") or "")[:512] or None,
+        "player_id": player_id,
     }
 
     response = await call_next(request)
