@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,7 +9,7 @@ from typing import Any
 class SystemSettingDefinition:
     key: str
     value_type: str
-    default_value: int | bool | str | list[float]
+    default_value: int | bool | str | list[float] | list[str]
     category: str
     title: str
     description: str
@@ -301,6 +302,23 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         ),
         is_sensitive=False,
     ),
+    # Sprint Trans-2b-1: источник истины для ручного перевода контента
+    # (миссии, сезоны, главы, сегменты, story_nodes). Новый язык добавляется
+    # здесь — API и админка подхватывают его из CMS, без деплоя и миграции.
+    # Коды строго двухбуквенные латинские в нижнем регистре (совместимо с
+    # i18next supportedLngs на фронте).
+    "content.supported_languages": SystemSettingDefinition(
+        key="content.supported_languages",
+        value_type="json",
+        default_value=["ru", "en", "zh"],
+        category="content",
+        title="Поддерживаемые языки контента",
+        description=(
+            "Языки, на которые переводится контент (миссии, сезоны и т.д.). "
+            "Новый язык добавляется здесь — система подхватит его автоматически."
+        ),
+        is_sensitive=False,
+    ),
 }
 
 
@@ -343,6 +361,27 @@ def validate_value(definition: SystemSettingDefinition, value: Any) -> None:
             raise ValueError("Первый множитель должен равняться 1.0.")
         if any(float(value[i]) > float(value[i - 1]) for i in range(1, len(value))):
             raise ValueError("Множители не могут возрастать.")
+        return
+
+    # Sprint Trans-2b-1: value_type="json" проверяется по ключу (как и
+    # множители выше), потому что общий json-бранч отсутствует. Без этой ветки
+    # validate_catalog_values() падал бы на любом PUT system-settings с
+    # «Неизвестный тип или ключ системной настройки.».
+    if definition.key == "content.supported_languages":
+        if not isinstance(value, list) or not value:
+            raise ValueError(
+                "Список языков контента должен быть непустым JSON-массивом."
+            )
+        if any(
+            not isinstance(item, str) or re.fullmatch(r"[a-z]{2}", item) is None
+            for item in value
+        ):
+            raise ValueError(
+                "Каждый язык должен быть двухбуквенным латинским кодом "
+                "в нижнем регистре (например, ru, en, zh)."
+            )
+        if len(set(value)) != len(value):
+            raise ValueError("Коды языков не могут повторяться.")
         return
 
     raise ValueError("Неизвестный тип или ключ системной настройки.")
