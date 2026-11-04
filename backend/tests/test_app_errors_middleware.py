@@ -181,7 +181,7 @@ class AppErrorsMiddlewareTests(unittest.TestCase):
         self.assertEqual(row.message, "boom")
         self.assertEqual(
             row.safe_context,
-            {"method": "GET", "path": "/x"},
+            {"method": "GET"},
         )
         # M-2b: структурированные поля (endpoint/status_code/stack).
         self.assertEqual(row.endpoint, "/x")

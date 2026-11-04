@@ -19,8 +19,9 @@ permission monitoring.read добавится позже, если появит�
 к карточкам игроков). Сейчас изменение каталога permission потребовало бы
 миграции и расширения admin-UI — не оправдано для read-only раздела.
 
-AppError не имеет player_id (модель 13.4): фильтр по игроку для /errors
-невозможен, поэтому для errors доступны только severity + period.
+AppError имеет player_id (nullable, заполняется с M-2c): для /errors доступны
+фильтры severity + period; error-groups группирует по error_type/endpoint/
+status_code.
 """
 from __future__ import annotations
 
@@ -58,6 +59,10 @@ def _serialize_app_error(err: AppError) -> dict[str, Any]:
         "errorType": err.error_type,
         "message": err.message,
         "safeContext": err.safe_context,
+        "endpoint": err.endpoint,
+        "statusCode": err.status_code,
+        "playerId": err.player_id,
+        "stack": err.stack,
         "createdAt": err.created_at.isoformat() if err.created_at else None,
     }
 
@@ -141,6 +146,113 @@ def list_admin_monitoring_errors(
 
     return {
         "errors": [_serialize_app_error(err) for err in rows],
+        "total": total,
+        "limit": safe_limit,
+        "offset": safe_offset,
+    }
+
+
+@router.get("/error-groups")
+def list_admin_monitoring_error_groups(
+    severity: str | None = None,
+    period: str = "all",
+    min_count: int = 1,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    _admin: AdminUser = Depends(require_permission(PLAYERS_READ_PERMISSION)),
+) -> dict[str, Any]:
+    """Группы AppError (M-3): GROUP BY error_type/endpoint/status_code.
+
+    count = COUNT(*), affectedPlayers = COUNT(DISTINCT player_id),
+    firstSeen/lastSeen = MIN/MAX(created_at). HAVING COUNT(*) >= min_count.
+    Сортировка count DESC + вторичные ключи (детерминированная пагинация).
+    """
+    if severity is not None and severity not in VALID_SEVERITIES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="severity должен быть 'error' или 'critical'.",
+        )
+    _validate_period(period)
+
+    safe_min_count = max(1, min_count)
+    safe_limit = max(1, min(limit, MAX_LIMIT))
+    safe_offset = max(0, offset)
+
+    filters = []
+    if severity is not None:
+        filters.append(AppError.severity == severity)
+    period_start = _period_start(period)
+    if period_start is not None:
+        filters.append(AppError.created_at >= period_start)
+
+    group_count = func.count().label("count")
+    affected = func.count(func.distinct(AppError.player_id)).label(
+        "affected_players"
+    )
+    first_seen = func.min(AppError.created_at).label("first_seen")
+    last_seen = func.max(AppError.created_at).label("last_seen")
+
+    with SessionLocal() as session:  # read-only, не begin()
+        # total = число групп (после HAVING).
+        total_stmt = (
+            select(
+                AppError.error_type,
+                AppError.endpoint,
+                AppError.status_code,
+            )
+            .where(*filters)
+            .group_by(
+                AppError.error_type, AppError.endpoint, AppError.status_code
+            )
+            .having(func.count() >= safe_min_count)
+            .subquery()
+        )
+        total = (
+            session.scalar(select(func.count()).select_from(total_stmt)) or 0
+        )
+
+        rows = session.execute(
+            select(
+                AppError.error_type,
+                AppError.endpoint,
+                AppError.status_code,
+                group_count,
+                affected,
+                first_seen,
+                last_seen,
+            )
+            .where(*filters)
+            .group_by(
+                AppError.error_type, AppError.endpoint, AppError.status_code
+            )
+            .having(func.count() >= safe_min_count)
+            .order_by(
+                group_count.desc(),
+                AppError.error_type,
+                AppError.endpoint,
+                AppError.status_code,
+            )
+            .offset(safe_offset)
+            .limit(safe_limit)
+        ).all()
+
+    return {
+        "groups": [
+            {
+                "errorType": row.error_type,
+                "endpoint": row.endpoint,
+                "statusCode": row.status_code,
+                "count": row.count,
+                "affectedPlayers": row.affected_players,
+                "firstSeen": (
+                    row.first_seen.isoformat() if row.first_seen else None
+                ),
+                "lastSeen": (
+                    row.last_seen.isoformat() if row.last_seen else None
+                ),
+            }
+            for row in rows
+        ],
         "total": total,
         "limit": safe_limit,
         "offset": safe_offset,

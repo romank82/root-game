@@ -142,6 +142,9 @@ class AdminMonitoringTests(unittest.TestCase):
         message: str = "boom",
         created_at: datetime | None = None,
         correlation_id: str | None = None,
+        endpoint: str | None = None,
+        status_code: int | None = None,
+        player_id: str | None = None,
     ) -> None:
         error = AppError(
             id=f"app-error-{uuid.uuid4().hex[:16]}",
@@ -150,6 +153,9 @@ class AdminMonitoringTests(unittest.TestCase):
             error_type=error_type,
             message=message,
             safe_context={"grid": "hex-1"},
+            endpoint=endpoint,
+            status_code=status_code,
+            player_id=player_id,
         )
         if created_at is not None:
             error.created_at = created_at
@@ -188,6 +194,14 @@ class AdminMonitoringTests(unittest.TestCase):
         from app.admin_monitoring import list_admin_monitoring_events
 
         return list_admin_monitoring_events(
+            _admin=SimpleNamespace(id="admin-monitoring-1"), **kwargs
+        )
+
+    @staticmethod
+    def _call_error_groups(**kwargs) -> dict:
+        from app.admin_monitoring import list_admin_monitoring_error_groups
+
+        return list_admin_monitoring_error_groups(
             _admin=SimpleNamespace(id="admin-monitoring-1"), **kwargs
         )
 # ---- Tests ----------------------------------------------------------
@@ -318,3 +332,87 @@ class AdminMonitoringTests(unittest.TestCase):
         self.assertEqual(self._call_errors(period="day")["total"], 1)
         self.assertEqual(self._call_errors(period="week")["total"], 2)
         self.assertEqual(self._call_errors(period="month")["total"], 2)
+
+    def test_error_groups(self) -> None:
+        """M-3: группировка по error_type/endpoint/status_code.
+
+        5 ошибок: A (/x, 500) x3 (player p1,p1,p2), B (/y, 500) x2 (p3, None).
+        - min_count=1 -> 2 группы; A: count=3, affectedPlayers=2 (NULL не
+          считается); B: count=2, affectedPlayers=1.
+        - min_count=3 -> 1 группа (A).
+        - period=day (свежие) -> 2 группы.
+        - total = число групп (2).
+        """
+        now = _now_naive_utc()
+        with self.SessionLocal.begin() as session:
+            self._add_error(
+                session,
+                error_type="A",
+                endpoint="/x",
+                status_code=500,
+                player_id="p1",
+                created_at=now - timedelta(hours=3),
+            )
+            self._add_error(
+                session,
+                error_type="A",
+                endpoint="/x",
+                status_code=500,
+                player_id="p2",
+                created_at=now - timedelta(hours=2),
+            )
+            self._add_error(
+                session,
+                error_type="A",
+                endpoint="/x",
+                status_code=500,
+                player_id="p1",
+                created_at=now - timedelta(hours=1),
+            )
+            self._add_error(
+                session,
+                error_type="B",
+                endpoint="/y",
+                status_code=500,
+                player_id="p3",
+                created_at=now - timedelta(hours=2),
+            )
+            self._add_error(
+                session,
+                error_type="B",
+                endpoint="/y",
+                status_code=500,
+                player_id=None,
+                created_at=now - timedelta(hours=1),
+            )
+
+        result = self._call_error_groups(period="all", min_count=1)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(len(result["groups"]), 2)
+
+        # Сортировка count desc: группа A (3) первой, затем B (2).
+        group_a, group_b = result["groups"]
+        self.assertEqual(group_a["errorType"], "A")
+        self.assertEqual(group_a["endpoint"], "/x")
+        self.assertEqual(group_a["statusCode"], 500)
+        self.assertEqual(group_a["count"], 3)
+        self.assertEqual(group_a["affectedPlayers"], 2)  # p1, p2
+        self.assertIsNotNone(group_a["firstSeen"])
+        self.assertIsNotNone(group_a["lastSeen"])
+        self.assertLess(group_a["firstSeen"], group_a["lastSeen"])
+
+        self.assertEqual(group_b["errorType"], "B")
+        self.assertEqual(group_b["endpoint"], "/y")
+        self.assertEqual(group_b["count"], 2)
+        self.assertEqual(group_b["affectedPlayers"], 1)  # p3; NULL не считается
+
+        # min_count=3 -> только группа A.
+        only_big = self._call_error_groups(period="all", min_count=3)
+        self.assertEqual(only_big["total"], 1)
+        self.assertEqual(len(only_big["groups"]), 1)
+        self.assertEqual(only_big["groups"][0]["errorType"], "A")
+
+        # period=day (созданы «сейчас») -> обе группы.
+        day_result = self._call_error_groups(period="day")
+        self.assertEqual(day_result["total"], 2)
+        self.assertEqual(len(day_result["groups"]), 2)

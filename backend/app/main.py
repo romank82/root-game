@@ -190,7 +190,6 @@ async def app_errors_middleware(request: Request, call_next):
                     message=str(exc)[:512],
                     safe_context={
                         "method": request.method,
-                        "path": request.url.path,
                     },
                     endpoint=request.url.path,
                     status_code=500,
