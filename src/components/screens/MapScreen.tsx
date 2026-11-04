@@ -40,7 +40,7 @@ interface MapScreenProps {
 }
 
 export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
-  const { t } = useTranslation(['map'])
+  const { t } = useTranslation(['map', 'common'])
   // Показываем только активную (ближайшую) миссию. Остальные — в других экранах.
   const activeMission = useActiveMission(missions, geoPosition)
   const mapRef = useRef<LeafletMap | null>(null)
@@ -51,12 +51,12 @@ export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
         <div className="map-loading-box">
           {geoError ? (
             <>
-              <p className="map-loading-title">{t('map:gps.errorTitle')}</p>
+              <p className="map-loading-title">{t('common:gps.errorTitle')}</p>
               <p className="map-loading-text">{geoError}</p>
             </>
           ) : (
             <>
-              <p className="map-loading-title">{t('map:gps.locatingTitle')}</p>
+              <p className="map-loading-title">{t('common:gps.locatingTitle')}</p>
               <p className="map-loading-text">
                 {t('map:gps.permissionHint')}
               </p>

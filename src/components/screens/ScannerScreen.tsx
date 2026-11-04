@@ -246,7 +246,7 @@ export function ScannerScreen({
           <section className="location-status">
             <span className="location-status-icon">⌖</span>
             <div>
-              <strong>{geoError ? t('scanner:gps.unavailableTitle') : t('scanner:gps.locatingTitle')}</strong>
+              <strong>{geoError ? t('common:gps.unavailableTitle') : t('common:gps.locatingTitle')}</strong>
               <p>{geoError ?? t('scanner:gps.permissionHint')}</p>
             </div>
           </section>
@@ -330,7 +330,7 @@ export function ScannerScreen({
 
   function checkPlayerLocation() {
     if (!navigator.geolocation) {
-      setLocationError(t('scanner:gps.notSupported'))
+      setLocationError(t('common:gps.notSupported'))
       return
     }
 
@@ -352,15 +352,15 @@ export function ScannerScreen({
         setIsCheckingLocation(false)
         if (error.code === error.PERMISSION_DENIED) {
           setLocationError(
-            t('scanner:gps.permissionDenied'),
+            t('common:gps.permissionDenied'),
           )
         } else if (error.code === error.POSITION_UNAVAILABLE) {
           setLocationError(
-            t('scanner:gps.positionUnavailable'),
+            t('common:gps.positionUnavailable'),
           )
         } else {
           setLocationError(
-            t('scanner:gps.positionError'),
+            t('common:gps.positionError'),
           )
         }
       },
@@ -497,7 +497,7 @@ export function ScannerScreen({
           <>
             <span className="location-status-icon">!</span>
             <div>
-              <strong>{t('scanner:gps.errorTitle')}</strong>
+              <strong>{t('common:gps.errorTitle')}</strong>
               <p>{locationError}</p>
             </div>
           </>

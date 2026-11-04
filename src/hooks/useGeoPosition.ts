@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import i18n from '../i18n'
 
 export type GeoPosition = {
   lat: number
@@ -41,7 +42,7 @@ export function useGeoPosition() {
       // который триггерит системный диалог разрешений в WebView.
       if (!navigator.geolocation) {
         if (cancelled) return
-        setError('Геолокация не поддерживается этим устройством.')
+        setError(i18n.t('common:gps.notSupported'))
         return
       }
 
@@ -60,13 +61,11 @@ export function useGeoPosition() {
           if (cancelled) return
           if (err.code === err.PERMISSION_DENIED) {
             setPermission('denied')
-            setError(
-              'Доступ к геолокации запрещён. Разрешите его в настройках браузера или Telegram и перезагрузите Mini App.',
-            )
+            setError(i18n.t('common:gps.permissionDenied'))
           } else if (err.code === err.POSITION_UNAVAILABLE) {
-            setError('Не удалось определить позицию. Проверьте GPS.')
+            setError(i18n.t('common:gps.positionUnavailable'))
           } else {
-            setError('Ошибка геолокации.')
+            setError(i18n.t('common:gps.positionError'))
           }
         },
         {
