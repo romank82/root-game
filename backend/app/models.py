@@ -246,6 +246,24 @@ class Mission(TimestampMixin, Base):
     # В будущем они будут исключаться из всех player API-схем.
     validation_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
+    # Sprint Trans-2a: ручные переводы публичного контента (title, description,
+    # content.ui) по языкам. Структуру карты и её валидацию вводит API-слой
+    # (Trans-2b); пока поле не читается и не пишется существующими роутами,
+    # поэтому nullable и default=None — обратная совместимость полная.
+    translations: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=None,
+    )
+
+    # Sprint Trans-2a: статус перевода контента: none / partial / complete.
+    # Кэш состояния, пересчитывается сервером при сохранении переводов.
+    translation_status: Mapped[str | None] = mapped_column(
+        String(16),
+        nullable=True,
+        default="none",
+    )
+
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
