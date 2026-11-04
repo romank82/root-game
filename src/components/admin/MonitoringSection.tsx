@@ -1,8 +1,10 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { Fragment, useEffect, useState, type CSSProperties } from 'react'
 import {
+  getErrorGroups,
   getMonitoringErrors,
   getMonitoringEvents,
   type MonitoringError,
+  type MonitoringErrorGroup,
   type MonitoringEvent,
 } from '../../api/adminApi'
 
@@ -73,6 +75,10 @@ const SEVERITY_COLORS: Record<string, string> = {
   error: '#ffd479',
 }
 
+function groupKey(group: MonitoringErrorGroup): string {
+  return `${group.errorType}|${group.endpoint ?? '∅'}|${group.statusCode ?? '∅'}`
+}
+
 export function MonitoringSection(_props: MonitoringSectionProps) {
   const [errors, setErrors] = useState<MonitoringError[]>([])
   const [errorsTotal, setErrorsTotal] = useState(0)
@@ -84,6 +90,21 @@ export function MonitoringSection(_props: MonitoringSectionProps) {
   const [correlationIdFilter, setCorrelationIdFilter] = useState('')
   const [errorsOffset, setErrorsOffset] = useState(0)
   const [errorsReload, setErrorsReload] = useState(0)
+
+  const [activeTab, setActiveTab] = useState<'groups' | 'records'>('groups')
+  const [groups, setGroups] = useState<MonitoringErrorGroup[]>([])
+  const [groupsTotal, setGroupsTotal] = useState(0)
+  const [groupsLoading, setGroupsLoading] = useState(false)
+  const [groupsError, setGroupsError] = useState('')
+  const [groupsPeriod, setGroupsPeriod] = useState<PeriodFilter>('all')
+  const [groupsSeverity, setGroupsSeverity] = useState<SeverityFilter>('all')
+  const [groupsMinCount, setGroupsMinCount] = useState<number>(1)
+  const [groupsOffset, setGroupsOffset] = useState(0)
+  const [groupsReload, setGroupsReload] = useState(0)
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
+  const [drilldownErrors, setDrilldownErrors] = useState<MonitoringError[]>([])
+  const [drilldownLoading, setDrilldownLoading] = useState(false)
+  const [drilldownError, setDrilldownError] = useState('')
 
   const [events, setEvents] = useState<MonitoringEvent[]>([])
   const [eventsTotal, setEventsTotal] = useState(0)
@@ -133,6 +154,92 @@ export function MonitoringSection(_props: MonitoringSectionProps) {
   }, [severityFilter, errorsPeriod, correlationIdFilter, errorsOffset, errorsReload])
 
   useEffect(() => {
+    if (activeTab !== 'groups') return
+    let cancelled = false
+    setGroupsLoading(true)
+    setGroupsError('')
+
+    getErrorGroups({
+      severity: groupsSeverity === 'all' ? undefined : groupsSeverity,
+      period: groupsPeriod,
+      minCount: groupsMinCount,
+      limit: PAGE_SIZE,
+      offset: groupsOffset,
+    })
+      .then((data) => {
+        if (!cancelled) {
+          setGroups(data.groups)
+          setGroupsTotal(data.total)
+        }
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setGroupsError(
+            requestError instanceof Error
+              ? requestError.message
+              : 'Не удалось загрузить группы ошибок.',
+          )
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setGroupsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeTab,
+    groupsSeverity,
+    groupsPeriod,
+    groupsMinCount,
+    groupsOffset,
+    groupsReload,
+  ])
+
+  useEffect(() => {
+    if (!expandedGroup) {
+      setDrilldownErrors([])
+      setDrilldownError('')
+      return
+    }
+    const group = groups.find((item) => groupKey(item) === expandedGroup)
+    if (!group) return
+    let cancelled = false
+    setDrilldownLoading(true)
+    setDrilldownError('')
+
+    getMonitoringErrors({
+      errorType: group.errorType,
+      endpoint: group.endpoint ?? undefined,
+      statusCode: group.statusCode ?? undefined,
+      period: groupsPeriod,
+      limit: PAGE_SIZE,
+      offset: 0,
+    })
+      .then((data) => {
+        if (!cancelled) setDrilldownErrors(data.errors)
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setDrilldownError(
+            requestError instanceof Error
+              ? requestError.message
+              : 'Не удалось загрузить ошибки группы.',
+          )
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDrilldownLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedGroup, groups, groupsPeriod])
+
+  useEffect(() => {
     let cancelled = false
     setEventsLoading(true)
     setEventsError('')
@@ -172,6 +279,9 @@ export function MonitoringSection(_props: MonitoringSectionProps) {
   const errorsShownFrom = errorsTotal === 0 ? 0 : errorsOffset + 1
   const errorsShownTo =
     errorsTotal === 0 ? 0 : Math.min(errorsOffset + PAGE_SIZE, errorsTotal)
+  const groupsShownFrom = groupsTotal === 0 ? 0 : groupsOffset + 1
+  const groupsShownTo =
+    groupsTotal === 0 ? 0 : Math.min(groupsOffset + PAGE_SIZE, groupsTotal)
   const eventsShownFrom = eventsTotal === 0 ? 0 : eventsOffset + 1
   const eventsShownTo =
     eventsTotal === 0 ? 0 : Math.min(eventsOffset + PAGE_SIZE, eventsTotal)
@@ -198,6 +308,28 @@ export function MonitoringSection(_props: MonitoringSectionProps) {
       <section className="admin-editor" style={{ marginTop: '24px' }}>
         <p className="admin-kicker">MONITORING / ERRORS</p>
         <h2 style={{ marginTop: '4px', marginBottom: '16px' }}>Ошибки</h2>
+
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <button
+            className={
+              activeTab === 'groups' ? 'admin-primary' : 'admin-secondary'
+            }
+            onClick={() => setActiveTab('groups')}
+          >
+            Группы
+          </button>
+          <button
+            className={
+              activeTab === 'records' ? 'admin-primary' : 'admin-secondary'
+            }
+            onClick={() => setActiveTab('records')}
+          >
+            Записи
+          </button>
+        </div>
+
+        {activeTab === 'records' && (
+          <>
 
         <div
           style={{
@@ -357,6 +489,242 @@ export function MonitoringSection(_props: MonitoringSectionProps) {
             Вперёд →
           </button>
         </div>
+          </>
+        )}
+
+        {activeTab === 'groups' && (
+          <>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'end',
+                gap: '12px',
+                marginBottom: '16px',
+              }}
+            >
+              <label style={{ flex: '0 0 190px' }}>
+                Период
+                <select
+                  value={groupsPeriod}
+                  onChange={(event) => {
+                    setGroupsPeriod(event.target.value as PeriodFilter)
+                    setGroupsOffset(0)
+                    setExpandedGroup(null)
+                  }}
+                >
+                  {PERIOD_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ flex: '0 0 150px' }}>
+                Severity
+                <select
+                  value={groupsSeverity}
+                  onChange={(event) => {
+                    setGroupsSeverity(event.target.value as SeverityFilter)
+                    setGroupsOffset(0)
+                    setExpandedGroup(null)
+                  }}
+                >
+                  {SEVERITY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ flex: '0 0 130px' }}>
+                Min count
+                <input
+                  type="number"
+                  min={1}
+                  value={groupsMinCount}
+                  onChange={(event) => {
+                    const parsed = Number(event.target.value)
+                    setGroupsMinCount(
+                      Number.isFinite(parsed) && parsed >= 1 ? parsed : 1,
+                    )
+                    setGroupsOffset(0)
+                    setExpandedGroup(null)
+                  }}
+                />
+              </label>
+              <button
+                className="admin-primary"
+                onClick={() => {
+                  setGroupsOffset(0)
+                  setGroupsReload((tick) => tick + 1)
+                  setExpandedGroup(null)
+                  _props.onNotice('Группы ошибок обновлены.')
+                }}
+                disabled={groupsLoading}
+              >
+                Обновить
+              </button>
+            </div>
+
+            {groupsLoading && <p className="admin-muted">Загрузка групп…</p>}
+
+            {groupsError && (
+              <p className="admin-alert admin-error">{groupsError}</p>
+            )}
+
+            {!groupsLoading && groups.length === 0 && !groupsError && (
+              <p className="admin-muted">Групп ошибок не найдено.</p>
+            )}
+
+            {!groupsLoading && groups.length > 0 && (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={tableStyle}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Тип ошибки</th>
+                      <th style={thStyle}>Endpoint</th>
+                      <th style={thStyle}>Кол-во</th>
+                      <th style={thStyle}>Игроков</th>
+                      <th style={thStyle}>Последний раз</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groups.map((group) => {
+                      const key = groupKey(group)
+                      const isExpanded = expandedGroup === key
+                      return (
+                        <Fragment key={key}>
+                          <tr
+                            onClick={() =>
+                              setExpandedGroup(isExpanded ? null : key)
+                            }
+                            style={{
+                              cursor: 'pointer',
+                              background: group.isGlobal
+                                ? 'rgba(255, 138, 154, 0.12)'
+                                : undefined,
+                            }}
+                          >
+                            <td style={tdStyle}>
+                              {group.isGlobal && (
+                                <span
+                                  style={{
+                                    color: '#ff8a9a',
+                                    fontWeight: 700,
+                                    marginRight: '8px',
+                                  }}
+                                >
+                                  GLOBAL
+                                </span>
+                              )}
+                              {group.errorType}
+                            </td>
+                            <td style={tdStyle}>{group.endpoint ?? '—'}</td>
+                            <td style={tdStyle}>
+                              <b>{group.count}</b>
+                            </td>
+                            <td style={tdStyle}>{group.affectedPlayers}</td>
+                            <td style={tdStyle}>{formatDate(group.lastSeen)}</td>
+                          </tr>
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={5} style={{ padding: '12px 16px' }}>
+                                {drilldownLoading ? (
+                                  <span className="admin-muted">
+                                    Загрузка ошибок…
+                                  </span>
+                                ) : drilldownError ? (
+                                  <span className="admin-alert admin-error">
+                                    {drilldownError}
+                                  </span>
+                                ) : drilldownErrors.length === 0 ? (
+                                  <span className="admin-muted">
+                                    Ошибок не найдено.
+                                  </span>
+                                ) : (
+                                  <table style={tableStyle}>
+                                    <thead>
+                                      <tr>
+                                        <th style={thStyle}>Дата</th>
+                                        <th style={thStyle}>Severity</th>
+                                        <th style={thStyle}>Сообщение</th>
+                                        <th style={thStyle}>CorrelationId</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {drilldownErrors.map((error) => (
+                                        <tr key={error.id}>
+                                          <td style={tdStyle}>
+                                            {formatDate(error.createdAt)}
+                                          </td>
+                                          <td style={tdStyle}>
+                                            <span
+                                              style={{
+                                                color:
+                                                  SEVERITY_COLORS[
+                                                    error.severity
+                                                  ] ?? '#8aac9d',
+                                              }}
+                                            >
+                                              {error.severity}
+                                            </span>
+                                          </td>
+                                          <td style={tdStyle}>
+                                            {error.message}
+                                          </td>
+                                          <td style={tdStyle}>
+                                            {error.correlationId}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '14px',
+                marginTop: '18px',
+              }}
+            >
+              <button
+                className="admin-secondary"
+                onClick={() =>
+                  setGroupsOffset(Math.max(0, groupsOffset - PAGE_SIZE))
+                }
+                disabled={groupsLoading || groupsOffset === 0}
+              >
+                ← Назад
+              </button>
+              <span className="admin-muted">
+                Показано {groupsShownFrom}–{groupsShownTo} из {groupsTotal}
+              </span>
+              <button
+                className="admin-secondary"
+                onClick={() => setGroupsOffset(groupsOffset + PAGE_SIZE)}
+                disabled={
+                  groupsLoading || groupsOffset + PAGE_SIZE >= groupsTotal
+                }
+              >
+                Вперёд →
+              </button>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="admin-editor" style={{ marginTop: '24px' }}>

@@ -1892,6 +1892,10 @@ export type MonitoringError = {
   errorType: string
   message: string
   safeContext: Record<string, unknown> | null
+  endpoint: string | null
+  statusCode: number | null
+  playerId: string | null
+  stack: string | null
   createdAt: string | null
 }
 
@@ -1923,6 +1927,9 @@ export async function getMonitoringErrors(
     severity?: string
     period?: string
     correlationId?: string
+    errorType?: string
+    endpoint?: string
+    statusCode?: number
     limit?: number
     offset?: number
   } = {},
@@ -1931,12 +1938,58 @@ export async function getMonitoringErrors(
   if (options.severity) params.set('severity', options.severity)
   if (options.period) params.set('period', options.period)
   if (options.correlationId) params.set('correlation_id', options.correlationId)
+  if (options.errorType) params.set('error_type', options.errorType)
+  if (options.endpoint) params.set('endpoint', options.endpoint)
+  if (options.statusCode !== undefined)
+    params.set('status_code', String(options.statusCode))
   if (options.limit !== undefined) params.set('limit', String(options.limit))
   if (options.offset !== undefined) params.set('offset', String(options.offset))
   const query = params.toString() ? `?${params.toString()}` : ''
   const response = await adminFetch(`/api/v1/admin/monitoring/errors${query}`)
   if (!response.ok) throw new Error(await readError(response))
   return response.json() as Promise<MonitoringErrorsResponse>
+}
+
+export type MonitoringErrorGroup = {
+  errorType: string
+  endpoint: string | null
+  statusCode: number | null
+  count: number
+  affectedPlayers: number
+  firstSeen: string | null
+  lastSeen: string | null
+  isGlobal: boolean
+}
+
+export type MonitoringErrorGroupsResponse = {
+  groups: MonitoringErrorGroup[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export async function getErrorGroups(
+  options: {
+    severity?: string
+    period?: string
+    minCount?: number
+    limit?: number
+    offset?: number
+  } = {},
+): Promise<MonitoringErrorGroupsResponse> {
+  const params = new URLSearchParams()
+  if (options.severity) params.set('severity', options.severity)
+  if (options.period) params.set('period', options.period)
+  if (options.minCount !== undefined)
+    params.set('min_count', String(options.minCount))
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.offset !== undefined) params.set('offset', String(options.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(
+    `/api/v1/admin/monitoring/error-groups${query}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<MonitoringErrorGroupsResponse>
 }
 
 export async function getMonitoringEvents(
