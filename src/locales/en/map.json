@@ -1,0 +1,8 @@
+{
+  "gps": {
+    "permissionHint": "Allow geolocation to see the map and mission zones."
+  },
+  "controls": {
+    "centerOnPlayer": "⌖ Center on player"
+  }
+}

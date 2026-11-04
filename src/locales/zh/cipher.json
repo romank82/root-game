@@ -1,0 +1,42 @@
+{
+  "header": {
+    "activeMissionEyebrow": "进行中的任务",
+    "completedEyebrow": "进行中的任务 / 已完成",
+    "timeUpEyebrow": "进行中的任务 / 时间已到",
+    "timerLabel": "直到任务结束"
+  },
+  "game": {
+    "correctCombinationAria": "正确组合",
+    "wrongFallback": "错误，请重试"
+  },
+  "timer": {
+    "seconds": "⏱ {{seconds}} 秒",
+    "attemptCurrent": "尝试 {{current}}",
+    "attemptOfMax": "尝试 {{current}} / {{max}}",
+    "attemptLastMark": " (最后一次)"
+  },
+  "success": {
+    "label": "锁已打开",
+    "titleFallback": "组合已被接受",
+    "textFallback": "进度和奖励已由服务器确认。",
+    "receivedLabel": "已收到",
+    "noAwards": "进度已由服务器确认。"
+  },
+  "timeUp": {
+    "label": "时间已到",
+    "title": "组合未组装",
+    "wrongFallback": "尝试未计入。"
+  },
+  "errors": {
+    "serverUnavailable": "服务器不可用。请检查连接。",
+    "noMissionEyebrow": "CIPHER / 迷你游戏不可用",
+    "noMissionTitle": "没有进行中的 CIPHER 任务",
+    "noMissionBody": "已发布的密码锁任务尚未从游戏引导中获取，或者包含无效的公共内容。"
+  },
+  "buttons": {
+    "reset": "重置",
+    "submit": "准备好了 →",
+    "submitting": "检查中…",
+    "backToContour": "前往 CONTOUR →"
+  }
+}

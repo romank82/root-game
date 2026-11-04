@@ -1,0 +1,21 @@
+{
+  "loading": "加载中…",
+  "cancel": "取消",
+  "retry": "重试",
+  "close": "关闭",
+  "yes": "是",
+  "no": "否",
+  "backToContour": "← 返回轮廓",
+  "search": "搜索",
+  "confirmEndSession": "结束游戏？进度将被保存，您可以返回。",
+  "stopSession": "退出游戏",
+  "gps": {
+    "notSupported": "此设备不支持地理定位。",
+    "permissionDenied": "地理定位访问被拒绝。请在浏览器或 Telegram 设置中允许。",
+    "positionUnavailable": "无法确定位置。请检查 GPS、互联网和地理定位设置。",
+    "positionError": "无法获取地理定位。请几秒钟后重试。",
+    "errorTitle": "地理定位错误",
+    "locatingTitle": "正在确定位置…",
+    "unavailableTitle": "地理定位不可用"
+  }
+}

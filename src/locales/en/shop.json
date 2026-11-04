@@ -1,0 +1,22 @@
+{
+  "header": {
+    "eyebrow": "SHOP / KEYS",
+    "title": "Shop"
+  },
+  "empty": {
+    "message": "The shop is empty. Fail a mission — keys will appear here."
+  },
+  "card": {
+    "priceLabel": "Price:",
+    "stockLabel": "In stock: {{count}} pcs.",
+    "soldOut": "Sold out. The next failure will add a key.",
+    "disabled": "Offer disabled."
+  },
+  "buttons": {
+    "buy": "Buy for {{price}} ROOT",
+    "purchasing": "Purchasing…"
+  },
+  "notices": {
+    "purchased": "Purchased. Balance: {{balance}} ROOT."
+  }
+}

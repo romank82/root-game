@@ -3,6 +3,12 @@
     "eyebrow": "ПРОФИЛЬ / АНКЕТА ИГРОКА",
     "title": "Профиль"
   },
+  "language": {
+    "title": "Язык",
+    "ru": "Русский",
+    "en": "English",
+    "zh": "中文"
+  },
   "gas": {
     "title": "Газ",
     "balanceLabel": "Баланс:",

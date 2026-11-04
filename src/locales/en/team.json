@@ -1,0 +1,78 @@
+{
+  "header": {
+    "eyebrow": "TEAM MISSION / TEAM",
+    "title": "Team missions"
+  },
+  "create": {
+    "title": "Create team",
+    "missionLabel": "Mission",
+    "missionPlaceholder": "Select a team mission",
+    "noMissions": "No team missions yet.",
+    "creating": "Creating…",
+    "submit": "Create team"
+  },
+  "ready": {
+    "busy": "Sending…",
+    "button": "Ready",
+    "confirmed": "You are marked as ready. Waiting for other members.",
+    "waitingStart": "Everyone is ready. As soon as all members have a fresh presence mark in the mission zone — the game will start automatically."
+  },
+  "waves": {
+    "attempt": "ATTEMPT {{current}} / {{max}}",
+    "playedWaiting": "You have played. Waiting for other players: {{played}}/{{total}}.",
+    "playedAllDone": "You have played. Waiting for other members.",
+    "failedNotice": "One of the members failed the attempt. Moving to the next wave…",
+    "gameEnded": "Game ended."
+  },
+  "status": {
+    "label": "Status:",
+    "collecting": "Assembling team",
+    "readyToStart": "All ready — waiting for auto-start",
+    "active": "Game in progress",
+    "succeeded": "Success",
+    "failed": "Failure",
+    "expired": "Expired",
+    "cancelledBeforeStart": "Cancelled before start",
+    "unknown": "Unknown status"
+  },
+  "notices": {
+    "noMissionSelected": "Select a team mission.",
+    "created": "Team created. Friends will join automatically.",
+    "ready": "You are ready. When everyone marks and is in the zone — automatic start.",
+    "locationOk": "Presence confirmed.",
+    "locationOut": "You are outside the mission zone. Move closer and try again.",
+    "missionPassed": "Mission passed!{{root}}",
+    "correct": "Correct!"
+  },
+  "errors": {
+    "wrongCombination": "Wrong combination.",
+    "geoUnsupported": "Geolocation is not supported by the device.",
+    "geoDenied": "Geolocation access denied. Allow access in settings.",
+    "geoUnavailable": "Failed to determine location.",
+    "geoTimeout": "Geolocation timeout. Try again."
+  },
+  "final": {
+    "endedTitle": "Mission ended",
+    "endedMessage": "Thanks for playing! Team mission ended.",
+    "succeededTitle": "MISSION PASSED",
+    "succeededMessage": "The whole team completed the waves.",
+    "failedTitle": "MISSION FAILED",
+    "failedMessage": "One of the team's attempts failed. Waves exhausted.",
+    "reward": "Reward: +{{amount}} ROOT",
+    "itemsLabel": "Items:",
+    "storyNodes": "Story nodes opened: {{count}}",
+    "chatClosed": "Chat closed.",
+    "missionFallback": "Team mission"
+  },
+  "chat": {
+    "title": "TEAM CHAT",
+    "empty": "No messages yet.",
+    "showMore": "SHOW MORE",
+    "messageLabel": "Message",
+    "messagePlaceholder": "Write to team",
+    "sending": "Sending…",
+    "send": "SEND",
+    "sendFailed": "Failed to send message.",
+    "historyFailed": "Failed to load chat history."
+  }
+}

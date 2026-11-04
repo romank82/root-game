@@ -1,0 +1,12 @@
+{
+  "network": "无连接。请检查网络。",
+  "timeout": "服务器无响应。请重试。",
+  "unauthorized": "访问被拒绝。请重新登录。",
+  "notFound": "未找到。",
+  "conflict": "操作已完成。",
+  "validation": "请检查输入的数据。",
+  "rateLimit": "请求过多。请稍候。",
+  "server": "服务器繁忙。请重试。",
+  "unknown": "出现问题。请重试。",
+  "supportCode": "支持代码：{{id}}"
+}

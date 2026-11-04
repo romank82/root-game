@@ -1,0 +1,38 @@
+{
+  "header": {
+    "eyebrow": "转账 / ROOT",
+    "title": "转账",
+    "availableLabel": "可用："
+  },
+  "search": {
+    "label": "搜索玩家（至少 3 个字符）",
+    "placeholder": "玩家昵称",
+    "noNickname": "无昵称",
+    "buttons": {
+      "searching": "搜索中…",
+      "select": "选择"
+    },
+    "error": {
+      "tooShort": "搜索至少需要 3 个字符。"
+    }
+  },
+  "recipient": {
+    "label": "收件人："
+  },
+  "amount": {
+    "label": "金额 (ROOT)",
+    "error": {
+      "notPositive": "请输入大于 0 的金额。"
+    }
+  },
+  "gas": {
+    "label": "燃料："
+  },
+  "buttons": {
+    "transfer": "转账",
+    "transferring": "转账中…"
+  },
+  "notices": {
+    "transferSuccess": "已转账。余额：{{fromBalance}} ROOT。"
+  }
+}

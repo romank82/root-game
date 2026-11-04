@@ -1,0 +1,78 @@
+{
+  "header": {
+    "eyebrow": "团队任务 / 团队",
+    "title": "团队任务"
+  },
+  "create": {
+    "title": "创建团队",
+    "missionLabel": "任务",
+    "missionPlaceholder": "选择一个团队任务",
+    "noMissions": "暂无团队任务。",
+    "creating": "正在创建…",
+    "submit": "创建团队"
+  },
+  "ready": {
+    "busy": "正在发送…",
+    "button": "准备好了",
+    "confirmed": "您已标记为就绪。等待其他成员。",
+    "waitingStart": "所有人都准备好了。一旦所有成员在任务区域内有新的存在标记——游戏将自动开始。"
+  },
+  "waves": {
+    "attempt": "尝试 {{current}} / {{max}}",
+    "playedWaiting": "您已游玩。等待其他玩家：{{played}}/{{total}}。",
+    "playedAllDone": "您已游玩。等待其他成员。",
+    "failedNotice": "其中一名成员尝试失败。进入下一波…",
+    "gameEnded": "游戏已结束。"
+  },
+  "status": {
+    "label": "状态：",
+    "collecting": "正在集结团队",
+    "readyToStart": "全部就绪——等待自动开始",
+    "active": "游戏进行中",
+    "succeeded": "成功",
+    "failed": "失败",
+    "expired": "已过期",
+    "cancelledBeforeStart": "开始前已取消",
+    "unknown": "未知状态"
+  },
+  "notices": {
+    "noMissionSelected": "请选择团队任务。",
+    "created": "团队已创建。朋友将自动加入。",
+    "ready": "您已准备好。当所有人都标记并在区域内时——自动开始。",
+    "locationOk": "存在已确认。",
+    "locationOut": "您在任务区域外。请靠近并重试。",
+    "missionPassed": "任务已通过！{{root}}",
+    "correct": "正确！"
+  },
+  "errors": {
+    "wrongCombination": "组合错误。",
+    "geoUnsupported": "设备不支持地理定位。",
+    "geoDenied": "地理定位访问被拒绝。请在设置中允许访问。",
+    "geoUnavailable": "无法确定位置。",
+    "geoTimeout": "地理定位超时。请重试。"
+  },
+  "final": {
+    "endedTitle": "任务已结束",
+    "endedMessage": "感谢游玩！团队任务已结束。",
+    "succeededTitle": "任务已通过",
+    "succeededMessage": "整个团队完成了所有波次。",
+    "failedTitle": "任务失败",
+    "failedMessage": "团队的其中一次尝试失败。波次已耗尽。",
+    "reward": "奖励：+{{amount}} ROOT",
+    "itemsLabel": "物品：",
+    "storyNodes": "已开启剧情节点：{{count}}",
+    "chatClosed": "聊天已关闭。",
+    "missionFallback": "团队任务"
+  },
+  "chat": {
+    "title": "团队聊天",
+    "empty": "暂无消息。",
+    "showMore": "显示更多",
+    "messageLabel": "消息",
+    "messagePlaceholder": "给团队留言",
+    "sending": "正在发送…",
+    "send": "发送",
+    "sendFailed": "发送消息失败。",
+    "historyFailed": "加载聊天记录失败。"
+  }
+}

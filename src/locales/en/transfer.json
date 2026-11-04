@@ -1,0 +1,38 @@
+{
+  "header": {
+    "eyebrow": "TRANSFER / ROOT",
+    "title": "Transfer",
+    "availableLabel": "Available:"
+  },
+  "search": {
+    "label": "Search player (minimum 3 characters)",
+    "placeholder": "Player nickname",
+    "noNickname": "No nickname",
+    "buttons": {
+      "searching": "Searching…",
+      "select": "Select"
+    },
+    "error": {
+      "tooShort": "At least 3 characters are required to search."
+    }
+  },
+  "recipient": {
+    "label": "Recipient:"
+  },
+  "amount": {
+    "label": "Amount (ROOT)",
+    "error": {
+      "notPositive": "Enter an amount greater than 0."
+    }
+  },
+  "gas": {
+    "label": "Gas:"
+  },
+  "buttons": {
+    "transfer": "Transfer",
+    "transferring": "Transferring…"
+  },
+  "notices": {
+    "transferSuccess": "Transferred. Balance: {{fromBalance}} ROOT."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "network": "No connection. Check your internet.",
+  "timeout": "Server is not responding. Try again.",
+  "unauthorized": "Access denied. Log in again.",
+  "notFound": "Not found.",
+  "conflict": "Action already completed.",
+  "validation": "Check the entered data.",
+  "rateLimit": "Too many requests. Wait a bit.",
+  "server": "Server is busy. Try again.",
+  "unknown": "Something went wrong. Try again.",
+  "supportCode": "Support code: {{id}}"
+}

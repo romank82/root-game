@@ -1,0 +1,59 @@
+{
+  "sections": {
+    "story": "剧情",
+    "team": "团队",
+    "individual": "个人",
+    "mySessions": "我的会话",
+    "activeSessions": "活跃",
+    "jobHistory": "任务历史"
+  },
+  "header": {
+    "contourConnected": "CONTOUR / 连接已建立",
+    "availablePackages": "可用的档案包",
+    "systemContentReceived": "[系统] 内容已从安全的游戏引导中接收。",
+    "systemResultsReceived": "[系统] 检查结果和奖励由服务器确认。"
+  },
+  "empty": {
+    "noTextPackages": "没有可用的文本包",
+    "publishedPackageHint": "已发布的剧情包尚未从游戏引导中接收，或者所有可用的包都已在任务历史中。",
+    "nothingYet": "暂时为空",
+    "searchingSessions": "正在搜索附近的会话…",
+    "noActiveSessions": "附近没有活跃的会话"
+  },
+  "buttons": {
+    "join": "加入",
+    "joining": "正在加入…",
+    "refuse": "拒绝",
+    "openSession": "打开会话",
+    "openMap": "打开地图",
+    "view": "查看",
+    "remove": "移除"
+  },
+  "status": {
+    "missionActive": "任务已激活。搜索区域已在地图上。",
+    "waitingPlayers": "等待玩家...",
+    "teamAssembled": "团队已集结！",
+    "gameInProgress": "游戏进行中",
+    "packageConfirmed": "✓ 包已确认",
+    "progressConfirmed": "进度已由服务器确认。",
+    "timeUp": "时间已到",
+    "missionOneTime": "任务为一次性。",
+    "packageUnavailable": "包不可用",
+    "serverWillOpen": "服务器将在满足必要条件后打开任务。",
+    "onBreak": "休息中",
+    "availableAgainIn": "再次可用倒计时："
+  },
+  "errors": {
+    "takeMissionFailed": "未能领取任务。",
+    "leaveSessionFailed": "未能离开会话。",
+    "notEnoughRoot": "{{amount}} ROOT 不足"
+  },
+  "missionStatus": {
+    "completed": "已解密",
+    "locked": "不可用",
+    "in_progress": "进行中",
+    "expired": "失败",
+    "cancelled": "已取消",
+    "available": "可用"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "gps": {
+    "permissionHint": "允许地理定位以查看地图和任务区域。"
+  },
+  "controls": {
+    "centerOnPlayer": "⌖ 定位到玩家"
+  }
+}

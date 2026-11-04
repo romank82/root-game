@@ -1,0 +1,23 @@
+{
+  "header": {
+    "eyebrow": "INVENTORY / PERSONAL CONTOUR",
+    "title": "Found objects",
+    "subtitle": "Inventory displays only items confirmed by the server.",
+    "objectsLabel": "OBJECTS"
+  },
+  "empty": {
+    "fileLabel": "INVENTORY IS EMPTY",
+    "title": "NO OBJECTS DETECTED",
+    "hint": "Items will appear after a server-confirmed game event.",
+    "statusLabel": "STATUS: PENDING"
+  },
+  "item": {
+    "cardLabel": "OBJECT #{{index}}",
+    "quantityLabel": "QUANTITY:"
+  },
+  "rarity": {
+    "common": "Common",
+    "rare": "Rare",
+    "epic": "Epic"
+  }
+}

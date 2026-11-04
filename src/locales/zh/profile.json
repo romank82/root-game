@@ -1,0 +1,96 @@
+{
+  "header": {
+    "eyebrow": "个人资料 / 玩家表格",
+    "title": "个人资料"
+  },
+  "language": {
+    "title": "语言",
+    "ru": "Русский",
+    "en": "English",
+    "zh": "中文"
+  },
+  "gas": {
+    "title": "燃料",
+    "balanceLabel": "余额：",
+    "emptyValue": "—",
+    "buying": "正在创建发票…",
+    "packs": {
+      "pack10": "10 燃料 (10 ⭐)",
+      "pack100": "100 燃料 (80 ⭐)",
+      "pack1000": "1000 燃料 (700 ⭐)"
+    },
+    "notice": {
+      "sentToChat": "发票已发送至机器人聊天。请打开机器人聊天并支付。",
+      "credited": "燃料已充值（确认后）。",
+      "openedInNewTab": "请前往 Telegram 机器人以确认支付。",
+      "paymentFailed": "支付失败。请重试。"
+    }
+  },
+  "tonWallet": {
+    "title": "TON 钱包",
+    "addressLabel": "将 ROOT 提取到 TON 的地址：",
+    "inputLabel": "您的 TON 地址",
+    "inputPlaceholder": "粘贴钱包地址",
+    "delete": "删除",
+    "deleting": "正在删除…",
+    "save": "保存",
+    "saving": "正在保存…",
+    "notice": {
+      "saved": "TON 钱包已保存。",
+      "deleted": "TON 钱包已删除。"
+    },
+    "error": {
+      "emptyAddress": "请输入 TON 地址"
+    }
+  },
+  "withdrawal": {
+    "title": "提取 ROOT → TON",
+    "noAddressHint": "请先保存上方的 TON 地址。",
+    "amountLabel": "ROOT 金额",
+    "amountPlaceholder": "例如，100",
+    "toAddressLabel": "到地址：",
+    "submit": "创建请求",
+    "submitting": "正在发送…",
+    "notice": {
+      "created": "请求已发送。正在处理中。"
+    },
+    "error": {
+      "noAddress": "请先保存 TON 地址。",
+      "invalidAmount": "金额必须为正整数。"
+    }
+  },
+  "applications": {
+    "title": "我的请求",
+    "empty": "暂无请求。",
+    "statusLabel": "状态：",
+    "separator": " · ",
+    "reasonPrefix": "原因：",
+    "summary": "{{amount}} ROOT → {{address}}…"
+  },
+  "form": {
+    "playerLabel": "玩家：",
+    "countryLabel": "国家",
+    "countryNotSpecified": "未指定",
+    "countryLockedHint": "国家根据坐标自动确定，无法在表格中更改。",
+    "genderLabel": "性别",
+    "genderNotSpecified": "未指定",
+    "ageLabel": "年龄",
+    "save": "保存",
+    "saving": "正在保存…"
+  },
+  "genderOptions": {
+    "male": "男性",
+    "female": "女性",
+    "other": "其他",
+    "unspecified": "不愿透露"
+  },
+  "status": {
+    "pending": "处理中",
+    "approved": "已批准",
+    "processing": "正在支付",
+    "confirmed": "已支付",
+    "rejected": "已拒绝",
+    "failed": "支付错误",
+    "fallback": "处理中"
+  }
+}

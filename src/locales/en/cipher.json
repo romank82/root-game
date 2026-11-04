@@ -1,0 +1,42 @@
+{
+  "header": {
+    "activeMissionEyebrow": "ACTIVE MISSION",
+    "completedEyebrow": "ACTIVE MISSION / COMPLETED",
+    "timeUpEyebrow": "ACTIVE MISSION / TIME IS UP",
+    "timerLabel": "until the task ends"
+  },
+  "game": {
+    "correctCombinationAria": "Correct combination",
+    "wrongFallback": "WRONG, TRY AGAIN"
+  },
+  "timer": {
+    "seconds": "⏱ {{seconds}} sec",
+    "attemptCurrent": "ATTEMPT {{current}}",
+    "attemptOfMax": "ATTEMPT {{current}} / {{max}}",
+    "attemptLastMark": " (LAST)"
+  },
+  "success": {
+    "label": "LOCK OPENED",
+    "titleFallback": "Combination accepted",
+    "textFallback": "Progress and rewards confirmed by the server.",
+    "receivedLabel": "RECEIVED",
+    "noAwards": "Progress confirmed by the server."
+  },
+  "timeUp": {
+    "label": "TIME IS UP",
+    "title": "Combination not assembled",
+    "wrongFallback": "Attempt not counted."
+  },
+  "errors": {
+    "serverUnavailable": "SERVER UNAVAILABLE. CHECK CONNECTION.",
+    "noMissionEyebrow": "CIPHER / MINI-GAME UNAVAILABLE",
+    "noMissionTitle": "NO ACTIVE CIPHER MISSION",
+    "noMissionBody": "The published code lock mission has not been received from the game bootstrap or contains invalid public content."
+  },
+  "buttons": {
+    "reset": "RESET",
+    "submit": "READY →",
+    "submitting": "CHECKING…",
+    "backToContour": "TO CONTOUR →"
+  }
+}

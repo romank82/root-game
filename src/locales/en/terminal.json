@@ -1,0 +1,59 @@
+{
+  "sections": {
+    "story": "STORY",
+    "team": "TEAM",
+    "individual": "INDIVIDUAL",
+    "mySessions": "MY SESSIONS",
+    "activeSessions": "ACTIVE",
+    "jobHistory": "MISSION HISTORY"
+  },
+  "header": {
+    "contourConnected": "CONTOUR / CONNECTION ESTABLISHED",
+    "availablePackages": "Available archive packages",
+    "systemContentReceived": "[SYSTEM] Content received from secure game bootstrap.",
+    "systemResultsReceived": "[SYSTEM] Check results and rewards are confirmed by the server."
+  },
+  "empty": {
+    "noTextPackages": "NO TEXT PACKAGES AVAILABLE",
+    "publishedPackageHint": "The published story package has not been received from the game bootstrap, or all available packages are already in the mission history.",
+    "nothingYet": "Empty for now",
+    "searchingSessions": "Searching for sessions nearby…",
+    "noActiveSessions": "No active sessions nearby"
+  },
+  "buttons": {
+    "join": "JOIN",
+    "joining": "Joining…",
+    "refuse": "DECLINE",
+    "openSession": "OPEN SESSION",
+    "openMap": "OPEN MAP",
+    "view": "VIEW",
+    "remove": "REMOVE"
+  },
+  "status": {
+    "missionActive": "Mission is active. The search zone is already on the map.",
+    "waitingPlayers": "Waiting for players...",
+    "teamAssembled": "Team assembled!",
+    "gameInProgress": "Game in progress",
+    "packageConfirmed": "✓ PACKAGE CONFIRMED",
+    "progressConfirmed": "Progress confirmed by the server.",
+    "timeUp": "TIME IS UP",
+    "missionOneTime": "Mission is one-time.",
+    "packageUnavailable": "PACKAGE UNAVAILABLE",
+    "serverWillOpen": "The server will open the task after the necessary conditions are met.",
+    "onBreak": "ON BREAK",
+    "availableAgainIn": "Available again in:"
+  },
+  "errors": {
+    "takeMissionFailed": "Failed to take the mission.",
+    "leaveSessionFailed": "Failed to leave the session.",
+    "notEnoughRoot": "Not enough {{amount}} ROOT"
+  },
+  "missionStatus": {
+    "completed": "DECRYPTED",
+    "locked": "UNAVAILABLE",
+    "in_progress": "IN PROGRESS",
+    "expired": "FAILED",
+    "cancelled": "CANCELLED",
+    "available": "AVAILABLE"
+  }
+}

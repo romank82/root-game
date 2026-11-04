@@ -1,0 +1,21 @@
+{
+  "loading": "Loading…",
+  "cancel": "Cancel",
+  "retry": "Retry",
+  "close": "Close",
+  "yes": "Yes",
+  "no": "No",
+  "backToContour": "← BACK TO CONTOUR",
+  "search": "Search",
+  "confirmEndSession": "End the game? Progress will be saved, you can return.",
+  "stopSession": "EXIT GAME",
+  "gps": {
+    "notSupported": "Geolocation is not supported by this device.",
+    "permissionDenied": "Geolocation access is denied. Allow it in your browser or Telegram settings.",
+    "positionUnavailable": "Failed to determine position. Check GPS, internet, and geolocation settings.",
+    "positionError": "Failed to get geolocation. Try again in a few seconds.",
+    "errorTitle": "GEOLOCATION ERROR",
+    "locatingTitle": "DETERMINING POSITION…",
+    "unavailableTitle": "GEOLOCATION UNAVAILABLE"
+  }
+}

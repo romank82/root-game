@@ -1,0 +1,23 @@
+{
+  "header": {
+    "eyebrow": "物品栏 / 个人轮廓",
+    "title": "已发现的物品",
+    "subtitle": "物品栏仅显示服务器确认的物品。",
+    "objectsLabel": "物品"
+  },
+  "empty": {
+    "fileLabel": "物品栏为空",
+    "title": "未发现物品",
+    "hint": "物品将在服务器确认的游戏事件后出现。",
+    "statusLabel": "状态：等待中"
+  },
+  "item": {
+    "cardLabel": "物品 #{{index}}",
+    "quantityLabel": "数量："
+  },
+  "rarity": {
+    "common": "普通",
+    "rare": "稀有",
+    "epic": "史诗"
+  }
+}

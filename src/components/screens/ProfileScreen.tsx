@@ -330,7 +330,9 @@ function buildPayload(
 }
 
 export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
-  const { t } = useTranslation(['profile', 'common'])
+  const { t, i18n } = useTranslation(['profile', 'common'])
+  // Язык интерфейса: базовый код (en-US → en), чтобы значение select совпадало с опциями.
+  const currentLanguage = (i18n.language || 'ru').split('-')[0]
   const [profile, setProfile] = useState<MyProfile | null>(null)
   const [draft, setDraft] = useState<DraftState>({
     country: '',
@@ -616,6 +618,18 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     <section className="inventory">
       <p className="eyebrow">{t('profile:header.eyebrow')}</p>
       <h2>{t('profile:header.title')}</h2>
+
+      <label>
+        {t('profile:language.title')}
+        <select
+          value={currentLanguage}
+          onChange={(e) => void i18n.changeLanguage(e.target.value)}
+        >
+          <option value="ru">{t('profile:language.ru')}</option>
+          <option value="en">{t('profile:language.en')}</option>
+          <option value="zh">{t('profile:language.zh')}</option>
+        </select>
+      </label>
 
       <div className="gas-block">
         <h3>{t('profile:gas.title')}</h3>

@@ -1,0 +1,14 @@
+{
+  "header": {
+    "eyebrow": "ARCHIVE / PERSONAL ACCESS",
+    "title": "Recovered fragments"
+  },
+  "empty": {
+    "title": "ARCHIVE IS EMPTY",
+    "body": "Story fragments will appear here only after server confirmation."
+  },
+  "card": {
+    "label": "SERVER STORY FRAGMENT",
+    "status": "STATUS: UNLOCKED BY SERVER"
+  }
+}

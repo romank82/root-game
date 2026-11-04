@@ -1,0 +1,96 @@
+{
+  "header": {
+    "eyebrow": "PROFILE / PLAYER FORM",
+    "title": "Profile"
+  },
+  "language": {
+    "title": "Language",
+    "ru": "Русский",
+    "en": "English",
+    "zh": "中文"
+  },
+  "gas": {
+    "title": "Gas",
+    "balanceLabel": "Balance:",
+    "emptyValue": "—",
+    "buying": "Creating invoice…",
+    "packs": {
+      "pack10": "10 gas (10 ⭐)",
+      "pack100": "100 gas (80 ⭐)",
+      "pack1000": "1000 gas (700 ⭐)"
+    },
+    "notice": {
+      "sentToChat": "Invoice sent to the bot chat. Open the bot chat and pay.",
+      "credited": "Gas credited (after confirmation).",
+      "openedInNewTab": "Go to the Telegram bot to confirm payment.",
+      "paymentFailed": "Payment failed. Try again."
+    }
+  },
+  "tonWallet": {
+    "title": "TON wallet",
+    "addressLabel": "Address for withdrawing ROOT to TON:",
+    "inputLabel": "Your TON address",
+    "inputPlaceholder": "Paste wallet address",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "save": "Save",
+    "saving": "Saving…",
+    "notice": {
+      "saved": "TON wallet saved.",
+      "deleted": "TON wallet deleted."
+    },
+    "error": {
+      "emptyAddress": "Enter TON address"
+    }
+  },
+  "withdrawal": {
+    "title": "Withdraw ROOT → TON",
+    "noAddressHint": "Save TON address above first.",
+    "amountLabel": "ROOT amount",
+    "amountPlaceholder": "e.g., 100",
+    "toAddressLabel": "To address:",
+    "submit": "Create request",
+    "submitting": "Sending…",
+    "notice": {
+      "created": "Request sent. It is being processed."
+    },
+    "error": {
+      "noAddress": "Save TON address first.",
+      "invalidAmount": "Amount must be a positive integer."
+    }
+  },
+  "applications": {
+    "title": "My requests",
+    "empty": "No requests yet.",
+    "statusLabel": "Status:",
+    "separator": " · ",
+    "reasonPrefix": "Reason: ",
+    "summary": "{{amount}} ROOT → {{address}}…"
+  },
+  "form": {
+    "playerLabel": "Player:",
+    "countryLabel": "Country",
+    "countryNotSpecified": "Not specified",
+    "countryLockedHint": "Country is determined automatically by coordinates and cannot be changed in the form.",
+    "genderLabel": "Gender",
+    "genderNotSpecified": "Not specified",
+    "ageLabel": "Age",
+    "save": "Save",
+    "saving": "Saving…"
+  },
+  "genderOptions": {
+    "male": "Male",
+    "female": "Female",
+    "other": "Other",
+    "unspecified": "Prefer not to say"
+  },
+  "status": {
+    "pending": "Processing",
+    "approved": "Approved",
+    "processing": "Paying out",
+    "confirmed": "Paid",
+    "rejected": "Rejected",
+    "failed": "Payout error",
+    "fallback": "Processing"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "header": {
+    "activeMissionEyebrow": "进行中的任务",
+    "layers": {
+      "solo": "单人",
+      "team": "团队",
+      "story": "剧情"
+    },
+    "timerLabel": "直到任务结束"
+  },
+  "gps": {
+    "permissionHint": "允许地理定位以查看雷达。"
+  },
+  "params": {
+    "title": "任务参数",
+    "codeLabel": "标识符",
+    "searchRadius": "搜索半径",
+    "safeScanPoint": "安全扫描点",
+    "rewardPreview": "奖励预览："
+  },
+  "navigation": {
+    "title": "导航和位置检查",
+    "findPoint": "找到安全的扫描点",
+    "checkHint": "检查设备上的距离。此导航检查不会在服务器上确认操作。",
+    "openRoute": "打开路线 →",
+    "locating": "正在确定位置...",
+    "checkPosition": "检查位置",
+    "notCheckedTitle": "未执行导航检查",
+    "notCheckedBody": "检查设备上到该点的距离。服务器地理检查将出现在单独的运行时 API 中。",
+    "pointAvailableTitle": "该点可用于本地导航",
+    "pointAvailableBody": "设备上的距离：{{distance}} 米。它不是服务器 LocationProof。",
+    "tooFarTitle": "扫描点太远",
+    "tooFarBody": "距离：{{distance}} 米。请靠近到 {{radius}} 米以内。",
+    "openCamera": "打开相机 →",
+    "radarHint": "跟随雷达。靠近后——打开相机。"
+  },
+  "repair": {
+    "defaultLabel": "代码修复",
+    "title": "恢复损坏的字符串",
+    "clear": "清除",
+    "submit": "检查代码 →",
+    "serverUnavailable": "服务器不可用。请检查连接。",
+    "structureBroken": "包结构已损坏。清除字符串并恢复。"
+  },
+  "ar": {
+    "start": "启动 AR 搜索",
+    "blocked": "AR 搜索被阻止",
+    "sessionInitialized": "AR 扫描已启动",
+    "faceLocked": "面已锁定",
+    "aimTitle": "瞄准 Segment 面",
+    "aimBody": "锁定虚拟立方体的面。",
+    "lockFace": "锁定面",
+    "syncedTitle": "面已同步",
+    "syncedBody": "开始视觉 QR 标记提取。",
+    "revealQr": "显现 QR 标记",
+    "qrRevealedTitle": "虚拟 QR 标记已提取",
+    "qrRevealedBody": "打开代码结构检查。结果和奖励由服务器确认。",
+    "extractData": "提取数据 →",
+    "successLabel": "包已恢复",
+    "successTitle": "段已稳定",
+    "successBody": "进度和奖励已由服务器确认。",
+    "receivedLabel": "已收到",
+    "noAwards": "进度已由服务器确认。"
+  },
+  "errors": {
+    "cmsUnavailableEyebrow": "扫描器 / CMS 段不可用",
+    "noScanPointTitle": "没有可用的扫描点",
+    "noScanPointBody": "已发布的 Segment 尚未从游戏引导中接收，或者包含无效的公共内容。"
+  }
+}
