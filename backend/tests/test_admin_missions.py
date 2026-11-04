@@ -25,8 +25,12 @@ from sqlalchemy.orm import sessionmaker
 from app.admin_missions import (
     AdminMissionCreatePayload,
     AdminMissionUpdatePayload,
+    MissionTranslationsPayload,
     create_admin_mission,
+    get_mission_translations,
     list_admin_missions,
+    publish_admin_mission,
+    put_mission_translations,
     update_admin_mission,
 )
 
@@ -51,8 +55,8 @@ def _create_payload(**overrides) -> AdminMissionCreatePayload:
     return AdminMissionCreatePayload(**data)
 
 
-class AdminMissionsCategoryApiTests(unittest.TestCase):
-    """Create/update a mission through the admin API with mission_category."""
+class AdminMissionsApiTests(unittest.TestCase):
+    """Admin missions API: mission_category, профиль мини-игры, переводы контента."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -518,3 +522,223 @@ class AdminMissionsCategoryApiTests(unittest.TestCase):
 
         self.assertEqual(first["slug"], "translit-missiya")
         self.assertEqual(second["slug"], "translit-missiya-2")
+
+    # ---- Sprint Trans-2b-2: перевод контента миссии ------------------------
+
+    def _publication_targets(self) -> dict[str, str]:
+        """GeoZone + ARObject: обязательные привязки для публикации миссии."""
+        from app.models import ARObject, GeoZone
+
+        suffix = uuid.uuid4().hex[:10]
+        ids = {
+            "geo_zone": f"geo-zone-{suffix}",
+            "ar_object": f"ar-object-{suffix}",
+        }
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GeoZone(
+                    id=ids["geo_zone"],
+                    slug=f"geo-zone-{suffix}",
+                    title="Translation test zone",
+                    status="published",
+                    sort_order=1,
+                )
+            )
+            session.flush()
+            session.add(
+                ARObject(
+                    id=ids["ar_object"],
+                    slug=f"ar-object-{suffix}",
+                    title="Translation test object",
+                    status="published",
+                    sort_order=1,
+                    geo_zone_id=ids["geo_zone"],
+                    object_type="marker",
+                    asset_uri="models/marker.glb",
+                )
+            )
+        return ids
+
+    def _publishable_mission(self, ids: dict[str, str], admin) -> str:
+        """Миссия, проходящая все прочие проверки publish (без переводов)."""
+        targets = self._publication_targets()
+        return create_admin_mission(
+            _create_payload(
+                chapter_id=ids["chapter"],
+                geo_zone_id=targets["geo_zone"],
+                ar_object_id=targets["ar_object"],
+                content={
+                    "schemaVersion": 1,
+                    "ui": {"label": "Метка", "question": "Вопрос?"},
+                },
+                validation_config={
+                    "validator": "normalized_text_match",
+                    "acceptedAnswers": ["ключ"],
+                },
+            ),
+            request=None,
+            admin=admin,
+        )["mission"]["id"]
+
+    def test_get_mission_translations_defaults(self) -> None:
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+        mission_id = create_admin_mission(
+            _create_payload(
+                chapter_id=ids["chapter"],
+                content={"schemaVersion": 1, "ui": {"label": "Метка"}},
+            ),
+            request=None,
+            admin=admin,
+        )["mission"]["id"]
+
+        result = get_mission_translations(mission_id, _admin=admin)
+
+        self.assertEqual(result["missionId"], mission_id)
+        self.assertEqual(result["translations"], {})
+        self.assertEqual(result["translationStatus"], "none")
+        self.assertEqual(result["supportedLanguages"], ["ru", "en", "zh"])
+        self.assertEqual(result["requiredContentUiKeys"], ["label"])
+
+    def test_put_mission_translations_complete(self) -> None:
+        from app.models import Mission
+
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+        mission_id = create_admin_mission(
+            _create_payload(
+                chapter_id=ids["chapter"],
+                content={"schemaVersion": 1, "ui": {"label": "Метка"}},
+            ),
+            request=None,
+            admin=admin,
+        )["mission"]["id"]
+
+        result = put_mission_translations(
+            mission_id,
+            MissionTranslationsPayload(
+                translations={
+                    "en": {
+                        "title": "Label mission",
+                        "description": "English description",
+                        "contentUi": {"label": "Label"},
+                    },
+                    "zh": {
+                        "title": "标签任务",
+                        "description": "中文描述",
+                        "contentUi": {"label": "标签"},
+                    },
+                }
+            ),
+            request=None,
+            admin=admin,
+        )
+
+        self.assertEqual(result["translationStatus"], "complete")
+        self.assertEqual(sorted(result["translations"]), ["en", "zh"])
+
+        with self.SessionLocal.begin() as session:
+            stored = session.get(Mission, mission_id)
+            self.assertEqual(stored.translation_status, "complete")
+            self.assertEqual(
+                stored.translations["en"]["title"],
+                "Label mission",
+            )
+            self.assertEqual(
+                stored.translations["zh"]["contentUi"]["label"],
+                "标签",
+            )
+
+    def test_put_mission_translations_partial_when_language_missing(self) -> None:
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+        mission_id = create_admin_mission(
+            _create_payload(
+                chapter_id=ids["chapter"],
+                content={"schemaVersion": 1, "ui": {"label": "Метка"}},
+            ),
+            request=None,
+            admin=admin,
+        )["mission"]["id"]
+
+        result = put_mission_translations(
+            mission_id,
+            MissionTranslationsPayload(
+                translations={
+                    "en": {
+                        "title": "Only English",
+                        "description": "English description",
+                        "contentUi": {"label": "Label"},
+                    }
+                }
+            ),
+            request=None,
+            admin=admin,
+        )
+
+        self.assertEqual(result["translationStatus"], "partial")
+        self.assertEqual(sorted(result["translations"]), ["en"])
+
+    def test_put_mission_translations_rejects_unsupported_language(self) -> None:
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+        mission_id = create_admin_mission(
+            _create_payload(chapter_id=ids["chapter"]),
+            request=None,
+            admin=admin,
+        )["mission"]["id"]
+
+        with self.assertRaises(HTTPException) as context:
+            put_mission_translations(
+                mission_id,
+                MissionTranslationsPayload(
+                    translations={
+                        "de": {"title": "Titel", "description": "Beschreibung"}
+                    }
+                ),
+                request=None,
+                admin=admin,
+            )
+
+        self.assertEqual(context.exception.status_code, 422)
+        self.assertIn("не поддерживается", context.exception.detail)
+
+    def test_publish_requires_complete_translations(self) -> None:
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+        mission_id = self._publishable_mission(ids, admin)
+
+        with self.assertRaises(HTTPException) as context:
+            publish_admin_mission(mission_id, request=None, admin=admin)
+
+        self.assertEqual(context.exception.status_code, 422)
+        self.assertIn("Перевод не завершён", context.exception.detail)
+
+        put_mission_translations(
+            mission_id,
+            MissionTranslationsPayload(
+                translations={
+                    "en": {
+                        "title": "Label mission",
+                        "description": "English description",
+                        "contentUi": {"label": "Label", "question": "Question?"},
+                    },
+                    "zh": {
+                        "title": "标签任务",
+                        "description": "中文描述",
+                        "contentUi": {"label": "标签", "question": "问题?"},
+                    },
+                }
+            ),
+            request=None,
+            admin=admin,
+        )
+
+        published = publish_admin_mission(
+            mission_id,
+            request=None,
+            admin=admin,
+        )["mission"]
+
+        self.assertEqual(published["status"], "published")
+        self.assertEqual(published["translationStatus"], "complete")

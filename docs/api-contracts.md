@@ -278,8 +278,45 @@ or settlement internals. Exact behavior is defined in
 - `POST /api/v1/admin/auth/login`
 - `GET /api/v1/admin/auth/me` — текущий admin без credentials/session token.
 - `POST /api/v1/admin/auth/logout`
-- `/api/v1/admin/missions` — list/get/create/update/publish/unpublish.
+- `/api/v1/admin/missions` — list/get/create/update/publish/unpublish/translations.
   - `GET /api/v1/admin/missions` — list; query: `chapter_id` (string, optional, 8.23) — фильтр по главе.
+  - Сериализация миссии содержит `translationStatus` (`none` / `partial` /
+    `complete`) — Trans-2b-2; сама карта переводов в list/get не отдаётся
+    (только через `/translations`), чтобы списки не разрастались текстом.
+  - `GET /api/v1/admin/missions/{mission_id}/translations` — карта переводов
+    контента; право `missions.read`. Ответ: `missionId`, `translations`
+    (`{language: {title, description, contentUi}}`), `translationStatus`,
+    `supportedLanguages` (из CMS `content.supported_languages`),
+    `requiredContentUiKeys` — какие `content.ui`-ключи миссии нужно повторить
+    в переводе, чтобы статус стал `complete`.
+  - `PUT /api/v1/admin/missions/{mission_id}/translations` — полная замена
+    карты переводов; право `missions.manage`. Тело:
+    `{"translations": {"en": {"title": "...", "description": "...",
+    "contentUi": {"label": "..."}}}}`. Правила:
+    - язык обязан быть в `content.supported_languages` (иначе 422);
+      `ru` обязателен в CMS-списке как базовый язык-оригинал и не переводится;
+    - разрешены только поля `title` (≤255), `description` (≤20000) и
+      `contentUi` с ключами контракта `content_contract`:
+      `label`, `question`, `inputPlaceholder`, `successTitle`, `successText`,
+      `instruction`, `wrongAnswerText`, `lineNumber`, `placeholder`,
+      `joinTitle`, `joinText`, `waitingText`, `readyText`, `activeText`,
+      `failureText`, `blocks` (массив непустых строк, ≤100 блоков по ≤2000
+      символов); технические ключи (`drumCount`, `alphabet`, `combination`,
+      `timeLimitSeconds`, `maxBlocks`, `rewardPreview`) не переводятся —
+      неизвестный ключ или поле дают 422;
+    - пустые строки означают «перевода нет» и не сохраняются;
+    - `translationStatus` пересчитывается сервером: `complete` — каждый язык
+      из CMS-списка, кроме `ru`, имеет `title`, `description` и все
+      `requiredContentUiKeys` (если `content.ui` миссии непустой);
+      `partial` — заполнен хотя бы один не-базовый язык; `none` — пусто;
+    - каждое сохранение пишет immutable `admin_audit_log`
+      (`mission.translations_updated`), в метаданных только языки, статус и
+      required-ключи — без текста перевода.
+  - `POST /api/v1/admin/missions/{mission_id}/publish` требует
+    `translationStatus == 'complete'` (иначе 422 «Перевод не завершён…»).
+    Правка `content`/`validation_config` уже опубликованной миссии через
+    `PATCH` проверяется `_validate_for_publish` без требования переводов
+    (не блокируем сопровождение ранее опубликованного контента).
 - `/api/v1/admin/segments` — list/get/create/update/publish/unpublish/archive;
   physical `DELETE` is unavailable.
   - `GET /api/v1/admin/segments` — list; query: `chapter_id` (string, optional, 8.23) — фильтр по главе.

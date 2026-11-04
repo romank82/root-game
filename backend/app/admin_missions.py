@@ -28,8 +28,10 @@ from app.models import (
     MinigameProfile,
     MissionReward,
     StoryNode,
+    SystemSetting,
 )
 from app.slug_utils import _normalize_slug, _slugify_title, unique_slug
+from app.system_settings_catalog import get_definition
 
 
 router = APIRouter(prefix="/api/v1/admin/missions", tags=["admin-missions"])
@@ -38,6 +40,44 @@ MISSION_READ_PERMISSION = "missions.read"
 MISSION_MANAGE_PERMISSION = "missions.manage"
 VALID_MISSION_STATUSES = {"draft", "published"}
 VALID_REWARD_TYPES = {"currency", "item", "story_node"}
+
+# Sprint Trans-2b-2: ручной перевод контента миссии (Mission.translations).
+# Источник истины по языкам — CMS-настройка content.supported_languages
+# (Trans-2b-1); базовый язык ru — оригинал контента и не переводится.
+SUPPORTED_LANGUAGES_SETTING_KEY = "content.supported_languages"
+BASE_CONTENT_LANGUAGE = "ru"
+TRANSLATION_STATUS_NONE = "none"
+TRANSLATION_STATUS_PARTIAL = "partial"
+TRANSLATION_STATUS_COMPLETE = "complete"
+TRANSLATION_TITLE_MAX_LENGTH = 255
+TRANSLATION_DESCRIPTION_MAX_LENGTH = 20_000
+TRANSLATION_UI_TEXT_MAX_LENGTH = 20_000
+TRANSLATION_UI_BLOCKS_MAX_ITEMS = 100
+TRANSLATION_UI_BLOCK_MAX_LENGTH = 2_000
+TRANSLATION_ALLOWED_FIELDS = frozenset({"title", "description", "contentUi"})
+# Текстовые content.ui-ключи всех типов миссий по контракту
+# app.content_contract.validate_mission_content (без технических:
+# drumCount/alphabet/falseChoicesPerDrum/combination/timeLimitSeconds/
+# maxBlocks/rewardPreview — они не переводятся).
+TRANSLATABLE_UI_TEXT_KEYS = (
+    "label",
+    "question",
+    "inputPlaceholder",
+    "successTitle",
+    "successText",
+    "instruction",
+    "wrongAnswerText",
+    "lineNumber",
+    "placeholder",
+    "joinTitle",
+    "joinText",
+    "waitingText",
+    "readyText",
+    "activeText",
+    "failureText",
+)
+TRANSLATABLE_UI_KEYS = frozenset(TRANSLATABLE_UI_TEXT_KEYS) | {"blocks"}
+TRANSLATABLE_UI_KEY_ORDER = (*TRANSLATABLE_UI_TEXT_KEYS, "blocks")
 
 
 def _validate_public_mission_content(
@@ -157,6 +197,17 @@ class AdminMissionUpdatePayload(BaseModel):
     rewards: list[AdminMissionRewardPayload] | None = None
 
 
+class MissionTranslationsPayload(BaseModel):
+    """Полная карта переводов контента: {language: {title, description, contentUi}}.
+
+    PUT заменяет карту целиком. Пустые строки означают «нет перевода» и
+    отбрасываются при нормализации (см. _normalize_translations_payload),
+    чтобы translation_status не зависел от формата ввода.
+    """
+
+    translations: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex}"
 
@@ -206,6 +257,9 @@ def _serialize_mission(
         "description": mission.description,
         "content": mission.content,
         "validationConfig": mission.validation_config,
+        "translationStatus": (
+            mission.translation_status or TRANSLATION_STATUS_NONE
+        ),
         "status": mission.status,
         "sortOrder": mission.sort_order,
         "rewards": [_serialize_reward(reward) for reward in rewards],
@@ -402,11 +456,254 @@ def _validate_rewards(
                 )
 
 
+def _read_supported_languages(session: Session) -> list[str]:
+    """Языки контента из CMS (content.supported_languages) либо дефолт каталога.
+
+    Порядок: строка system_settings -> default_value код-каталога -> базовый ru.
+    Значения фильтруются: пустые и нестроковые элементы игнорируются, дубликаты
+    схлопываются (валидация CMS уже запрещает и то, и другое — это защита от
+    ручных правок в БД).
+    """
+    row = session.get(SystemSetting, SUPPORTED_LANGUAGES_SETTING_KEY)
+    if row is not None and isinstance(row.value_json, list):
+        languages = [
+            item.strip()
+            for item in row.value_json
+            if isinstance(item, str) and item.strip()
+        ]
+        if languages:
+            return list(dict.fromkeys(languages))
+
+    definition = get_definition(SUPPORTED_LANGUAGES_SETTING_KEY)
+    defaults = definition.default_value if definition is not None else None
+    if isinstance(defaults, list):
+        fallback = [
+            item for item in defaults if isinstance(item, str) and item.strip()
+        ]
+        if fallback:
+            return list(dict.fromkeys(fallback))
+
+    return [BASE_CONTENT_LANGUAGE]
+
+
+def _required_content_ui_keys(mission: Mission) -> tuple[str, ...]:
+    """content.ui-ключи миссии, которые нужно повторить в каждом переводе."""
+    content = mission.content if isinstance(mission.content, dict) else {}
+    ui = content.get("ui") if isinstance(content, dict) else None
+    if not isinstance(ui, dict):
+        return ()
+    return tuple(key for key in TRANSLATABLE_UI_KEY_ORDER if key in ui)
+
+
+def _translation_error(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=detail,
+    )
+
+
+def _translation_text(value: Any, *, field: str, maximum: int) -> str:
+    """Строковое поле перевода без внешних пробелов (пустая строка = нет перевода)."""
+    if not isinstance(value, str):
+        raise _translation_error(f"Поле перевода {field} должно быть строкой.")
+    text = value.strip()
+    if len(text) > maximum:
+        raise _translation_error(
+            f"Поле перевода {field} длиннее {maximum} символов."
+        )
+    return text
+
+
+def _translation_blocks(value: Any, *, field: str) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise _translation_error(
+            f"Поле перевода {field} должно быть непустым массивом строк."
+        )
+    if len(value) > TRANSLATION_UI_BLOCKS_MAX_ITEMS:
+        raise _translation_error(
+            f"Поле перевода {field} содержит больше "
+            f"{TRANSLATION_UI_BLOCKS_MAX_ITEMS} блоков."
+        )
+    blocks: list[str] = []
+    for index, block in enumerate(value):
+        if not isinstance(block, str) or not block.strip():
+            raise _translation_error(
+                f"Поле перевода {field}[{index}] должно быть непустой строкой."
+            )
+        if len(block.strip()) > TRANSLATION_UI_BLOCK_MAX_LENGTH:
+            raise _translation_error(
+                f"Поле перевода {field}[{index}] длиннее "
+                f"{TRANSLATION_UI_BLOCK_MAX_LENGTH} символов."
+            )
+        blocks.append(block.strip())
+    return blocks
+
+
+def _normalize_translations_payload(
+    translations: dict[str, dict[str, Any]],
+    supported_languages: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Проверить карту переводов и отбросить пустые значения.
+
+    Язык обязан быть в CMS-списке; поля — только title/description/contentUi;
+    contentUi — только переводимые ключи контракта content_contract
+    (+ blocks для code_repair). Пустые строки в карту не попадают.
+    """
+    normalized: dict[str, dict[str, Any]] = {}
+
+    for language, entry in translations.items():
+        if language not in supported_languages:
+            raise _translation_error(
+                f"Язык '{language}' не поддерживается "
+                f"({SUPPORTED_LANGUAGES_SETTING_KEY})."
+            )
+        if not isinstance(entry, dict):
+            raise _translation_error(
+                f"Перевод языка '{language}' должен быть объектом."
+            )
+
+        unknown_fields = sorted(set(entry) - TRANSLATION_ALLOWED_FIELDS)
+        if unknown_fields:
+            raise _translation_error(
+                f"Неизвестные поля перевода для '{language}': "
+                f"{', '.join(unknown_fields)}."
+            )
+
+        payload: dict[str, Any] = {}
+
+        if "title" in entry:
+            title = _translation_text(
+                entry["title"],
+                field=f"translations.{language}.title",
+                maximum=TRANSLATION_TITLE_MAX_LENGTH,
+            )
+            if title:
+                payload["title"] = title
+
+        if "description" in entry:
+            description = _translation_text(
+                entry["description"],
+                field=f"translations.{language}.description",
+                maximum=TRANSLATION_DESCRIPTION_MAX_LENGTH,
+            )
+            if description:
+                payload["description"] = description
+
+        if "contentUi" in entry:
+            ui = entry["contentUi"]
+            if not isinstance(ui, dict):
+                raise _translation_error(
+                    f"Перевод translations.{language}.contentUi "
+                    "должен быть объектом."
+                )
+            unknown_ui_keys = sorted(set(ui) - TRANSLATABLE_UI_KEYS)
+            if unknown_ui_keys:
+                raise _translation_error(
+                    f"Неизвестные ключи contentUi для '{language}': "
+                    f"{', '.join(unknown_ui_keys)}."
+                )
+            ui_payload: dict[str, Any] = {}
+            for key, value in ui.items():
+                field = f"translations.{language}.contentUi.{key}"
+                if key == "blocks":
+                    ui_payload["blocks"] = _translation_blocks(value, field=field)
+                    continue
+                text = _translation_text(
+                    value,
+                    field=field,
+                    maximum=TRANSLATION_UI_TEXT_MAX_LENGTH,
+                )
+                if text:
+                    ui_payload[key] = text
+            if ui_payload:
+                payload["contentUi"] = ui_payload
+
+        if payload:
+            normalized[language] = payload
+
+    return normalized
+
+
+def _compute_translation_status(
+    translations: dict[str, dict[str, Any]],
+    supported_languages: list[str],
+    required_content_ui_keys: tuple[str, ...],
+) -> str:
+    """none / partial / complete по непустым переводам не-базовых языков.
+
+    complete = каждый язык из CMS-списка, кроме базового ru, имеет title,
+    description и все required_content_ui_keys (если content.ui миссии непустой).
+    ru — оригинал контента (mission.title/description), перевод на него не нужен.
+    """
+    target_languages = [
+        language
+        for language in supported_languages
+        if language != BASE_CONTENT_LANGUAGE
+    ]
+    if not target_languages:
+        return TRANSLATION_STATUS_COMPLETE
+
+    def _is_complete(language: str) -> bool:
+        entry = translations.get(language)
+        if not isinstance(entry, dict):
+            return False
+        if not entry.get("title") or not entry.get("description"):
+            return False
+        if not required_content_ui_keys:
+            return True
+        ui = entry.get("contentUi")
+        if not isinstance(ui, dict):
+            return False
+        return all(key in ui for key in required_content_ui_keys)
+
+    if all(_is_complete(language) for language in target_languages):
+        return TRANSLATION_STATUS_COMPLETE
+    if any(language in translations for language in target_languages):
+        return TRANSLATION_STATUS_PARTIAL
+    return TRANSLATION_STATUS_NONE
+
+
+def _ensure_translations_complete(session: Session, mission: Mission) -> None:
+    """Publish gate: миссия публикуется только с полным переводом контента."""
+    if (
+        mission.translation_status or TRANSLATION_STATUS_NONE
+    ) == TRANSLATION_STATUS_COMPLETE:
+        return
+
+    supported_languages = _read_supported_languages(session)
+    target_languages = [
+        language
+        for language in supported_languages
+        if language != BASE_CONTENT_LANGUAGE
+    ]
+    suffix = f" ({', '.join(target_languages)})" if target_languages else ""
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=(
+            f"Перевод не завершён. Заполните переводы для всех языков{suffix} "
+            "перед публикацией."
+        ),
+    )
+
+
 def _validate_for_publish(
     session: Session,
     mission: Mission,
+    *,
+    require_complete_translations: bool = False,
 ) -> None:
-    """Reject publishing a mission that the current game engine cannot validate."""
+    """Reject publishing a mission that the current game engine cannot validate.
+
+    require_complete_translations=True используется точкой публикации
+    (POST /{mission_id}/publish): без полного перевода миссия не публикуется.
+    По умолчанию False, чтобы точечные тесты контент-контракта
+    (_validate_for_publish в test_admin_content_validation и
+    test_minigame_profile_cipher_publish) оставались про контент, а не про
+    переводы.
+    """
+    if require_complete_translations:
+        _ensure_translations_complete(session, mission)
+
     # Sprint 8.17.16: для cipher-миссий с published-профилем старые поля
     # content.ui (drumCount/alphabet/combination) не обязательны — настройки
     # мини-игры берутся из profile.settings (см. _resolve_minigame_settings).
@@ -983,7 +1280,11 @@ def publish_admin_mission(
         if mission.status == "published":
             return {"mission": _serialize_mission(session, mission)}
 
-        _validate_for_publish(session, mission)
+        _validate_for_publish(
+            session,
+            mission,
+            require_complete_translations=True,
+        )
         mission.status = "published"
         session.flush()
 
@@ -1031,3 +1332,97 @@ def unpublish_admin_mission(
         )
 
         return {"mission": _serialize_mission(session, mission)}
+
+
+@router.get("/{mission_id}/translations")
+def get_mission_translations(
+    mission_id: str,
+    _admin: AdminUser = Depends(require_permission(MISSION_READ_PERMISSION)),
+):
+    """Карта переводов контента миссии и вычисленный translation_status.
+
+    Sprint Trans-2b-2. Языки берутся из CMS (content.supported_languages),
+    поэтому новый язык появляется в контракте без деплоя.
+    """
+    with SessionLocal.begin() as session:
+        mission = session.get(Mission, mission_id)
+        if mission is None:
+            raise HTTPException(status_code=404, detail="Миссия не найдена.")
+
+        supported_languages = _read_supported_languages(session)
+
+        return {
+            "missionId": mission.id,
+            "translations": mission.translations or {},
+            "translationStatus": (
+                mission.translation_status or TRANSLATION_STATUS_NONE
+            ),
+            "supportedLanguages": supported_languages,
+            # Подсказка админке: какие content.ui-ключи миссии нужно повторить,
+            # чтобы перевод считался complete.
+            "requiredContentUiKeys": list(_required_content_ui_keys(mission)),
+        }
+
+
+@router.put("/{mission_id}/translations")
+def put_mission_translations(
+    mission_id: str,
+    payload: MissionTranslationsPayload,
+    request: Request,
+    admin: AdminUser = Depends(require_permission(MISSION_MANAGE_PERMISSION)),
+):
+    """Полная замена карты переводов миссии (Sprint Trans-2b-2).
+
+    Валидирует языки по CMS (content.supported_languages, ru обязателен как
+    оригинал), поля title/description/contentUi по контракту content_contract,
+    пересчитывает translation_status на сервере и пишет immutable audit.
+    Текст перевода в audit не попадает — только языки, статус и required-ключи.
+    """
+    with SessionLocal.begin() as session:
+        mission = session.get(Mission, mission_id)
+        if mission is None:
+            raise HTTPException(status_code=404, detail="Миссия не найдена.")
+
+        supported_languages = _read_supported_languages(session)
+        if BASE_CONTENT_LANGUAGE not in supported_languages:
+            raise _translation_error(
+                "Базовый язык ru обязателен в "
+                f"{SUPPORTED_LANGUAGES_SETTING_KEY}: он не переводится, "
+                "а служит оригиналом контента миссии."
+            )
+
+        translations = _normalize_translations_payload(
+            payload.translations or {},
+            supported_languages,
+        )
+        required_content_ui_keys = _required_content_ui_keys(mission)
+        translation_status = _compute_translation_status(
+            translations,
+            supported_languages,
+            required_content_ui_keys,
+        )
+
+        mission.translations = translations
+        mission.translation_status = translation_status
+        session.flush()
+
+        _audit(
+            session,
+            admin=admin,
+            action="mission.translations_updated",
+            mission_id=mission.id,
+            metadata={
+                "languages": sorted(translations),
+                "translationStatus": translation_status,
+                "requiredContentUiKeys": list(required_content_ui_keys),
+            },
+            request=request,
+        )
+
+        return {
+            "missionId": mission.id,
+            "translations": mission.translations,
+            "translationStatus": mission.translation_status,
+            "supportedLanguages": supported_languages,
+            "requiredContentUiKeys": list(required_content_ui_keys),
+        }
