@@ -91,7 +91,7 @@ i18n
     fallbackLng: 'ru',
     supportedLngs: ['ru', 'en', 'zh'],
     detection: {
-      order: ['localStorage', 'navigator', 'htmlTag'],
+      order: ['localStorage', 'navigator'],
       caches: ['localStorage'],
     },
     defaultNS: 'common',

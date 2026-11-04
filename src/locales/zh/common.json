@@ -17,5 +17,16 @@
     "errorTitle": "地理定位错误",
     "locatingTitle": "正在确定位置…",
     "unavailableTitle": "地理定位不可用"
+  },
+  "tabs": {
+    "terminal": "轮廓",
+    "profile": "个人资料",
+    "shop": "商店",
+    "archive": "档案",
+    "scanner": "扫描器",
+    "map": "地图",
+    "camera": "相机",
+    "inventory": "物品",
+    "transfer": "转账"
   }
 }

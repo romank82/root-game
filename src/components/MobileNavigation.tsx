@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { Screen } from '../types/game'
 
 interface MobileNavigationProps {
@@ -6,6 +7,8 @@ interface MobileNavigationProps {
 }
 
 export function MobileNavigation({ screen, onScreenChange }: MobileNavigationProps) {
+  const { t } = useTranslation(['common'])
+
   return (
     <nav className="mobile-navigation" aria-label="Игровая навигация">
       <button
@@ -13,7 +16,7 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         onClick={() => onScreenChange('terminal')}
       >
         <span>◉</span>
-        Контур
+        {t('common:tabs.terminal')}
       </button>
 
       <button
@@ -21,7 +24,7 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         onClick={() => onScreenChange('archive')}
       >
         <span>▤</span>
-        Архив
+        {t('common:tabs.archive')}
       </button>
 
       <button
@@ -29,7 +32,7 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         onClick={() => onScreenChange('scanner')}
       >
         <span>⌗</span>
-        Сканер
+        {t('common:tabs.scanner')}
       </button>
 
       <button
@@ -37,7 +40,7 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         onClick={() => onScreenChange('map')}
       >
         <span>◎</span>
-        Карта
+        {t('common:tabs.map')}
       </button>
 
       {/* TEMP: dev-only camera test button — удалить в Sprint 8.6.g. */}
@@ -47,7 +50,7 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
           onClick={() => onScreenChange('camera-test')}
         >
           <span>◐</span>
-          Камера
+          {t('common:tabs.camera')}
         </button>
       )}
 
@@ -56,7 +59,7 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         onClick={() => onScreenChange('inventory')}
       >
         <span>◈</span>
-        Вещи
+        {t('common:tabs.inventory')}
       </button>
 
       <button
@@ -64,7 +67,7 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         onClick={() => onScreenChange('shop')}
       >
         <span>⊕</span>
-        Магазин
+        {t('common:tabs.shop')}
       </button>
 
       <button
@@ -72,7 +75,7 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         onClick={() => onScreenChange('transfer')}
       >
         <span>⇄</span>
-        Перевод
+        {t('common:tabs.transfer')}
       </button>
 
       <button
@@ -80,7 +83,7 @@ export function MobileNavigation({ screen, onScreenChange }: MobileNavigationPro
         onClick={() => onScreenChange('profile')}
       >
         <span>◔</span>
-        Профиль
+        {t('common:tabs.profile')}
       </button>
     </nav>
   )

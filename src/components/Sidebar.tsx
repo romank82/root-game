@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { ApiStatus, Screen } from '../types/game'
 
 interface SidebarProps {
@@ -7,23 +8,31 @@ interface SidebarProps {
 }
 
 export function Sidebar({ echo, apiStatus, onScreenChange }: SidebarProps) {
+  const { t } = useTranslation(['common'])
+
   return (
     <aside className="sidebar">
       <p>НАВИГАЦИЯ</p>
 
       <button className="active" onClick={() => onScreenChange('terminal')}>
-        ◉ Контур
+        ◉ {t('common:tabs.terminal')}
       </button>
 
-      <button onClick={() => onScreenChange('archive')}>▤ Архив</button>
+      <button onClick={() => onScreenChange('archive')}>
+        ▤ {t('common:tabs.archive')}
+      </button>
 
       <button onClick={() => onScreenChange('inventory')}>
-        ◈ Инвентарь
+        ◈ {t('common:tabs.inventory')}
       </button>
 
-      <button onClick={() => onScreenChange('scanner')}>◌ Сканер</button>
+      <button onClick={() => onScreenChange('scanner')}>
+        ◌ {t('common:tabs.scanner')}
+      </button>
 
-      <button onClick={() => onScreenChange('shop')}>⊕ Магазин</button>
+      <button onClick={() => onScreenChange('shop')}>
+        ⊕ {t('common:tabs.shop')}
+      </button>
 
       <div className="echo-card">
         <span>РЕСУРС</span>

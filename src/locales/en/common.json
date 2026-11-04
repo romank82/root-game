@@ -17,5 +17,16 @@
     "errorTitle": "GEOLOCATION ERROR",
     "locatingTitle": "DETERMINING POSITION…",
     "unavailableTitle": "GEOLOCATION UNAVAILABLE"
+  },
+  "tabs": {
+    "terminal": "Contour",
+    "profile": "Profile",
+    "shop": "Shop",
+    "archive": "Archive",
+    "scanner": "Scanner",
+    "map": "Map",
+    "camera": "Camera",
+    "inventory": "Items",
+    "transfer": "Transfer"
   }
 }

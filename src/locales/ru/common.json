@@ -17,5 +17,16 @@
     "errorTitle": "ОШИБКА ГЕОЛОКАЦИИ",
     "locatingTitle": "ОПРЕДЕЛЯЕМ ПОЗИЦИЮ…",
     "unavailableTitle": "ГЕОЛОКАЦИЯ НЕДОСТУПНА"
+  },
+  "tabs": {
+    "terminal": "Контур",
+    "profile": "Профиль",
+    "shop": "Магазин",
+    "archive": "Архив",
+    "scanner": "Сканер",
+    "map": "Карта",
+    "camera": "Камера",
+    "inventory": "Вещи",
+    "transfer": "Перевод"
   }
 }
