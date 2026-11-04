@@ -102,9 +102,13 @@ def list_admin_monitoring_errors(
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
     correlation_id: str | None = None,
+    error_type: str | None = None,
+    endpoint: str | None = None,
+    status_code: int | None = None,
     _admin: AdminUser = Depends(require_permission(PLAYERS_READ_PERMISSION)),
 ) -> dict[str, Any]:
-    """Список AppError (13.5-a): severity + period + correlation_id + пагинация.
+    """Список AppError (13.5-a): severity + period + correlation_id + error_type
+    + endpoint + status_code + пагинация.
 
     Сортировка created_at desc, id desc (детерминированный порядок).
     """
@@ -123,6 +127,12 @@ def list_admin_monitoring_errors(
         filters.append(AppError.severity == severity)
     if correlation_id:
         filters.append(AppError.correlation_id == correlation_id)
+    if error_type:
+        filters.append(AppError.error_type == error_type)
+    if endpoint:
+        filters.append(AppError.endpoint == endpoint)
+    if status_code is not None:
+        filters.append(AppError.status_code == status_code)
     period_start = _period_start(period)
     if period_start is not None:
         filters.append(AppError.created_at >= period_start)

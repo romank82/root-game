@@ -416,3 +416,29 @@ class AdminMonitoringTests(unittest.TestCase):
         day_result = self._call_error_groups(period="day")
         self.assertEqual(day_result["total"], 2)
         self.assertEqual(len(day_result["groups"]), 2)
+
+    def test_errors_filter_by_group_fields(self) -> None:
+        """M-4: /errors фильтрует по error_type/endpoint/status_code.
+
+        3 ошибки: A (/x, 500) x2, B (/y, 500) x1.
+        Фильтры (как клик по группе в M-6) сужают выборку согласованно.
+        """
+        with self.SessionLocal.begin() as session:
+            self._add_error(
+                session, error_type="A", endpoint="/x", status_code=500
+            )
+            self._add_error(
+                session, error_type="A", endpoint="/x", status_code=500
+            )
+            self._add_error(
+                session, error_type="B", endpoint="/y", status_code=500
+            )
+
+        self.assertEqual(self._call_errors(error_type="A")["total"], 2)
+        self.assertEqual(self._call_errors(endpoint="/x")["total"], 2)
+        self.assertEqual(self._call_errors(status_code=500)["total"], 3)
+        self.assertEqual(
+            self._call_errors(error_type="A", endpoint="/x")["total"], 2
+        )
+        self.assertEqual(self._call_errors(error_type="B")["total"], 1)
+        self.assertEqual(self._call_errors(error_type="C")["total"], 0)
