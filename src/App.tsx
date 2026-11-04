@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import './App.css'
 import { useAuth } from './hooks/useAuth'
 import { useGameState } from './hooks/useGameState'
@@ -21,6 +22,7 @@ import { CipherScreen } from './components/screens/CipherScreen'
 import { TeamSessionScreen } from './components/screens/TeamSessionScreen'
 
 function App() {
+  const { t } = useTranslation(['common'])
   const {
     screen,
     setScreen,
@@ -62,9 +64,7 @@ function App() {
   }
 
   function stopSession() {
-    const confirmed = window.confirm(
-      'Завершить игровую сессию? Прогресс сохранится, вы сможете вернуться.',
-    )
+    const confirmed = window.confirm(t('common:confirmEndSession'))
 
     if (!confirmed) return
 
@@ -216,7 +216,7 @@ function App() {
 
       {accepted && screen !== 'briefing' && (
         <button className="exit-button" onClick={stopSession}>
-          ОСТАНОВИТЬ СЕССИЮ
+          {t('common:stopSession')}
         </button>
       )}
     </main>
