@@ -16,7 +16,8 @@
     "codeLabel": "ИДЕНТИФИКАТОР",
     "searchRadius": "РАДИУС ПОИСКА",
     "safeScanPoint": "БЕЗОПАСНАЯ ТОЧКА СКАНИРОВАНИЯ",
-    "rewardPreview": "ПРЕДПРОСМОТР НАГРАДЫ:"
+    "rewardPreview": "ПРЕДПРОСМОТР НАГРАДЫ:",
+    "unitMeters": "{{value}} м"
   },
   "navigation": {
     "title": "НАВИГАЦИЯ И ПРОВЕРКА ПОЗИЦИИ",
@@ -40,7 +41,8 @@
     "clear": "ОЧИСТИТЬ",
     "submit": "ПРОВЕРИТЬ КОД →",
     "serverUnavailable": "СЕРВЕР НЕДОСТУПЕН. ПРОВЕРЬТЕ ПОДКЛЮЧЕНИЕ.",
-    "structureBroken": "СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ И ВОССТАНОВИТЕ ЕЁ ЗАНОВО."
+    "structureBroken": "СТРУКТУРА ПАКЕТА НАРУШЕНА. ОЧИСТИТЕ СТРОКУ И ВОССТАНОВИТЕ ЕЁ ЗАНОВО.",
+    "placeholderFallback": "Выберите блоки ниже"
   },
   "ar": {
     "start": "ЗАПУСТИТЬ AR-ПОИСК",
@@ -66,5 +68,19 @@
     "cmsUnavailableEyebrow": "СКАНЕР / CMS-СЕГМЕНТ НЕДОСТУПЕН",
     "noScanPointTitle": "НЕТ ДОСТУПНОЙ ТОЧКИ СКАНИРОВАНИЯ",
     "noScanPointBody": "Опубликованный Segment не получен из игрового bootstrap либо содержит некорректный public content."
+  },
+  "echo": {
+    "title": "ЭХОЛОКАЦИЯ · КУРС ВВЕРХ",
+    "ringLabel30": "30м",
+    "ringLabel50": "50м",
+    "ringLabel70": "70м",
+    "distance": "РАССТОЯНИЕ: {{meters}} м",
+    "targetFar": "Цель далеко — идите по стрелке",
+    "accuracy": "ТОЧНОСТЬ: ±{{meters}} м",
+    "gpsInaccurate": "GPS пока неточный, подождите 10-20 сек или выйдите на открытое место.",
+    "direction": "НАПРАВЛЕНИЕ:",
+    "compassLoading": "компас...",
+    "straightAhead": "ПРЯМО",
+    "compassUnavailable": "Компас недоступен."
   }
 }

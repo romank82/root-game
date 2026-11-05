@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { DEFAULT_MISSION_LAYER_COLOR } from '../constants/missionLayerColors'
 
 interface EchoRadarProps {
@@ -83,6 +84,7 @@ export function EchoRadar({
   hint,
   color = DEFAULT_MISSION_LAYER_COLOR,
 }: EchoRadarProps) {
+  const { t } = useTranslation(['scanner'])
   const [heading, setHeading] = useState<number | null>(null)
   const [compassError, setCompassError] = useState<string | null>(null)
 
@@ -163,7 +165,7 @@ export function EchoRadar({
     }
 
     if (typeof DeviceOrientationEvent === 'undefined') {
-      setCompassError('Компас недоступен.')
+      setCompassError(t('scanner:echo.compassUnavailable'))
       return
     }
 
@@ -210,7 +212,7 @@ export function EchoRadar({
 
   return (
     <section className="echo-radar">
-      <p className="echo-radar-title">ЭХОЛОКАЦИЯ · КУРС ВВЕРХ</p>
+      <p className="echo-radar-title">{t('scanner:echo.title')}</p>
 
       <svg
         className="echo-radar-svg"
@@ -264,7 +266,7 @@ export function EchoRadar({
           textAnchor="middle"
           opacity={0.6}
         >
-          30м
+          {t('scanner:echo.ringLabel30')}
         </text>
         <text
           x={RADAR_CENTER_PX}
@@ -274,7 +276,7 @@ export function EchoRadar({
           textAnchor="middle"
           opacity={0.6}
         >
-          50м
+          {t('scanner:echo.ringLabel50')}
         </text>
         <text
           x={RADAR_CENTER_PX}
@@ -284,7 +286,7 @@ export function EchoRadar({
           textAnchor="middle"
           opacity={0.6}
         >
-          70м
+          {t('scanner:echo.ringLabel70')}
         </text>
 
         {/* Точка игрока в центре */}
@@ -328,19 +330,19 @@ export function EchoRadar({
 
       <div className="echo-radar-info">
         <p className="echo-radar-line">
-          РАССТОЯНИЕ: {Math.round(distanceM)} м
+          {t('scanner:echo.distance', { meters: Math.round(distanceM) })}
         </p>
         {distanceM > MAX_DISTANCE_M && (
           <p className="echo-radar-line echo-radar-far">
-            Цель далеко — идите по стрелке
+            {t('scanner:echo.targetFar')}
           </p>
         )}
         <p className="echo-radar-line">
-          ТОЧНОСТЬ: ±{Math.round(playerAccuracy)} м
+          {t('scanner:echo.accuracy', { meters: Math.round(playerAccuracy) })}
         </p>
         {playerAccuracy > 100 && (
           <p className="echo-radar-line echo-radar-warning">
-            GPS пока неточный, подождите 10-20 сек или выйдите на открытое место.
+            {t('scanner:echo.gpsInaccurate')}
           </p>
         )}
         {heading !== null && (
@@ -349,11 +351,11 @@ export function EchoRadar({
           </p>
         )}
         <p className="echo-radar-line">
-          НАПРАВЛЕНИЕ:{' '}
+          {t('scanner:echo.direction')}{' '}
           {heading === null
-            ? 'компас...'
+            ? t('scanner:echo.compassLoading')
             : Math.abs(deltaDeg) < 15
-              ? 'ПРЯМО'
+              ? t('scanner:echo.straightAhead')
               : deltaDeg > 0
                 ? `↻ ${Math.round(deltaDeg)}°`
                 : `↺ ${Math.round(Math.abs(deltaDeg))}°`}

@@ -4,5 +4,8 @@
   },
   "controls": {
     "centerOnPlayer": "⌖ Center on player"
+  },
+  "overlay": {
+    "accuracyMeters": "± {{meters}} m"
   }
 }

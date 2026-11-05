@@ -17,7 +17,11 @@
     "confirmed": "您已标记为就绪。等待其他成员。",
     "waitingStart": "所有人都准备好了。一旦所有成员在任务区域内有新的存在标记——游戏将自动开始。"
   },
+  "session": {
+    "membersLabel": "成员："
+  },
   "waves": {
+    "title": "团队迷你游戏",
     "attempt": "尝试 {{current}} / {{max}}",
     "playedWaiting": "您已游玩。等待其他玩家：{{played}}/{{total}}。",
     "playedAllDone": "您已游玩。等待其他成员。",

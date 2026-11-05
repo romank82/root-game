@@ -4,5 +4,8 @@
   },
   "controls": {
     "centerOnPlayer": "⌖ 定位到玩家"
+  },
+  "overlay": {
+    "accuracyMeters": "± {{meters}} 米"
   }
 }

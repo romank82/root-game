@@ -17,7 +17,11 @@
     "confirmed": "You are marked as ready. Waiting for other members.",
     "waitingStart": "Everyone is ready. As soon as all members have a fresh presence mark in the mission zone — the game will start automatically."
   },
+  "session": {
+    "membersLabel": "Members:"
+  },
   "waves": {
+    "title": "TEAM MINI-GAME",
     "attempt": "ATTEMPT {{current}} / {{max}}",
     "playedWaiting": "You have played. Waiting for other players: {{played}}/{{total}}.",
     "playedAllDone": "You have played. Waiting for other members.",

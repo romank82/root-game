@@ -4,5 +4,8 @@
   },
   "controls": {
     "centerOnPlayer": "⌖ На игрока"
+  },
+  "overlay": {
+    "accuracyMeters": "± {{meters}} м"
   }
 }

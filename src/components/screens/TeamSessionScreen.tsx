@@ -705,7 +705,7 @@ export function TeamSessionScreen({
             className="primary-button"
             onClick={() => onScreenChange('terminal')}
           >
-            ВЕРНУТЬСЯ В КОНТУР
+            {t('common:backToContour')}
           </button>
         </div>
       )}
@@ -746,7 +746,7 @@ export function TeamSessionScreen({
             className="primary-button"
             onClick={() => onScreenChange('terminal')}
           >
-            ВЕРНУТЬСЯ В КОНТУР
+            {t('common:backToContour')}
           </button>
         </div>
       )}
@@ -762,7 +762,7 @@ export function TeamSessionScreen({
             </b>
           </p>
           <p>
-            Участников: <b>{session.memberCount}</b>
+            {t('team:session.membersLabel')} <b>{session.memberCount}</b>
           </p>
 
           {session.status === 'collecting' && (
@@ -842,7 +842,7 @@ export function TeamSessionScreen({
                   onReset={handleResetWave}
                   // CipherGame сам рендерит ошибку (repair-error) — не дублируем.
                   error={waveError}
-                  title="КОМАНДНАЯ МИНИ-ИГРА"
+                  title={t('team:waves.title')}
                 />
               ) : (
                 <p>{t('team:waves.gameEnded')}</p>
@@ -917,7 +917,7 @@ export function TeamSessionScreen({
       )}
 
       <button className="back-button" onClick={() => onScreenChange('terminal')}>
-        ← ВЕРНУТЬСЯ В КОНТУР
+        {t('common:backToContour')}
       </button>
     </section>
   )

@@ -16,7 +16,8 @@
     "codeLabel": "IDENTIFIER",
     "searchRadius": "SEARCH RADIUS",
     "safeScanPoint": "SAFE SCAN POINT",
-    "rewardPreview": "REWARD PREVIEW:"
+    "rewardPreview": "REWARD PREVIEW:",
+    "unitMeters": "{{value}} m"
   },
   "navigation": {
     "title": "NAVIGATION AND POSITION CHECK",
@@ -40,7 +41,8 @@
     "clear": "CLEAR",
     "submit": "CHECK CODE →",
     "serverUnavailable": "SERVER UNAVAILABLE. CHECK CONNECTION.",
-    "structureBroken": "PACKAGE STRUCTURE BROKEN. CLEAR THE STRING AND RESTORE IT."
+    "structureBroken": "PACKAGE STRUCTURE BROKEN. CLEAR THE STRING AND RESTORE IT.",
+    "placeholderFallback": "Select blocks below"
   },
   "ar": {
     "start": "START AR SEARCH",
@@ -66,5 +68,19 @@
     "cmsUnavailableEyebrow": "SCANNER / CMS SEGMENT UNAVAILABLE",
     "noScanPointTitle": "NO AVAILABLE SCAN POINT",
     "noScanPointBody": "Published Segment was not received from the game bootstrap or contains invalid public content."
+  },
+  "echo": {
+    "title": "ECHOLOCATION · COURSE UP",
+    "ringLabel30": "30m",
+    "ringLabel50": "50m",
+    "ringLabel70": "70m",
+    "distance": "DISTANCE: {{meters}} m",
+    "targetFar": "Target is far — follow the arrow",
+    "accuracy": "ACCURACY: ±{{meters}} m",
+    "gpsInaccurate": "GPS is still inaccurate, wait 10-20 sec or move to an open area.",
+    "direction": "DIRECTION:",
+    "compassLoading": "compass...",
+    "straightAhead": "STRAIGHT",
+    "compassUnavailable": "Compass unavailable."
   }
 }

@@ -16,7 +16,8 @@
     "codeLabel": "标识符",
     "searchRadius": "搜索半径",
     "safeScanPoint": "安全扫描点",
-    "rewardPreview": "奖励预览："
+    "rewardPreview": "奖励预览：",
+    "unitMeters": "{{value}} 米"
   },
   "navigation": {
     "title": "导航和位置检查",
@@ -40,7 +41,8 @@
     "clear": "清除",
     "submit": "检查代码 →",
     "serverUnavailable": "服务器不可用。请检查连接。",
-    "structureBroken": "包结构已损坏。清除字符串并恢复。"
+    "structureBroken": "包结构已损坏。清除字符串并恢复。",
+    "placeholderFallback": "选择下方的代码块"
   },
   "ar": {
     "start": "启动 AR 搜索",
@@ -66,5 +68,19 @@
     "cmsUnavailableEyebrow": "扫描器 / CMS 段不可用",
     "noScanPointTitle": "没有可用的扫描点",
     "noScanPointBody": "已发布的 Segment 尚未从游戏引导中接收，或者包含无效的公共内容。"
+  },
+  "echo": {
+    "title": "回声定位 · 航向向上",
+    "ringLabel30": "30米",
+    "ringLabel50": "50米",
+    "ringLabel70": "70米",
+    "distance": "距离：{{meters}} 米",
+    "targetFar": "目标很远——请沿箭头前进",
+    "accuracy": "精度：±{{meters}} 米",
+    "gpsInaccurate": "GPS 仍不准确，请等待 10-20 秒或前往开阔地带。",
+    "direction": "方向：",
+    "compassLoading": "罗盘...",
+    "straightAhead": "直行",
+    "compassUnavailable": "罗盘不可用。"
   }
 }

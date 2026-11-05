@@ -443,11 +443,11 @@ export function ScannerScreen({
           <dl className="segment-stats">
             <div>
               <dt>{t('scanner:params.searchRadius')}</dt>
-              <dd>{content.searchRadiusMeters} м</dd>
+              <dd>{t('scanner:params.unitMeters', { value: content.searchRadiusMeters })}</dd>
             </div>
             <div>
               <dt>{t('scanner:params.safeScanPoint')}</dt>
-              <dd>{content.safeScanRadiusMeters} м</dd>
+              <dd>{t('scanner:params.unitMeters', { value: content.safeScanRadiusMeters })}</dd>
             </div>
           </dl>
           {repair.rewardPreviewText && (
@@ -574,7 +574,7 @@ export function ScannerScreen({
                 ))
               ) : (
                 <span className="code-placeholder">
-                  {repair.placeholder ?? 'Выберите блоки ниже'}
+                  {repair.placeholder ?? t('scanner:repair.placeholderFallback')}
                 </span>
               )}
             </code>

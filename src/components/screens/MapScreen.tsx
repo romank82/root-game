@@ -134,7 +134,7 @@ export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
         </button>
         <div className="map-overlay-info">
           {geoPosition.lat.toFixed(5)}, {geoPosition.lng.toFixed(5)}
-          {' '}± {Math.round(geoPosition.accuracy)} м
+          {' '}{t('map:overlay.accuracyMeters', { meters: Math.round(geoPosition.accuracy) })}
         </div>
       </div>
     </section>
