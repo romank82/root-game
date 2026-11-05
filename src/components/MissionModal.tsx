@@ -46,76 +46,31 @@ export function MissionModal({
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 110,
-        background: 'rgba(2, 8, 6, 0.66)',
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'center',
-        overflowY: 'auto',
-        padding: '40px 16px',
-      }}
+      className="mission-modal-overlay"
       onClick={() => {
         if (!isAccepting) onClose()
       }}
     >
       <div
-        style={{
-          background: '#0d1c18',
-          border: '1px solid rgba(190, 255, 226, 0.24)',
-          borderRadius: 12,
-          padding: 20,
-          width: 'min(560px, 100%)',
-          boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
-        }}
+        className="mission-modal"
         onClick={(event) => event.stopPropagation()}
       >
-        <p
-          style={{
-            margin: '0 0 18px',
-            color: '#65e9ae',
-            fontSize: 10,
-            letterSpacing: '0.12em',
-          }}
-        >
-          МИССИЯ
-        </p>
+        <p className="mission-modal-eyebrow">МИССИЯ</p>
 
-        <h3
-          style={{
-            margin: '0 0 12px',
-            color: '#effff6',
-            fontSize: 21,
-            letterSpacing: '-0.025em',
-          }}
-        >
-          {mission.title}
-        </h3>
+        <h3 className="mission-modal-title">{mission.title}</h3>
 
         {mission.description && (
-          <p
-            style={{
-              margin: '0 0 16px',
-              color: '#d2e6dc',
-              fontSize: 15,
-              lineHeight: 1.7,
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {mission.description}
-          </p>
+          <p className="mission-modal-desc">{mission.description}</p>
         )}
 
         {hasEntryPrice && (
-          <p style={{ margin: '0 0 8px', color: '#b7ffdb' }}>
+          <p className="mission-modal-line">
             Вход: {mission.entryRoot} ROOT
           </p>
         )}
 
         {requiredItems.length > 0 && (
-          <p style={{ margin: '0 0 8px', color: '#b7ffdb' }}>
+          <p className="mission-modal-line">
             Требуемые ключи:{' '}
             {requiredItems
               .map(
@@ -127,43 +82,20 @@ export function MissionModal({
         )}
 
         {rewardLabels.length > 0 && (
-          <p style={{ margin: '0 0 16px', color: '#b7ffdb' }}>
+          <p className="mission-modal-line mission-modal-rewards">
             Возможные награды: {rewardLabels.join(', ')}
           </p>
         )}
 
         {error && (
-          <ErrorWithCode
-            message={error}
-            style={{
-              margin: '0 0 12px',
-              color: '#ffd0d0',
-              fontSize: 13,
-            }}
-          />
+          <ErrorWithCode message={error} className="mission-modal-error" />
         )}
 
-        <div
-          style={{
-            display: 'flex',
-            gap: 10,
-            flexWrap: 'wrap',
-            marginTop: 20,
-          }}
-        >
+        <div className="mission-modal-actions">
           <button
             onClick={onAccept}
             disabled={isAccepting}
-            style={{
-              background: '#00ff88',
-              color: '#000',
-              border: 'none',
-              padding: '10px 18px',
-              borderRadius: 6,
-              fontWeight: 'bold',
-              fontSize: 13,
-              cursor: isAccepting ? 'wait' : 'pointer',
-            }}
+            className="mission-modal-btn-accept"
           >
             {isAccepting
               ? 'ПОЛУЧЕНИЕ GPS…'
@@ -173,15 +105,7 @@ export function MissionModal({
           <button
             onClick={onClose}
             disabled={isAccepting}
-            style={{
-              background: 'transparent',
-              color: '#b7ffdb',
-              border: '1px solid rgba(174, 255, 219, 0.35)',
-              padding: '10px 18px',
-              borderRadius: 6,
-              fontSize: 13,
-              cursor: isAccepting ? 'wait' : 'pointer',
-            }}
+            className="mission-modal-btn-cancel"
           >
             ОТМЕНА
           </button>
