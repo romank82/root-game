@@ -74,6 +74,11 @@ function App() {
   if (authStatus !== 'authenticated') {
     return (
       <main className="app-shell">
+        <div className="ambient" aria-hidden="true">
+          <i className="blob a" />
+          <i className="blob b" />
+          <i className="blob c" />
+        </div>
         <div className="noise" />
         <BriefingScreen
           authStatus={authStatus}
@@ -88,6 +93,11 @@ function App() {
 
   return (
     <main className="app-shell">
+      <div className="ambient" aria-hidden="true">
+        <i className="blob a" />
+        <i className="blob b" />
+        <i className="blob c" />
+      </div>
       <div className="noise" />
 
       <Topbar
