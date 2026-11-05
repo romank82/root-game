@@ -458,6 +458,54 @@ def _inject_ar_object_type(
     return injected
 
 
+def _resolve_mission_translation(mission: Mission, lang: str) -> dict[str, Any]:
+    """Вернуть {title, description, contentUi} для lang с fallback на ru."""
+    translations = (
+        mission.translations if isinstance(mission.translations, dict) else {}
+    )
+    entry = translations.get(lang) if isinstance(translations, dict) else None
+
+    if lang and lang != "ru" and isinstance(entry, dict):
+        return {
+            "title": entry.get("title") or mission.title,
+            "description": entry.get("description") or mission.description,
+            "contentUi": entry.get("contentUi"),
+        }
+
+    content = mission.content if isinstance(mission.content, dict) else {}
+    return {
+        "title": mission.title,
+        "description": mission.description,
+        "contentUi": content.get("ui") if isinstance(content, dict) else None,
+    }
+
+
+def _localize_mission_content(mission: Mission, lang: str) -> dict[str, Any]:
+    """content миссии с переведённым content.ui (без мутации mission.content).
+
+    Переведённые contentUi-ключи перекрывают оригинальные; технические ключи
+    (alphabet/combination/drumCount/timeLimitSeconds) и arScene остаются из
+    оригинала, т.к. переводы их не содержат. Если перевода нет — возвращает
+    исходный content (по значению, но без изменения исходного dict).
+    """
+    content = mission.content
+    base = dict(content) if isinstance(content, dict) else {}
+
+    translated_ui = _resolve_mission_translation(mission, lang).get("contentUi")
+    if not isinstance(translated_ui, dict) or not translated_ui:
+        return base
+
+    original_ui = base.get("ui") if isinstance(base, dict) else None
+    merged_ui = dict(original_ui) if isinstance(original_ui, dict) else {}
+    # contentUi-ключи в переводе могут быть полными значениями (строки/массив
+    # blocks) — поверх оригинального ui, чтобы технические поля сохранились.
+    merged_ui.update(translated_ui)
+
+    localized = dict(base)
+    localized["ui"] = merged_ui
+    return localized
+
+
 def _collect_ar_object_types(
     session: Session,
     missions: list[Mission],
@@ -534,10 +582,19 @@ def _team_max_members_from_config(mission: Mission) -> int | None:
     return max_members
 
 
-def _build_bootstrap(session: Session, player_id: str) -> dict:
+def _build_bootstrap(
+    session: Session,
+    player_id: str,
+    lang: str = "ru",
+) -> dict:
     """
     Возвращает только публичные данные для клиента.
     validation_config намеренно никогда не включается в ответ.
+
+    lang (Trans-4a): язык публичного контента миссий. title/description/
+    content.ui.* резолвятся из Mission.translations с fallback на ru
+    (см. _resolve_mission_translation); технические поля content.ui
+    (alphabet/combination/drumCount/timeLimitSeconds) остаются оригинальными.
     """
     player = _ensure_player(session, player_id)
     progress = _synchronize_player_missions(session, player_id)
@@ -769,10 +826,14 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
                 "slug": mission.slug,
                 "missionType": mission.mission_type,
                 "missionLayer": mission.mission_layer,
-                "title": mission.title,
-                "description": mission.description,
+                "title": (
+                    _resolve_mission_translation(mission, lang)["title"]
+                ),
+                "description": (
+                    _resolve_mission_translation(mission, lang)["description"]
+                ),
                 "content": _inject_ar_object_type(
-                    mission.content,
+                    _localize_mission_content(mission, lang),
                     ar_object_type_by_mission_id.get(mission.id),
                 ),
                 "geoZoneId": mission.geo_zone_id,
@@ -944,9 +1005,14 @@ def _build_bootstrap(session: Session, player_id: str) -> dict:
     }
 
 
-def get_bootstrap(player_id: str) -> dict:
+def get_bootstrap(player_id: str, lang: str = "ru") -> dict:
+    """Публичный bootstrap игрока.
+
+    lang (Trans-4a) — желаемый язык контента миссий; невалидные/неизвестные
+    значения безопасны: _resolve_mission_translation отдаёт оригинал (ru).
+    """
     with SessionLocal.begin() as session:
-        return _build_bootstrap(session, player_id)
+        return _build_bootstrap(session, player_id, lang=lang)
 
 
 def _normalize_text(value: str) -> str:

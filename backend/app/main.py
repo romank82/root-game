@@ -707,9 +707,10 @@ def logout(request: Request, response: Response):
 def get_engine_bootstrap_route(
     request: Request,
     player_id: str = Depends(get_current_player_id),
+    lang: str = Query("ru", max_length=8),
 ):
     try:
-        bootstrap = get_engine_bootstrap(player_id)
+        bootstrap = get_engine_bootstrap(player_id, lang=lang)
     except MissionEngineError as error:
         raise HTTPException(
             status_code=error.status_code,
