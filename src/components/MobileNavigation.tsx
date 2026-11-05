@@ -13,7 +13,7 @@ export function MobileNavigation({ screen, onScreenChange, onOpenMore }: MobileN
   const { t } = useTranslation(['common'])
 
   return (
-    <nav className="mobile-navigation" aria-label="Игровая навигация">
+    <nav className="mobile-navigation" aria-label={t('common:mobileNav.ariaLabel')}>
       <button
         className={`tab${screen === 'terminal' ? ' active' : ''}`}
         onClick={() => onScreenChange('terminal')}

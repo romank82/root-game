@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 interface TopbarProps {
   accepted: boolean
   rootBalance: number
@@ -5,6 +7,7 @@ interface TopbarProps {
 }
 
 export function Topbar({ accepted, rootBalance, onBrandClick }: TopbarProps) {
+  const { t } = useTranslation(['common'])
   return (
     <header className="topbar">
       <button
@@ -26,9 +29,9 @@ export function Topbar({ accepted, rootBalance, onBrandClick }: TopbarProps) {
         <div className="topbar-session">
           <div className="status">
             <span className="status-dot" />
-            КОНТУР АКТИВЕН
+            {t('common:topbar.sessionActive')}
           </div>
-          <div className="topbar-wallet" aria-label={`Баланс ROOT: ${rootBalance}`}>
+          <div className="topbar-wallet" aria-label={t('common:topbar.balanceAria', { balance: rootBalance })}>
             <span>ROOT</span>
             <strong>{rootBalance}</strong>
           </div>

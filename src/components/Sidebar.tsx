@@ -12,7 +12,7 @@ export function Sidebar({ echo, apiStatus, onScreenChange }: SidebarProps) {
 
   return (
     <aside className="sidebar">
-      <p>НАВИГАЦИЯ</p>
+      <p>{t('common:sidebar.navigation')}</p>
 
       <button className="active" onClick={() => onScreenChange('terminal')}>
         ◉ {t('common:tabs.terminal')}
@@ -35,12 +35,12 @@ export function Sidebar({ echo, apiStatus, onScreenChange }: SidebarProps) {
       </button>
 
       <div className="echo-card">
-        <span>РЕСУРС</span>
+        <span>{t('common:sidebar.resource')}</span>
         <strong>{echo} ROOT</strong>
         <small>
-          {apiStatus === 'checking' && 'синхронизация...'}
-          {apiStatus === 'online' && 'синхронизация: online'}
-          {apiStatus === 'offline' && 'локальный тестовый режим'}
+          {apiStatus === 'checking' && t('common:sidebar.syncChecking')}
+          {apiStatus === 'online' && t('common:sidebar.syncOnline')}
+          {apiStatus === 'offline' && t('common:sidebar.syncOffline')}
         </small>
       </div>
     </aside>

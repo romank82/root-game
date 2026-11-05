@@ -30,5 +30,19 @@
     "inventory": "Вещи",
     "transfer": "Перевод",
     "more": "Ещё"
+  },
+  "sidebar": {
+    "navigation": "НАВИГАЦИЯ",
+    "resource": "РЕСУРС",
+    "syncChecking": "синхронизация...",
+    "syncOnline": "синхронизация: online",
+    "syncOffline": "локальный тестовый режим"
+  },
+  "topbar": {
+    "sessionActive": "КОНТУР АКТИВЕН",
+    "balanceAria": "Баланс ROOT: {{balance}}"
+  },
+  "mobileNav": {
+    "ariaLabel": "Игровая навигация"
   }
 }

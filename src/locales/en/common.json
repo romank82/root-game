@@ -30,5 +30,19 @@
     "inventory": "Items",
     "transfer": "Transfer",
     "more": "More"
+  },
+  "sidebar": {
+    "navigation": "NAVIGATION",
+    "resource": "RESOURCE",
+    "syncChecking": "syncing...",
+    "syncOnline": "syncing: online",
+    "syncOffline": "local test mode"
+  },
+  "topbar": {
+    "sessionActive": "CONTOUR ACTIVE",
+    "balanceAria": "ROOT balance: {{balance}}"
+  },
+  "mobileNav": {
+    "ariaLabel": "Game navigation"
   }
 }

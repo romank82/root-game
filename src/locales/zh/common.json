@@ -30,5 +30,19 @@
     "inventory": "物品",
     "transfer": "转账",
     "more": "更多"
+  },
+  "sidebar": {
+    "navigation": "导航",
+    "resource": "资源",
+    "syncChecking": "同步中...",
+    "syncOnline": "同步：在线",
+    "syncOffline": "本地测试模式"
+  },
+  "topbar": {
+    "sessionActive": "CONTOUR 已激活",
+    "balanceAria": "ROOT 余额：{{balance}}"
+  },
+  "mobileNav": {
+    "ariaLabel": "游戏导航"
   }
 }
