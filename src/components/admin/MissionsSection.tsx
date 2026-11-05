@@ -21,6 +21,7 @@ import {
   type KeyItem,
   type MissionRuntimePolicy,
 } from '../../api/adminApi'
+import { MissionsTranslationsModal } from './MissionsTranslationsModal'
 
 type RewardForm = {
   rewardType: string
@@ -763,6 +764,8 @@ export function MissionsSection({
   const [policyError, setPolicyError] = useState<string | null>(null)
   const [policyNotice, setPolicyNotice] = useState<string | null>(null)
   const [publishingPolicy, setPublishingPolicy] = useState(false)
+  // Sprint Trans-3b: модалка ручного перевода контента миссии.
+  const [translationsModalOpen, setTranslationsModalOpen] = useState(false)
 
   const selectedMission = useMemo(
     () => missions.find((mission) => mission.id === selectedId) ?? null,
@@ -2493,11 +2496,30 @@ export function MissionsSection({
               {submitting ? 'Сохранение…' : 'Сохранить'}
             </button>
 
+            {selectedMission && (
+              <button
+                className="admin-secondary"
+                onClick={() => setTranslationsModalOpen(true)}
+                disabled={!canWrite || submitting}
+              >
+                Перевести
+              </button>
+            )}
+
             {selectedMission?.status === 'draft' && (
               <button
                 className="admin-publish"
                 onClick={() => changePublication('publish')}
-                disabled={!canWrite || submitting}
+                disabled={
+                  !canWrite ||
+                  submitting ||
+                  (selectedMission.translationStatus ?? 'none') !== 'complete'
+                }
+                title={
+                  (selectedMission.translationStatus ?? 'none') !== 'complete'
+                    ? 'Требуется перевод (en, zh). Откройте «Перевести».'
+                    : undefined
+                }
               >
                 Опубликовать
               </button>
@@ -2514,6 +2536,26 @@ export function MissionsSection({
             )}
           </div>
       </section>
+
+      {translationsModalOpen && selectedMission && (
+        <MissionsTranslationsModal
+          missionId={selectedMission.id}
+          missionTitle={selectedMission.title}
+          missionDescription={selectedMission.description}
+          missionContentUi={(selectedMission.content?.ui as Record<string, string | string[]>) || {}}
+          onClose={() => setTranslationsModalOpen(false)}
+          onSaved={(status) => {
+            setMissions((current) =>
+              current.map((mission) =>
+                mission.id === selectedMission.id
+                  ? { ...mission, translationStatus: status }
+                  : mission,
+              ),
+            )
+            setTranslationsModalOpen(false)
+          }}
+        />
+      )}
     </div>
   )
 }
