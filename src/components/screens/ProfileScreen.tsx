@@ -495,9 +495,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     if (platform === 'android' || platform === 'android_x') {
       try {
         await sendGasInvoice(gasAmount)
-        setGasNotice(
-          'Инвойс отправлен в чат с ботом. Откройте чат с ботом и оплатите.',
-        )
+        setGasNotice(t('profile:gas.notice.sentToChat'))
       } catch (err) {
         setGasError((err as Error).message)
       } finally {
@@ -808,7 +806,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
               <option value="">{t('profile:form.countryNotSpecified')}</option>
               {COUNTRY_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {t(`profile:country.${option.value}`, { defaultValue: option.label })}
                 </option>
               ))}
             </select>

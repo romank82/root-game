@@ -92,5 +92,17 @@
     "rejected": "Rejected",
     "failed": "Payout error",
     "fallback": "Processing"
+  },
+  "country": {
+    "RU": "Russia",
+    "KZ": "Kazakhstan",
+    "BY": "Belarus",
+    "UA": "Ukraine",
+    "US": "United States",
+    "DE": "Germany",
+    "FR": "France",
+    "CN": "China",
+    "JP": "Japan",
+    "GB": "United Kingdom"
   }
 }
