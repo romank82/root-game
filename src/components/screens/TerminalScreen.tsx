@@ -193,8 +193,8 @@ export function TerminalScreen({
       if (result.left) {
         setTeamLeaveNote(
           result.refunded
-            ? 'Плата возвращена'
-            : 'Вы вышли из командной сессии',
+            ? t('terminal:teamLeave.refunded')
+            : t('terminal:teamLeave.left'),
         )
         // Оптимистично скрываем блок сессии (bootstrap обновится в App).
         setLeftTeamSessionIds((ids) => [...ids, mission.id])
@@ -214,7 +214,7 @@ export function TerminalScreen({
   function getCurrentPosition(): Promise<GeolocationPosition> {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
-        reject(new Error('Геолокация не поддерживается устройством.'))
+        reject(new Error(t('common:gps.notSupported')))
         return
       }
       navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -244,11 +244,11 @@ export function TerminalScreen({
         geoErr instanceof GeolocationPositionError ? geoErr.code : null
       const message =
         code === 1
-          ? 'Отказано в доступе к геолокации. Разрешите доступ и повторите.'
+          ? t('common:gps.permissionDenied')
           : code === 2
-            ? 'Не удалось определить местоположение. Повторите попытку.'
+            ? t('common:gps.positionUnavailable')
             : code === 3
-              ? 'Таймаут геолокации. Повторите попытку.'
+              ? t('common:gps.timeout')
               : (geoErr as Error).message
       throw new Error(message)
     }
@@ -362,17 +362,21 @@ export function TerminalScreen({
         {activeSessions.map((item) => (
           <article className="puzzle" key={item.id}>
             <span className="file-label">
-              {item.missionTitle ?? 'Командная миссия'}
+              {item.missionTitle ?? t('terminal:activeSessions.fallbackTitle')}
             </span>
-            <small>СТАТУС: СБОР</small>
-            <h3>{item.description ?? 'Без описания'}</h3>
+            <small>{t('terminal:activeSessions.statusLabel')} {t('terminal:activeSessions.statusCollecting')}</small>
+            <h3>{item.description ?? t('terminal:activeSessions.noDescription')}</h3>
             <p className="team-member-count">
-              {item.memberCount}/{item.maxMembers ?? '?'} — свободно:{' '}
-              {item.freeSlots ?? '?'}
+              {item.memberCount}/{item.maxMembers ?? '?'}{' '}
+              {t('terminal:activeSessions.freeSlots', {
+                count: item.freeSlots ?? '?',
+              })}
             </p>
             <p className="in-progress-hint">
-              До команды:{' '}
-              {item.distanceKm !== null ? `${item.distanceKm} км` : '—'}
+              {t('terminal:activeSessions.distanceLabel')}{' '}
+              {item.distanceKm !== null
+                ? t('terminal:activeSessions.km', { distance: item.distanceKm })
+                : '—'}
             </p>
             <button
               type="button"
@@ -414,15 +418,17 @@ export function TerminalScreen({
     const rewardLabels = (mission.rewards ?? [])
       .map((reward) => {
         if (reward.type === 'currency' && typeof reward.amount === 'number') {
-          return `До ${reward.amount} ROOT`
+          return t('terminal:rewards.currency', { amount: reward.amount })
         }
         if (reward.type === 'item' && reward.itemId) {
           // Человекочитаемый код из CMS (TEST_KEY_003); если его нет —
           // системный itemId.
-          return `Предмет: ${reward.itemCode ?? reward.itemId}`
+          return t('terminal:rewards.item', {
+            name: reward.itemCode ?? reward.itemId,
+          })
         }
         if (reward.type === 'story_node' && reward.storyNodeId) {
-          return `Сюжетный узел: ${reward.storyNodeId}`
+          return t('terminal:rewards.storyNode', { name: reward.storyNodeId })
         }
         return null
       })
@@ -457,7 +463,7 @@ export function TerminalScreen({
         <span className="file-label">
           {missionText(mission, 'label', mission.title)}
         </span>
-        <small>СТАТУС: {missionStatusLabel(t, mission.status)}</small>
+        <small>{t('terminal:missionCard.statusLabel')} {missionStatusLabel(t, mission.status)}</small>
         <h3>
           {missionText(mission, 'question', mission.description)}
         </h3>
@@ -529,7 +535,7 @@ export function TerminalScreen({
                 <MissionTimer
                   mode="cancel"
                   deadlineAt={cancelDeadlineAt}
-                  label="до конца отказа с возвратом"
+                  label={t('terminal:refundWindow.label')}
                 />
                 <button
                   type="button"
@@ -574,7 +580,7 @@ export function TerminalScreen({
                     <MissionTimer
                       mode="cancel"
                       deadlineAt={teamCancelDeadlineAt}
-                      label="до конца отказа с возвратом"
+                      label={t('terminal:refundWindow.label')}
                     />
                   </div>
                 )}
@@ -595,7 +601,7 @@ export function TerminalScreen({
           <>
             {typeof mission.entryRoot === 'number' && mission.entryRoot > 0 && (
               <>
-                <p>Вход: {mission.entryRoot} ROOT</p>
+                <p>{t('terminal:missionCard.entryLabel')} {mission.entryRoot} ROOT</p>
                 {missingRoot && (
                   <p className="repair-error">
                     {t('terminal:errors.notEnoughRoot', {
@@ -608,7 +614,7 @@ export function TerminalScreen({
 
             {requiredItems.length > 0 && (
               <p className={hasAllKeys ? undefined : 'repair-error'}>
-                Требуемые ключи:{' '}
+                {t('terminal:missionCard.requiredKeysLabel')}{' '}
                 {requiredItems
                   .map(
                     (requirement) =>
@@ -619,7 +625,7 @@ export function TerminalScreen({
             )}
 
             {rewardLabels.length > 0 && (
-              <p>Возможные награды: {rewardLabels.join(', ')}</p>
+              <p>{t('terminal:missionCard.rewardsLabel')} {rewardLabels.join(', ')}</p>
             )}
 
             <div className="accept-row">
@@ -743,7 +749,7 @@ export function TerminalScreen({
                       {missionText(mission, 'label', mission.title)}
                     </span>
                     <small>
-                      СТАТУС:{' '}
+                      {t('terminal:archive.statusLabel')}{' '}
                       {mission.status === 'completed'
                         ? t('terminal:missionStatus.completed')
                         : t('terminal:missionStatus.expired')}
@@ -751,7 +757,7 @@ export function TerminalScreen({
                     <h3>{mission.title}</h3>
                     {mission.completedAt && (
                       <p className="archive-hint">
-                        Завершено:{' '}
+                        {t('terminal:archive.completedAtLabel')}{' '}
                         {new Date(mission.completedAt).toLocaleString()}
                       </p>
                     )}

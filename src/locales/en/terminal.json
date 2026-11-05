@@ -55,5 +55,51 @@
     "expired": "FAILED",
     "cancelled": "CANCELLED",
     "available": "AVAILABLE"
+  },
+  "missionCard": {
+    "statusLabel": "STATUS:",
+    "entryLabel": "Entry:",
+    "requiredKeysLabel": "Required keys:",
+    "rewardsLabel": "Possible rewards:"
+  },
+  "rewards": {
+    "currency": "Up to {{amount}} ROOT",
+    "item": "Item: {{name}}",
+    "storyNode": "Story node: {{name}}"
+  },
+  "activeSessions": {
+    "fallbackTitle": "Team mission",
+    "statusLabel": "STATUS:",
+    "statusCollecting": "ASSEMBLING",
+    "noDescription": "No description",
+    "freeSlots": "— free: {{count}}",
+    "distanceLabel": "To team:",
+    "km": "{{distance}} km"
+  },
+  "refundWindow": {
+    "label": "until refund window ends"
+  },
+  "teamLeave": {
+    "refunded": "Fee refunded",
+    "left": "You left the team session"
+  },
+  "archive": {
+    "statusLabel": "STATUS:",
+    "completedAtLabel": "Completed:"
+  },
+  "missionModal": {
+    "eyebrow": "MISSION",
+    "entryLabel": "Entry:",
+    "requiredKeysLabel": "Required keys:",
+    "rewardsLabel": "Possible rewards:",
+    "acceptLoading": "GETTING GPS…",
+    "accept": "TAKE MISSION",
+    "cancel": "CANCEL"
+  },
+  "timer": {
+    "expiredRefund": "REFUND WINDOW EXPIRED",
+    "expired": "TIME IS UP",
+    "refuseAction": "refuse",
+    "removeAction": "remove"
   }
 }

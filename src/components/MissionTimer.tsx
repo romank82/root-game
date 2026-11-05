@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface MissionTimerProps {
   deadlineAt: string | null
@@ -32,6 +33,7 @@ export function MissionTimer({
   label,
   onClick,
 }: MissionTimerProps) {
+  const { t } = useTranslation(['terminal'])
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -60,8 +62,12 @@ export function MissionTimer({
   // В режиме 'cancel' — отдельный текст: после истечения окна отказ
   // уже не возвращает плату.
   const expiredLabel =
-    mode === 'cancel' ? 'ВРЕМЯ НА ОТКАЗ ИСТЕКЛО' : 'ВРЕМЯ ВЫШЛО'
-  const actionLabel = mode === 'cancel' ? 'отказаться' : 'убрать'
+    mode === 'cancel'
+      ? t('terminal:timer.expiredRefund')
+      : t('terminal:timer.expired')
+  const actionLabel = mode === 'cancel'
+    ? t('terminal:timer.refuseAction')
+    : t('terminal:timer.removeAction')
 
   return (
     <div

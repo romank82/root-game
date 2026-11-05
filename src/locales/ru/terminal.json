@@ -55,5 +55,51 @@
     "expired": "ПРОВАЛЕНО",
     "cancelled": "ОТМЕНЕНО",
     "available": "ДОСТУПНО"
+  },
+  "missionCard": {
+    "statusLabel": "СТАТУС:",
+    "entryLabel": "Вход:",
+    "requiredKeysLabel": "Требуемые ключи:",
+    "rewardsLabel": "Возможные награды:"
+  },
+  "rewards": {
+    "currency": "До {{amount}} ROOT",
+    "item": "Предмет: {{name}}",
+    "storyNode": "Сюжетный узел: {{name}}"
+  },
+  "activeSessions": {
+    "fallbackTitle": "Командная миссия",
+    "statusLabel": "СТАТУС:",
+    "statusCollecting": "СБОР",
+    "noDescription": "Без описания",
+    "freeSlots": "— свободно: {{count}}",
+    "distanceLabel": "До команды:",
+    "km": "{{distance}} км"
+  },
+  "refundWindow": {
+    "label": "до конца отказа с возвратом"
+  },
+  "teamLeave": {
+    "refunded": "Плата возвращена",
+    "left": "Вы вышли из командной сессии"
+  },
+  "archive": {
+    "statusLabel": "СТАТУС:",
+    "completedAtLabel": "Завершено:"
+  },
+  "missionModal": {
+    "eyebrow": "МИССИЯ",
+    "entryLabel": "Вход:",
+    "requiredKeysLabel": "Требуемые ключи:",
+    "rewardsLabel": "Возможные награды:",
+    "acceptLoading": "ПОЛУЧЕНИЕ GPS…",
+    "accept": "ВЗЯТЬ МИССИЮ",
+    "cancel": "ОТМЕНА"
+  },
+  "timer": {
+    "expiredRefund": "ВРЕМЯ НА ОТКАЗ ИСТЕКЛО",
+    "expired": "ВРЕМЯ ВЫШЛО",
+    "refuseAction": "отказаться",
+    "removeAction": "убрать"
   }
 }

@@ -14,6 +14,7 @@
     "permissionDenied": "Geolocation access is denied. Allow it in your browser or Telegram settings.",
     "positionUnavailable": "Failed to determine position. Check GPS, internet, and geolocation settings.",
     "positionError": "Failed to get geolocation. Try again in a few seconds.",
+    "timeout": "Geolocation timeout. Try again.",
     "errorTitle": "GEOLOCATION ERROR",
     "locatingTitle": "DETERMINING POSITION…",
     "unavailableTitle": "GEOLOCATION UNAVAILABLE"

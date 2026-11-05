@@ -55,5 +55,51 @@
     "expired": "失败",
     "cancelled": "已取消",
     "available": "可用"
+  },
+  "missionCard": {
+    "statusLabel": "状态：",
+    "entryLabel": "入场：",
+    "requiredKeysLabel": "所需钥匙：",
+    "rewardsLabel": "可能奖励："
+  },
+  "rewards": {
+    "currency": "最高 {{amount}} ROOT",
+    "item": "物品：{{name}}",
+    "storyNode": "剧情节点：{{name}}"
+  },
+  "activeSessions": {
+    "fallbackTitle": "团队任务",
+    "statusLabel": "状态：",
+    "statusCollecting": "集结中",
+    "noDescription": "无描述",
+    "freeSlots": "— 空闲：{{count}}",
+    "distanceLabel": "距团队：",
+    "km": "{{distance}} 公里"
+  },
+  "refundWindow": {
+    "label": "直至可退款拒绝截止"
+  },
+  "teamLeave": {
+    "refunded": "费用已退还",
+    "left": "您已离开团队会话"
+  },
+  "archive": {
+    "statusLabel": "状态：",
+    "completedAtLabel": "已完成："
+  },
+  "missionModal": {
+    "eyebrow": "任务",
+    "entryLabel": "入场：",
+    "requiredKeysLabel": "所需钥匙：",
+    "rewardsLabel": "可能奖励：",
+    "acceptLoading": "正在获取 GPS…",
+    "accept": "领取任务",
+    "cancel": "取消"
+  },
+  "timer": {
+    "expiredRefund": "退款窗口已过期",
+    "expired": "时间已到",
+    "refuseAction": "拒绝",
+    "removeAction": "移除"
   }
 }

@@ -1,4 +1,5 @@
 import type { EngineMission } from '../api/engineApi'
+import { useTranslation } from 'react-i18next'
 import { ErrorWithCode } from './ErrorWithCode'
 
 interface MissionModalProps {
@@ -24,6 +25,8 @@ export function MissionModal({
   isAccepting,
   error,
 }: MissionModalProps) {
+  const { t } = useTranslation(['terminal', 'common'])
+
   const hasEntryPrice =
     typeof mission.entryRoot === 'number' && mission.entryRoot > 0
 
@@ -32,13 +35,15 @@ export function MissionModal({
   const rewardLabels = (mission.rewards ?? [])
     .map((reward) => {
       if (reward.type === 'currency' && typeof reward.amount === 'number') {
-        return `До ${reward.amount} ROOT`
+        return t('terminal:rewards.currency', { amount: reward.amount })
       }
       if (reward.type === 'item' && reward.itemId) {
-        return `Предмет: ${reward.itemCode ?? reward.itemId}`
+        return t('terminal:rewards.item', {
+          name: reward.itemCode ?? reward.itemId,
+        })
       }
       if (reward.type === 'story_node' && reward.storyNodeId) {
-        return `Сюжетный узел: ${reward.storyNodeId}`
+        return t('terminal:rewards.storyNode', { name: reward.storyNodeId })
       }
       return null
     })
@@ -55,7 +60,7 @@ export function MissionModal({
         className="mission-modal"
         onClick={(event) => event.stopPropagation()}
       >
-        <p className="mission-modal-eyebrow">МИССИЯ</p>
+        <p className="mission-modal-eyebrow">{t('terminal:missionModal.eyebrow')}</p>
 
         <h3 className="mission-modal-title">{mission.title}</h3>
 
@@ -65,13 +70,13 @@ export function MissionModal({
 
         {hasEntryPrice && (
           <p className="mission-modal-line">
-            Вход: {mission.entryRoot} ROOT
+            {t('terminal:missionModal.entryLabel')} {mission.entryRoot} ROOT
           </p>
         )}
 
         {requiredItems.length > 0 && (
           <p className="mission-modal-line">
-            Требуемые ключи:{' '}
+            {t('terminal:missionModal.requiredKeysLabel')}{' '}
             {requiredItems
               .map(
                 (requirement) =>
@@ -83,7 +88,7 @@ export function MissionModal({
 
         {rewardLabels.length > 0 && (
           <p className="mission-modal-line mission-modal-rewards">
-            Возможные награды: {rewardLabels.join(', ')}
+            {t('terminal:missionModal.rewardsLabel')} {rewardLabels.join(', ')}
           </p>
         )}
 
@@ -98,8 +103,8 @@ export function MissionModal({
             className="mission-modal-btn-accept"
           >
             {isAccepting
-              ? 'ПОЛУЧЕНИЕ GPS…'
-              : 'ВЗЯТЬ МИССИЮ'}
+              ? t('terminal:missionModal.acceptLoading')
+              : t('terminal:missionModal.accept')}
           </button>
 
           <button
@@ -107,7 +112,7 @@ export function MissionModal({
             disabled={isAccepting}
             className="mission-modal-btn-cancel"
           >
-            ОТМЕНА
+            {t('common:cancel')}
           </button>
         </div>
       </div>
