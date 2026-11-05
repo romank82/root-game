@@ -1,3 +1,6 @@
+import i18n from '../i18n'
+
+
 export type EngineMissionStatus =
   | 'locked'
   | 'available'
@@ -313,7 +316,13 @@ export async function authenticateTelegram(
 }
 
 export async function getEngineBootstrap(): Promise<EngineBootstrap> {
-  const response = await apiFetch('/api/v1/engine/bootstrap')
+  // Sprint Trans-4b: язык контента (title/description/content.ui) приходит
+  // с бэкенда уже переведённым (Trans-4a). i18n — модульный синглтон, поэтому
+  // читаем язык напрямую (хук в обычной функции недоступен).
+  const lang = (i18n.language || 'ru').split('-')[0]
+  const response = await apiFetch(
+    `/api/v1/engine/bootstrap?lang=${encodeURIComponent(lang)}`,
+  )
 
   if (!response.ok) {
     throw new Error(await readError(response))

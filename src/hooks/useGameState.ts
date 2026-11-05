@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   acceptEngineMission,
   expireEngineMission,
@@ -10,6 +10,7 @@ import {
   type EngineSegment,
   type EngineStoryNode,
 } from '../api/engineApi'
+import i18n from '../i18n'
 import type { ApiStatus, Screen } from '../types/game'
 
 export function useGameState() {
@@ -58,6 +59,35 @@ export function useGameState() {
     setSegments(bootstrap.segments)
     setApiStatus('online')
   }, [])
+
+  // Sprint Trans-4b: контент миссий (title/description/content.ui) переводится
+  // на бэкенде в bootstrap по ?lang= (Trans-4a). При смене языка интерфейса
+  // перезапрашиваем bootstrap, чтобы миссии приехали на новом языке.
+  // Первичная загрузка остаётся за useAuth — здесь только смена языка,
+  // поэтому нет риска двойного запроса на старте.
+  useEffect(() => {
+    let isMounted = true
+
+    const handleLanguageChanged = () => {
+      getEngineBootstrap()
+        .then((bootstrap) => {
+          if (!isMounted) return
+          applyEngineBootstrap(bootstrap)
+        })
+        .catch(() => {
+          // Не роняем UI: при ошибке остаётся прежний (уже загруженный)
+          // контент, следующий успешный bootstrap подтянет актуальный язык.
+          if (!isMounted) return
+        })
+    }
+
+    i18n.on('languageChanged', handleLanguageChanged)
+
+    return () => {
+      isMounted = false
+      i18n.off('languageChanged', handleLanguageChanged)
+    }
+  }, [applyEngineBootstrap])
 
   const submitMission = useCallback(async (
     missionId: string,
