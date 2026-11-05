@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import './App.css'
 import { useAuth } from './hooks/useAuth'
@@ -7,6 +7,7 @@ import { useGeoPosition } from './hooks/useGeoPosition'
 import { getEngineBootstrap } from './api/engineApi'
 import { Topbar } from './components/Topbar'
 import { MobileNavigation } from './components/MobileNavigation'
+import { MoreSheet } from './components/MoreSheet'
 import { BriefingScreen } from './components/screens/BriefingScreen'
 import { TerminalScreen } from './components/screens/TerminalScreen'
 import { ArchiveScreen } from './components/screens/ArchiveScreen'
@@ -45,6 +46,8 @@ function App() {
   const { authStatus, authError } = useAuth(applyEngineBootstrap)
 
   const { position: geoPosition, error: geoError } = useGeoPosition()
+
+  const [moreOpen, setMoreOpen] = useState(false)
 
   useEffect(() => {
     localStorage.setItem('chimera-screen', screen)
@@ -221,8 +224,18 @@ function App() {
       )}
 
       {accepted && screen !== 'briefing' && (
-        <MobileNavigation screen={screen} onScreenChange={setScreen} />
+        <MobileNavigation
+          screen={screen}
+          onScreenChange={setScreen}
+          onOpenMore={() => setMoreOpen(true)}
+        />
       )}
+
+      <MoreSheet
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        onScreenChange={setScreen}
+      />
 
       {accepted && screen !== 'briefing' && (
         <button className="exit-button" onClick={stopSession}>

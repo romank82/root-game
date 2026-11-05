@@ -27,6 +27,7 @@
     "map": "Карта",
     "camera": "Камера",
     "inventory": "Вещи",
-    "transfer": "Перевод"
+    "transfer": "Перевод",
+    "more": "Ещё"
   }
 }

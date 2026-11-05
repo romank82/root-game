@@ -4,86 +4,106 @@ import type { Screen } from '../types/game'
 interface MobileNavigationProps {
   screen: Screen
   onScreenChange: (screen: Screen) => void
+  onOpenMore: () => void
 }
 
-export function MobileNavigation({ screen, onScreenChange }: MobileNavigationProps) {
+const MORE_SCREENS: Screen[] = ['camera-test', 'archive', 'inventory', 'shop', 'transfer']
+
+export function MobileNavigation({ screen, onScreenChange, onOpenMore }: MobileNavigationProps) {
   const { t } = useTranslation(['common'])
 
   return (
     <nav className="mobile-navigation" aria-label="Игровая навигация">
       <button
-        className={screen === 'terminal' ? 'active' : ''}
+        className={`tab${screen === 'terminal' ? ' active' : ''}`}
         onClick={() => onScreenChange('terminal')}
       >
-        <span>◉</span>
-        {t('common:tabs.terminal')}
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="4 17 10 11 4 5" />
+          <line x1="12" y1="19" x2="20" y2="19" />
+        </svg>
+        <span className="lbl">{t('common:tabs.terminal')}</span>
       </button>
 
       <button
-        className={screen === 'archive' ? 'active' : ''}
-        onClick={() => onScreenChange('archive')}
-      >
-        <span>▤</span>
-        {t('common:tabs.archive')}
-      </button>
-
-      <button
-        className={screen === 'scanner' ? 'active' : ''}
+        className={`tab${screen === 'scanner' ? ' active' : ''}`}
         onClick={() => onScreenChange('scanner')}
       >
-        <span>⌗</span>
-        {t('common:tabs.scanner')}
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+          <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+          <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+          <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+        <span className="lbl">{t('common:tabs.scanner')}</span>
       </button>
 
       <button
-        className={screen === 'map' ? 'active' : ''}
+        className={`tab${screen === 'map' ? ' active' : ''}`}
         onClick={() => onScreenChange('map')}
       >
-        <span>◎</span>
-        {t('common:tabs.map')}
-      </button>
-
-      {/* TEMP: dev-only camera test button — удалить в Sprint 8.6.g. */}
-      {import.meta.env.DEV && (
-        <button
-          className={screen === 'camera-test' ? 'active' : ''}
-          onClick={() => onScreenChange('camera-test')}
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
         >
-          <span>◐</span>
-          {t('common:tabs.camera')}
-        </button>
-      )}
-
-      <button
-        className={screen === 'inventory' ? 'active' : ''}
-        onClick={() => onScreenChange('inventory')}
-      >
-        <span>◈</span>
-        {t('common:tabs.inventory')}
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+          <circle cx="12" cy="10" r="3" />
+        </svg>
+        <span className="lbl">{t('common:tabs.map')}</span>
       </button>
 
       <button
-        className={screen === 'shop' ? 'active' : ''}
-        onClick={() => onScreenChange('shop')}
-      >
-        <span>⊕</span>
-        {t('common:tabs.shop')}
-      </button>
-
-      <button
-        className={screen === 'transfer' ? 'active' : ''}
-        onClick={() => onScreenChange('transfer')}
-      >
-        <span>⇄</span>
-        {t('common:tabs.transfer')}
-      </button>
-
-      <button
-        className={screen === 'profile' ? 'active' : ''}
+        className={`tab${screen === 'profile' ? ' active' : ''}`}
         onClick={() => onScreenChange('profile')}
       >
-        <span>◔</span>
-        {t('common:tabs.profile')}
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+        <span className="lbl">{t('common:tabs.profile')}</span>
+      </button>
+
+      <button
+        className={`tab${MORE_SCREENS.includes(screen) ? ' active' : ''}`}
+        onClick={onOpenMore}
+        aria-haspopup="dialog"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="12" r="2" />
+          <circle cx="19" cy="12" r="2" />
+          <circle cx="5" cy="12" r="2" />
+        </svg>
+        <span className="lbl">{t('common:tabs.more')}</span>
       </button>
     </nav>
   )

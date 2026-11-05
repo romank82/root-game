@@ -132,12 +132,8 @@ button {
   position: relative;
   z-index: 0;
   min-height: 100dvh;
-  overflow: hidden;
   background: var(--bg);
-  padding-top: var(--safe-top);
-  padding-bottom: var(--safe-bottom);
-  padding-left: var(--safe-left);
-  padding-right: var(--safe-right);
+  padding-bottom: calc(120px + var(--safe-bottom));
 }
 
 .noise {
@@ -213,14 +209,16 @@ button {
 }
 
 .topbar {
-  position: relative;
-  z-index: 1;
-  height: 82px;
-  padding: 0 7vw;
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid rgba(190, 255, 226, 0.12);
+  gap: 12px;
+  padding: calc(12px + var(--safe-top)) 16px 12px;
+  background: linear-gradient(180deg, rgba(5, 7, 6, 0.88), rgba(5, 7, 6, 0));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .brand {
@@ -249,7 +247,7 @@ button {
 .status,
 .sidebar > p,
 .echo-card span {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .brand strong {
@@ -394,7 +392,7 @@ h2 {
   border: 1px solid #59eead;
   color: #03100a;
   background: #59eead;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -485,7 +483,7 @@ h2 {
   display: block;
   margin: 7px 0 5px;
   color: #7fffc0;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 19px;
 }
 
@@ -545,7 +543,7 @@ h2 {
   margin-top: 23px;
   margin-bottom: 0;
   color: #78a894;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 12px;
 }
 
@@ -568,7 +566,7 @@ h2 {
   outline: none;
   color: #eafff3;
   background: #07100f;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .answer-row input:focus {
@@ -580,7 +578,7 @@ h2 {
   border: 1px solid #5aedad;
   color: #06120d;
   background: #5aedad;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
   font-weight: 600;
 }
@@ -666,7 +664,7 @@ h2 {
   place-items: center;
   border: 1px solid #64efb0;
   color: #64efb0;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
 }
 
@@ -674,7 +672,7 @@ h2 {
 .locked-file strong {
   display: block;
   margin-bottom: 5px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 12px;
 }
 
@@ -687,7 +685,7 @@ h2 {
 .archive-file b {
   margin-left: auto;
   color: #6df1b3;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 10px;
 }
 
@@ -709,7 +707,7 @@ h2 {
   border: 1px solid rgba(255, 211, 107, 0.35);
   color: #f8d67c;
   background: #0c1712;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 9px;
   letter-spacing: 0.08em;
 }
@@ -835,7 +833,7 @@ h2 {
 .inventory-count span,
 .inventory-count strong {
   display: block;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .inventory-count span {
@@ -873,14 +871,14 @@ h2 {
   place-items: center;
   border: 1px solid #65efb1;
   color: #65efb1;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 24px;
 }
 
 .item-card h3 {
   margin: 0 0 12px;
   color: #effff6;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 17px;
 }
 
@@ -893,7 +891,7 @@ h2 {
 
 .item-card small {
   color: #74dfaa;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 9px;
   letter-spacing: 0.08em;
 }
@@ -915,7 +913,7 @@ h2 {
   border: 1px solid rgba(89, 238, 173, 0.45);
   color: #8affc4;
   background: transparent;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
 }
@@ -1051,7 +1049,7 @@ h2 {
   top: 50%;
   left: 50%;
   color: #86ffbf;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 56px;
   text-shadow: 0 0 28px rgba(100, 245, 179, 0.8);
   transform: translate(-50%, -50%);
@@ -1073,7 +1071,7 @@ h2 {
 .scanner-status {
   margin-top: 22px;
   color: #82e9b6;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
 }
@@ -1090,7 +1088,7 @@ h2 {
 
 .scanner-rules span {
   color: #63efae;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 12px;
 }
 
@@ -1102,7 +1100,149 @@ h2 {
 }
 
 .mobile-navigation {
-  display: none;
+  position: fixed;
+  z-index: 30;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(12px + var(--safe-bottom));
+  width: min(430px, calc(100% - 24px));
+  height: 68px;
+  border-radius: 24px;
+  padding: 6px;
+  display: flex;
+  align-items: stretch;
+  background: rgba(9, 12, 11, 0.78);
+  border: 1px solid var(--stroke);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+}
+
+.mobile-navigation .tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  position: relative;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.mobile-navigation .tab.active {
+  color: var(--accent-soft);
+}
+
+.mobile-navigation .tab.active::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #7cf7c4, #2ee6a0);
+  box-shadow: 0 0 12px rgba(46, 230, 160, 0.7);
+}
+
+.mobile-navigation .tab svg {
+  width: 22px;
+  height: 22px;
+}
+
+.mobile-navigation .tab .lbl {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* === MoreSheet (Sprint UI-2b): bottom sheet === */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  margin: 0 auto;
+  width: min(430px, 100%);
+  padding: 10px 12px calc(16px + var(--safe-bottom));
+  border-radius: 24px 24px 0 0;
+  background: rgba(9, 12, 11, 0.92);
+  border: 1px solid var(--stroke);
+  border-bottom: none;
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: 0 -24px 48px rgba(0, 0, 0, 0.55);
+  animation: sheet-up 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sheet-handle {
+  width: 40px;
+  height: 4px;
+  margin: 4px auto 12px;
+  border-radius: 2px;
+  background: var(--stroke);
+}
+
+.sheet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.srow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 13px 14px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.srow:active {
+  background: var(--surface);
+}
+
+.srow .srow-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--accent-soft);
+  font-size: 18px;
+}
+
+.srow .srow-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 @keyframes scan-line {
@@ -1119,10 +1259,6 @@ h2 {
 }
 
 @media (max-width: 760px) {
-  .app-shell {
-    padding-bottom: 95px;
-  }
-
   .sidebar {
     display: none;
   }
@@ -1149,44 +1285,6 @@ h2 {
   .scanner-frame {
     width: min(100%, 360px);
     margin: 0 auto;
-  }
-
-  .mobile-navigation {
-    position: fixed;
-    z-index: 10;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    min-height: 70px;
-    padding-bottom: env(safe-area-inset-bottom);
-    border-top: 1px solid rgba(174, 255, 219, 0.14);
-    background: rgba(5, 15, 12, 0.94);
-    backdrop-filter: blur(18px);
-  }
-
-  .mobile-navigation button {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    color: #719689;
-    background: transparent;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 9px;
-  }
-
-  .mobile-navigation button span {
-    font-size: 18px;
-    line-height: 1;
-  }
-
-  .mobile-navigation button.active {
-    color: #75f2b5;
-    text-shadow: 0 0 14px rgba(84, 241, 173, 0.45);
   }
 
   .exit-button {
@@ -1219,7 +1317,7 @@ h2 {
 .segment-code span {
   display: block;
   color: #75efb4;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 10px;
   letter-spacing: 0.12em;
 }
@@ -1246,7 +1344,7 @@ h2 {
   display: block;
   margin-top: 8px;
   color: #e0fff0;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
 }
 
@@ -1289,7 +1387,7 @@ h2 {
   place-items: center;
   border: 1px solid rgba(136, 255, 197, 0.65);
   color: #a5ffcf;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .cube-front {
@@ -1353,7 +1451,7 @@ h2 {
 
 .segment-stats dt {
   color: #759f8d;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 9px;
   letter-spacing: 0.08em;
 }
@@ -1361,14 +1459,14 @@ h2 {
 .segment-stats dd {
   margin: 8px 0 0;
   color: #e1fff0;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 13px;
 }
 
 .segment-item-reward {
   margin: 0;
   color: #85efb8;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 10px;
   letter-spacing: 0.06em;
 }
@@ -1412,7 +1510,7 @@ h2 {
   border: 1px solid #64efb0;
   color: #05110b;
   background: #70f4b6;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -1459,7 +1557,7 @@ h2 {
   place-items: center;
   border: 1px solid currentColor;
   color: #ffd07e;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .location-status-success .location-status-icon {
@@ -1468,7 +1566,7 @@ h2 {
 
 .location-status strong {
   color: #e9fff2;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
   letter-spacing: 0.06em;
 }
@@ -1512,7 +1610,7 @@ h2 {
 .ar-cube {
   z-index: 2;
   color: #8dffc3;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 84px;
   text-shadow: 0 0 28px rgba(95, 243, 175, 0.85);
 }
@@ -1523,7 +1621,7 @@ h2 {
   top: 50%;
   left: 50%;
   color: #effff7;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 28px;
   transform: translate(-50%, -50%);
 }
@@ -1556,7 +1654,7 @@ h2 {
   display: block;
   margin-top: 16px;
   color: #7eb19a;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 9px;
 }
 
@@ -1626,7 +1724,7 @@ h2 {
   border: 1px solid #64efb0;
   color: #06120c;
   background: #70f4b6;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -1645,7 +1743,7 @@ h2 {
   border: 1px solid rgba(110, 255, 190, 0.6);
   color: #8cffc8;
   background: rgba(4, 21, 13, 0.85);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 9px;
   letter-spacing: 0.06em;
 }
@@ -1706,7 +1804,7 @@ h2 {
   padding: 22px 13px;
   border-right: 1px solid rgba(108, 246, 180, 0.14);
   color: #638c77;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
 }
 
@@ -1715,7 +1813,7 @@ h2 {
   align-items: center;
   padding: 18px;
   color: #9fffd0;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 16px;
   word-break: break-word;
 }
@@ -1738,7 +1836,7 @@ h2 {
   border: 1px solid rgba(108, 246, 180, 0.4);
   color: #a2ffcf;
   background: rgba(23, 93, 61, 0.22);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
 }
 
@@ -1763,7 +1861,7 @@ h2 {
 .repair-error {
   margin: 16px 0 0;
   color: #ffb183;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 10px;
   line-height: 1.6;
 }
@@ -1804,7 +1902,7 @@ h2 {
 .mission-reward-grid span,
 .mission-reward-grid strong {
   display: block;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .mission-reward-grid span {
@@ -1820,7 +1918,7 @@ h2 {
 
 .mission-success-card small {
   color: #75aa8b;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 9px;
   line-height: 1.5;
 }
@@ -1839,6 +1937,7 @@ h2 {
   display: flex;
   align-items: center;
   gap: 18px;
+  margin-left: auto;
 }
 
 .topbar-wallet {
@@ -1849,7 +1948,7 @@ h2 {
   border: 1px solid rgba(91, 239, 175, 0.22);
   color: #7fffc0;
   background: rgba(42, 129, 88, 0.08);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .topbar-wallet span {
@@ -1901,7 +2000,7 @@ h2 {
   padding: 11px 15px;
   color: #03100a;
   background: #59eead;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;

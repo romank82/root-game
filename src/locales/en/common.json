@@ -27,6 +27,7 @@
     "map": "Map",
     "camera": "Camera",
     "inventory": "Items",
-    "transfer": "Transfer"
+    "transfer": "Transfer",
+    "more": "More"
   }
 }
