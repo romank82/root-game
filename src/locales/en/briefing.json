@@ -1,0 +1,26 @@
+{
+  "loading": {
+    "checkingSession": "Checking\nsession",
+    "requiresTelegram": "Telegram\nrequired",
+    "checkingConfirmed": "Checking the confirmed game session…",
+    "openInBot": "OPEN THE GAME VIA THE BUTTON IN THE CHAT WITH @HIMERAPROTOCOLBOT"
+  },
+  "packet": {
+    "incoming": "INCOMING ARCHIVE PACKET",
+    "packet": "Packet",
+    "noSender": "no sender",
+    "sender": "SENDER",
+    "notDefined": "NOT DEFINED",
+    "integrity": "INTEGRITY",
+    "status": "STATUS",
+    "waitingObserver": "WAITING FOR OBSERVER"
+  },
+  "disclaimer": {
+    "title": "«Chimera Protocol» is an interactive art game. It does not access your files, settings, or device. You can stop participating at any time.",
+    "consent": "I understand that this is a game simulation and I want to continue."
+  },
+  "buttons": {
+    "activate": "ACTIVATE PROTOCOL",
+    "note": "ACCESS CAN BE DISABLED AT ANY TIME"
+  }
+}

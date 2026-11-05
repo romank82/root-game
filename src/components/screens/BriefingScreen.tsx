@@ -1,4 +1,5 @@
 import type { AuthStatus } from '../../types/game'
+import { useTranslation } from 'react-i18next'
 
 interface BriefingScreenProps {
   authStatus: AuthStatus
@@ -15,6 +16,7 @@ export function BriefingScreen({
   setAccepted,
   onActivate,
 }: BriefingScreenProps) {
+  const { t } = useTranslation(['briefing', 'common'])
   if (authStatus !== 'authenticated') {
     return (
       <section className="briefing">
@@ -22,17 +24,17 @@ export function BriefingScreen({
         <p className="eyebrow">CHIMERA PROTOCOL / ACCESS GATE</p>
         <h1>
           {authStatus === 'checking'
-            ? 'Проверяем\nсессию'
-            : 'Требуется\nTelegram'}
+            ? t('briefing:loading.checkingSession')
+            : t('briefing:loading.requiresTelegram')}
         </h1>
         <p className="intro">
           {authStatus === 'checking'
-            ? 'Проверяем подтверждённую игровую сессию…'
+            ? t('briefing:loading.checkingConfirmed')
             : authError}
         </p>
         {authStatus !== 'checking' && (
           <p className="safe-note">
-            ОТКРОЙТЕ ИГРУ КНОПКОЙ В ЧАТЕ С @HIMERAPROTOCOLBOT
+            {t('briefing:loading.openInBot')}
           </p>
         )}
       </section>
@@ -42,32 +44,30 @@ export function BriefingScreen({
   return (
     <section className="briefing">
       <div className="packet-icon">▣</div>
-      <p className="eyebrow">ВХОДЯЩИЙ АРХИВНЫЙ ПАКЕТ</p>
+      <p className="eyebrow">{t('briefing:packet.incoming')}</p>
       <h1>
-        Пакет
+        {t('briefing:packet.packet')}
         <br />
-        без отправителя
+        {t('briefing:packet.noSender')}
       </h1>
 
       <div className="packet-data">
         <div>
-          <span>ОТПРАВИТЕЛЬ</span>
-          <b>НЕ ОПРЕДЕЛЁН</b>
+          <span>{t('briefing:packet.sender')}</span>
+          <b>{t('briefing:packet.notDefined')}</b>
         </div>
         <div>
-          <span>ЦЕЛОСТНОСТЬ</span>
+          <span>{t('briefing:packet.integrity')}</span>
           <b className="warning">61%</b>
         </div>
         <div>
-          <span>СТАТУС</span>
-          <b>ОЖИДАНИЕ НАБЛЮДАТЕЛЯ</b>
+          <span>{t('briefing:packet.status')}</span>
+          <b>{t('briefing:packet.waitingObserver')}</b>
         </div>
       </div>
 
       <p className="intro">
-        «Протокол Химера» — интерактивная художественная игра. Она не
-        получает доступ к вашим файлам, настройкам или устройству. Вы
-        можете остановить участие в любой момент.
+        {t('briefing:disclaimer.title')}
       </p>
 
       <label className="consent">
@@ -77,7 +77,7 @@ export function BriefingScreen({
           onChange={(event) => setAccepted(event.target.checked)}
         />
         <span>
-          Я понимаю, что это игровая симуляция, и хочу продолжить.
+          {t('briefing:disclaimer.consent')}
         </span>
       </label>
 
@@ -86,11 +86,11 @@ export function BriefingScreen({
         disabled={!accepted}
         onClick={onActivate}
       >
-        АКТИВИРОВАТЬ ПРОТОКОЛ <span>→</span>
+        {t('briefing:buttons.activate')} <span>→</span>
       </button>
 
       <p className="safe-note">
-        ДОСТУП МОЖНО ОТКЛЮЧИТЬ В ЛЮБОЙ МОМЕНТ
+        {t('briefing:buttons.note')}
       </p>
     </section>
   )

@@ -13,6 +13,7 @@ import ruArchive from './locales/ru/archive.json'
 import ruMap from './locales/ru/map.json'
 import ruInventory from './locales/ru/inventory.json'
 import ruTransfer from './locales/ru/transfer.json'
+import ruBriefing from './locales/ru/briefing.json'
 import enCommon from './locales/en/common.json'
 import enErrors from './locales/en/errors.json'
 import enTerminal from './locales/en/terminal.json'
@@ -25,6 +26,7 @@ import enArchive from './locales/en/archive.json'
 import enMap from './locales/en/map.json'
 import enInventory from './locales/en/inventory.json'
 import enTransfer from './locales/en/transfer.json'
+import enBriefing from './locales/en/briefing.json'
 import zhCommon from './locales/zh/common.json'
 import zhErrors from './locales/zh/errors.json'
 import zhTerminal from './locales/zh/terminal.json'
@@ -37,6 +39,7 @@ import zhArchive from './locales/zh/archive.json'
 import zhMap from './locales/zh/map.json'
 import zhInventory from './locales/zh/inventory.json'
 import zhTransfer from './locales/zh/transfer.json'
+import zhBriefing from './locales/zh/briefing.json'
 
 const resources = {
   ru: {
@@ -52,6 +55,7 @@ const resources = {
     map: ruMap,
     inventory: ruInventory,
     transfer: ruTransfer,
+    briefing: ruBriefing,
   },
   en: {
     common: enCommon,
@@ -66,6 +70,7 @@ const resources = {
     map: enMap,
     inventory: enInventory,
     transfer: enTransfer,
+    briefing: enBriefing,
   },
   zh: {
     common: zhCommon,
@@ -80,6 +85,7 @@ const resources = {
     map: zhMap,
     inventory: zhInventory,
     transfer: zhTransfer,
+    briefing: zhBriefing,
   },
 }
 
@@ -95,7 +101,7 @@ i18n
       caches: ['localStorage'],
     },
     defaultNS: 'common',
-    ns: ['common', 'errors', 'terminal', 'profile', 'shop', 'team', 'scanner', 'cipher', 'archive', 'map', 'inventory', 'transfer'],
+    ns: ['common', 'errors', 'terminal', 'profile', 'shop', 'team', 'scanner', 'cipher', 'archive', 'map', 'inventory', 'transfer', 'briefing'],
     interpolation: { escapeValue: false },
   })
 

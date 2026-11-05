@@ -1,0 +1,26 @@
+{
+  "loading": {
+    "checkingSession": "正在检查\n会话",
+    "requiresTelegram": "需要\nTelegram",
+    "checkingConfirmed": "正在检查已确认的游戏会话…",
+    "openInBot": "请在与 @HIMERAPROTOCOLBOT 的聊天中点击按钮打开游戏"
+  },
+  "packet": {
+    "incoming": "传入的档案包",
+    "packet": "数据包",
+    "noSender": "无发送者",
+    "sender": "发送者",
+    "notDefined": "未定义",
+    "integrity": "完整性",
+    "status": "状态",
+    "waitingObserver": "等待观察者"
+  },
+  "disclaimer": {
+    "title": "《奇美拉协议》是一款交互式艺术游戏。它不会访问您的文件、设置或设备。您可以随时停止参与。",
+    "consent": "我理解这是一次游戏模拟，并且我想继续。"
+  },
+  "buttons": {
+    "activate": "激活协议",
+    "note": "可以随时关闭访问权限"
+  }
+}
