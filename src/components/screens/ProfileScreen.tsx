@@ -622,6 +622,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       <label>
         {t('profile:language.title')}
         <select
+          className="profile-input"
           value={currentLanguage}
           onChange={(e) => void i18n.changeLanguage(e.target.value)}
         >
@@ -675,6 +676,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
             <label>
               {t('profile:tonWallet.inputLabel')}
               <input
+                className="profile-input"
                 type="text"
                 value={tonWalletDraft}
                 placeholder={t('profile:tonWallet.inputPlaceholder')}
@@ -709,6 +711,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
             <label>
               {t('profile:withdrawal.amountLabel')}
               <input
+                className="profile-input"
                 type="text"
                 value={withdrawAmount}
                 placeholder={t('profile:withdrawal.amountPlaceholder')}
@@ -797,6 +800,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
           <label>
             {t('profile:form.countryLabel')}
             <select
+              className="profile-input"
               value={draft.country}
               disabled={countryLocked}
               onChange={(e) => setDraft({ ...draft, country: e.target.value })}
@@ -818,6 +822,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
           <label>
             {t('profile:form.genderLabel')}
             <select
+              className="profile-input"
               value={draft.gender}
               onChange={(e) => setDraft({ ...draft, gender: e.target.value })}
             >
@@ -833,6 +838,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
           <label>
             {t('profile:form.ageLabel')}
             <input
+              className="profile-input"
               type="number"
               min={0}
               max={120}
