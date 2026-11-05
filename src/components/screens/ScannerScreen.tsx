@@ -618,16 +618,7 @@ export function ScannerScreen({
           >
             <div className="ar-cube">
               {content.objectType === 'root_logo' ? (
-                <div
-                  style={{
-                    width: '100%',
-                    height: '220px',
-                    overflow: 'visible',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                  }}
-                >
+                <div className="ar-3d-scene">
                   <Game3DScene />
                 </div>
               ) : (

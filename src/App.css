@@ -1345,8 +1345,11 @@ h2 {
 .segment-code {
   min-width: 180px;
   padding: 15px;
-  border: 1px solid rgba(102, 239, 177, 0.22);
-  background: rgba(23, 89, 61, 0.1);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .segment-code strong {
@@ -1361,8 +1364,11 @@ h2 {
   display: grid;
   grid-template-columns: minmax(250px, 0.85fr) minmax(280px, 1fr);
   overflow: hidden;
-  border: 1px solid rgba(174, 255, 219, 0.16);
-  background: rgba(9, 26, 19, 0.72);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .segment-visual {
@@ -1487,8 +1493,11 @@ h2 {
   justify-content: space-between;
   margin-top: 20px;
   padding: 24px;
-  border: 1px solid rgba(174, 255, 219, 0.14);
-  background: rgba(11, 31, 22, 0.66);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .location-panel h3 {
@@ -1549,8 +1558,11 @@ h2 {
   align-items: flex-start;
   margin-top: 16px;
   padding: 18px;
-  border: 1px solid rgba(255, 197, 103, 0.22);
-  background: rgba(72, 53, 18, 0.15);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .location-status-success {
@@ -1595,8 +1607,11 @@ h2 {
 .ar-placeholder {
   margin-top: 16px;
   padding: 24px;
-  border: 1px solid rgba(101, 242, 177, 0.22);
-  background: rgba(12, 45, 30, 0.42);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   text-align: center;
 }
 
@@ -1608,12 +1623,15 @@ h2 {
   margin: 20px auto;
   overflow: hidden;
   place-items: center;
-  border: 1px solid rgba(106, 246, 181, 0.3);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-card);
   background:
     linear-gradient(rgba(80, 226, 155, 0.07) 1px, transparent 1px),
     linear-gradient(90deg, rgba(80, 226, 155, 0.07) 1px, transparent 1px),
-    #07100f;
+    rgba(5, 7, 6, 0.55);
   background-size: 24px 24px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .ar-cube {
@@ -1629,7 +1647,7 @@ h2 {
   z-index: 3;
   top: 50%;
   left: 50%;
-  color: #effff7;
+  color: var(--accent-soft);
   font-family: "JetBrains Mono", monospace;
   font-size: 28px;
   transform: translate(-50%, -50%);
@@ -2238,14 +2256,16 @@ h2 {
 }
 /* === Echo radar (Sprint 8.6.h, TEMP) === */
 .echo-radar {
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(0, 255, 136, 0.4);
-  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-card);
   padding: 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .echo-radar-title {
@@ -2957,4 +2977,14 @@ h2 {
 .mission-modal-btn-cancel:disabled {
   cursor: wait;
   opacity: 0.6;
+}
+
+/* === ScannerScreen / AR (Sprint UI-2d): обёртка 3D-сцены === */
+.ar-3d-scene {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 220px;
+  overflow: visible;
 }
