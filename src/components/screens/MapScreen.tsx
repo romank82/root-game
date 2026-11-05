@@ -79,7 +79,7 @@ export function MapScreen({ missions, geoPosition, geoError }: MapScreenProps) {
         ref={mapRef}
         center={[geoPosition.lat, geoPosition.lng]}
         zoom={FOCUS_ZOOM}
-        style={{ width: '100%', height: '100%' }}
+        className="map-container"
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'

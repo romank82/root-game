@@ -789,7 +789,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       <ErrorWithCode message={error} className="repair-error" />
 
       {!loading && profile && (
-        <>
+        <div className="profile-form">
           <p>
             {t('profile:form.playerLabel')} <b>{profile.nickname}</b>
           </p>
@@ -853,7 +853,7 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
           <button type="button" onClick={handleCancel}>
             {t('common:cancel')}
           </button>
-        </>
+        </div>
       )}
 
       <button
