@@ -18,10 +18,7 @@ import { CooldownCountdown } from '../CooldownCountdown'
 import { MissionTimer } from '../MissionTimer'
 import { MissionModal } from '../MissionModal'
 import { missionText } from '../../utils/missionHelpers'
-import {
-  MISSION_LAYER_COLORS,
-  MISSION_LAYER_ORDER as LAYER_ORDER,
-} from '../../constants/missionLayerColors'
+import { MISSION_LAYER_ORDER as LAYER_ORDER } from '../../constants/missionLayerColors'
 
 // Окно отказа с возвратом платы (3 минуты после взятия миссии).
 // Зеркало CANCEL_DEADLINE_SECONDS = 180 на бэкенде (mission_engine.py):
@@ -327,20 +324,11 @@ export function TerminalScreen({
   // активном списке миссий (папки там не рендерятся).
   function renderTeamTabs() {
     return (
-      <div style={{ display: 'flex', gap: 8, margin: '0 0 12px' }}>
+      <div className="terminal-tab-row">
         <button
           type="button"
+          className={`terminal-tab${teamTab === 'mine' ? ' is-active' : ''}`}
           onClick={() => setTeamTab('mine')}
-          style={{
-            background: teamTab === 'mine' ? '#00ff88' : 'transparent',
-            color: teamTab === 'mine' ? '#000' : 'inherit',
-            border: '1px solid #00ff88',
-            padding: '6px 12px',
-            borderRadius: 6,
-            fontWeight: 'bold',
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
         >
           {t('terminal:sections.mySessions')}
         </button>
@@ -355,16 +343,7 @@ export function TerminalScreen({
             }
             setTeamTab('active')
           }}
-          style={{
-            background: teamTab === 'active' ? '#00ff88' : 'transparent',
-            color: teamTab === 'active' ? '#000' : 'inherit',
-            border: '1px solid #00ff88',
-            padding: '6px 12px',
-            borderRadius: 6,
-            fontWeight: 'bold',
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
+          className={`terminal-tab${teamTab === 'active' ? ' is-active' : ''}`}
         >
           {t('terminal:sections.activeSessions')}
         </button>
@@ -546,14 +525,7 @@ export function TerminalScreen({
             </button>
 
             {cancelDeadlineAt && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  flexWrap: 'wrap',
-                }}
-              >
+              <div className="terminal-action-row">
                 <MissionTimer
                   mode="cancel"
                   deadlineAt={cancelDeadlineAt}
@@ -561,16 +533,7 @@ export function TerminalScreen({
                 />
                 <button
                   type="button"
-                  style={{
-                    background: '#00ff88',
-                    color: '#000',
-                    border: 'none',
-                    padding: '8px 14px',
-                    borderRadius: 6,
-                    fontWeight: 'bold',
-                    fontSize: 12,
-                    cursor: 'pointer',
-                  }}
+                  className="terminal-refuse"
                   onClick={() => void onExpireMission(mission.id)}
                 >
                   {t('terminal:buttons.refuse')}
@@ -607,14 +570,7 @@ export function TerminalScreen({
                 {/* Таймер — только пока открыто окно отказа С возвратом
                     платы (3 мин); после дедлайна возврата нет, таймер скрыт. */}
                 {teamCancelWindowOpen && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      flexWrap: 'wrap',
-                    }}
-                  >
+                  <div className="terminal-action-row">
                     <MissionTimer
                       mode="cancel"
                       deadlineAt={teamCancelDeadlineAt}
@@ -627,16 +583,7 @@ export function TerminalScreen({
                     после дедлайна — без возврата платы, но выход остаётся. */}
                 <button
                   type="button"
-                  style={{
-                    background: '#00ff88',
-                    color: '#000',
-                    border: 'none',
-                    padding: '8px 14px',
-                    borderRadius: 6,
-                    fontWeight: 'bold',
-                    fontSize: 12,
-                    cursor: 'pointer',
-                  }}
+                  className="terminal-refuse"
                   onClick={() => void handleLeaveTeamMission(mission)}
                 >
                   {t('terminal:buttons.refuse')}
@@ -708,13 +655,7 @@ export function TerminalScreen({
         )}
 
         {teamLeaveNote && (
-          <p
-            style={{
-              margin: '0 0 12px',
-              color: '#65e9ae',
-              fontSize: 13,
-            }}
-          >
+          <p className="terminal-note">
             {teamLeaveNote}
           </p>
         )}
@@ -734,10 +675,7 @@ export function TerminalScreen({
                 подвкладка вынесена отдельным блоком. */}
             <section className="layer-folder">
               <p className="eyebrow">{LAYER_LABEL.team}</p>
-              <div
-                className="layer-folder-body"
-                style={{ borderLeftColor: MISSION_LAYER_COLORS.team }}
-              >
+              <div className="layer-folder-body terminal-layer-border terminal-layer-team">
                 {renderTeamTabs()}
                 {teamTab === 'active' ? (
                   renderActiveSessions()
@@ -757,8 +695,7 @@ export function TerminalScreen({
               <section key={layer} className="layer-folder">
                 <button
                   type="button"
-                  className={`layer-folder-toggle${isOpen ? ' is-open' : ''}${isEmpty ? ' is-empty' : ''}`}
-                  style={{ color: MISSION_LAYER_COLORS[layer] }}
+                  className={`layer-folder-toggle terminal-layer-label-${layer}${isOpen ? ' is-open' : ''}${isEmpty ? ' is-empty' : ''}`}
                   onClick={() => setOpenLayer(layer)}
                 >
                   <span className="layer-folder-icon">{isOpen ? '📂' : '📁'}</span>
@@ -767,10 +704,7 @@ export function TerminalScreen({
                 </button>
 
                 {isOpen && (
-                  <div
-                    className="layer-folder-body"
-                    style={{ borderLeftColor: MISSION_LAYER_COLORS[layer] }}
-                  >
+                  <div className={`layer-folder-body terminal-layer-border terminal-layer-${layer}`}>
                     {/* Sprint 8.x-4-join-gps: подвкладки папки «Командные» —
                         свои сессии (как было) и чужие лобби рядом. */}
                     {layer === 'team' && renderTeamTabs()}

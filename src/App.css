@@ -2750,3 +2750,101 @@ h2 {
             drop-shadow(0 0 56px color-mix(in srgb, var(--cube-color, #00ff88) 90%, transparent));
   }
 }
+/* ============================================================
+   TerminalScreen restyle (Sprint UI-2c-1): дизайн-токены + классы
+   ============================================================ */
+.terminal-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.terminal-card {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-card);
+  padding: 16px;
+}
+
+.terminal-hero {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-card);
+  padding: 20px;
+}
+
+.terminal-cta {
+  width: 100%;
+  height: 56px;
+  border: none;
+  border-radius: var(--r-btn);
+  background: var(--accent);
+  color: #03130d;
+  font-weight: 800;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+/* Подвкладки папки «Командные» (свои сессии / чужие лобби). */
+.terminal-tab-row {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.terminal-tab {
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.terminal-tab.is-active {
+  background: var(--accent);
+  color: #03130d;
+}
+
+/* Строка «таймер + кнопка отказа». */
+.terminal-action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Кнопка «Отказаться» / «Покинуть команду». */
+.terminal-refuse {
+  background: var(--accent);
+  color: #03130d;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Зелёная служебная заметка (teamLeaveNote). */
+.terminal-note {
+  margin: 0 0 12px;
+  color: var(--accent-soft);
+  font-size: 13px;
+}
+
+/* Цвет левой границы папки слоя миссии. */
+.terminal-layer-border {
+  border-left-width: 4px;
+  border-left-style: solid;
+}
+.terminal-layer-story { border-left-color: var(--layer-story); }
+.terminal-layer-team { border-left-color: var(--layer-team); }
+.terminal-layer-solo { border-left-color: var(--layer-solo); }
+
+/* Цвет подписи папки слоя миссии. */
+.terminal-layer-label-story { color: var(--layer-story); }
+.terminal-layer-label-team { color: var(--layer-team); }
+.terminal-layer-label-solo { color: var(--layer-solo); }
