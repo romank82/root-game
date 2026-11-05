@@ -5,6 +5,8 @@ import traceback
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -139,10 +141,26 @@ logger = logging.getLogger(__name__)
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Retention 30 дней (Sprint DB-Audit-2): стартуем планировщик при
+    # запуске приложения и останавливаем при его завершении. Сам планировщик
+    # (BackgroundScheduler) запускает отдельный поток, поэтому здесь нет
+    # блокирующего I/O.
+    from app.retention import start_scheduler, stop_scheduler
+
+    start_scheduler()
+    try:
+        yield
+    finally:
+        stop_scheduler()
+
+
 app = FastAPI(
     title="CHIMERA Protocol API",
     version="0.6.0",
     description="Backend API for the CHIMERA game.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

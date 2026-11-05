@@ -18,3 +18,7 @@ httpx==0.28.1
 # TON (11.4): SDK для валидации адресов и Jetton transfer (testnet).
 pytoniq==0.1.43
 pytoniq-core==0.2.1
+
+# Retention scheduler (Sprint DB-Audit-2): ежедневная очистка старых
+# нефинансовых runtime-записей (PlayerEvent/AppError/LocationProof/TeamSessionMessage).
+APScheduler==3.11.0
