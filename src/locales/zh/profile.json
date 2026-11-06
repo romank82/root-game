@@ -26,6 +26,14 @@
       "paymentFailed": "支付失败。请重试。"
     }
   },
+  "referral": {
+    "title": "邀请好友",
+    "description": "分享链接，好友开始转账后你就能获得 ROOT。",
+    "shareButton": "分享链接",
+    "shareText": "来玩 CHIMERA！",
+    "disabled": "邀请活动已关闭。",
+    "error": "分享失败。"
+  },
   "tonWallet": {
     "title": "TON 钱包",
     "addressLabel": "将 ROOT 提取到 TON 的地址：",

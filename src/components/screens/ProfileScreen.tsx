@@ -7,6 +7,7 @@ import {
   deleteMyTonWallet,
   getEngineBootstrap,
   getMyProfile,
+  getMyReferralInfo,
   getMyTonWallet,
   listMyWithdrawals,
   saveMyProfile,
@@ -14,6 +15,7 @@ import {
   sendGasInvoice,
   type MyProfile,
   type MyProfilePayload,
+  type MyReferralInfo,
   type MyTonWallet,
   type PlayerWithdrawal,
 } from '../../api/engineApi'
@@ -347,6 +349,9 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
   const [buyingGas, setBuyingGas] = useState(false)
   const [gasError, setGasError] = useState<string | null>(null)
   const [gasNotice, setGasNotice] = useState<string | null>(null)
+  // Sprint Referral R-7: карточка рефералки (флаг, награда, share-ссылка).
+  const [referralInfo, setReferralInfo] = useState<MyReferralInfo | null>(null)
+  const [referralError, setReferralError] = useState<string | null>(null)
   // 11.0-b: TON-кошелёк — текущий адрес, черновик и статусы операций.
   const [tonWallet, setTonWallet] = useState<MyTonWallet | null>(null)
   const [tonWalletDraft, setTonWalletDraft] = useState('')
@@ -434,6 +439,23 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
       })
       .finally(() => {
         if (!cancelled) setWithdrawalsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Sprint Referral R-7: карточка рефералки при открытии профиля. Сбой запроса
+  // не ломает экран (анкета, газ, выводы) — только блок рефералки.
+  useEffect(() => {
+    let cancelled = false
+    getMyReferralInfo()
+      .then((data) => {
+        if (cancelled) return
+        setReferralInfo(data)
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setReferralError(err.message)
       })
     return () => {
       cancelled = true
@@ -612,6 +634,31 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     }
   }
 
+  // Sprint Referral R-7: поделиться реферальной ссылкой. Ссылку собирает
+  // бэкенд (GET /me/referral) — имя бота фронт не знает. В Telegram открываем
+  // штатный шер-диалог (openTelegramLink), вне WebApp — новую вкладку.
+  function handleShareReferral() {
+    const url = referralInfo?.shareLink
+    if (!url) return
+    const text = t('profile:referral.shareText')
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`
+    setReferralError(null)
+    try {
+      // telegram.d.ts не описывает openTelegramLink — сужаем тип локально,
+      // как это сделано для openInvoice в handleBuyGas.
+      const telegramWebApp = window.Telegram?.WebApp as
+        | { openTelegramLink?: (link: string) => void }
+        | undefined
+      if (telegramWebApp?.openTelegramLink) {
+        telegramWebApp.openTelegramLink(shareUrl)
+        return
+      }
+      window.open(shareUrl, '_blank')
+    } catch {
+      setReferralError(t('profile:referral.error'))
+    }
+  }
+
   return (
     <section className="inventory">
       <p className="eyebrow">{t('profile:header.eyebrow')}</p>
@@ -785,6 +832,25 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
           </ul>
         )}
       </div>
+
+      {referralInfo?.enabled && (
+        <div className="gas-block">
+          <h3>{t('profile:referral.title')}</h3>
+          <p>{t('profile:referral.description')}</p>
+          {referralInfo.shareLink ? (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleShareReferral}
+            >
+              {t('profile:referral.shareButton')}
+            </button>
+          ) : (
+            <p className="admin-muted">{t('profile:referral.disabled')}</p>
+          )}
+          {referralError && <p className="repair-error">{referralError}</p>}
+        </div>
+      )}
 
       {loading && <p>{t('common:loading')}</p>}
       <ErrorWithCode message={error} className="repair-error" />

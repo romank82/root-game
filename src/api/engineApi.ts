@@ -577,6 +577,27 @@ export async function saveMyProfile(
 
   return response.json() as Promise<{ player: MyProfile }>
 }
+
+// Sprint Referral R-7: карточка рефералки игрока (GET /me/referral).
+// shareLink собирает бэкенд (t.me/<bot>?start=ref_<playerId>) — фронт имени
+// бота не знает и не хардкодит; null — если TELEGRAM_BOT_USERNAME не задан.
+export type MyReferralInfo = {
+  enabled: boolean
+  rewardRoot: number
+  shareLink: string | null
+  referredBy: string | null
+}
+
+export async function getMyReferralInfo(): Promise<MyReferralInfo> {
+  const response = await apiFetch('/api/v1/engine/me/referral')
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<MyReferralInfo>
+}
+
 export type SearchPlayerHit = {
   id: string
   nickname: string | null

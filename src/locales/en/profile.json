@@ -26,6 +26,14 @@
       "paymentFailed": "Payment failed. Try again."
     }
   },
+  "referral": {
+    "title": "Invite a friend",
+    "description": "Share the link and get ROOT once your friend starts sending transfers.",
+    "shareButton": "Share link",
+    "shareText": "Play CHIMERA!",
+    "disabled": "Referral program is disabled.",
+    "error": "Could not share."
+  },
   "tonWallet": {
     "title": "TON wallet",
     "addressLabel": "Address for withdrawing ROOT to TON:",
