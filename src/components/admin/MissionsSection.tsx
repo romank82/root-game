@@ -1581,12 +1581,6 @@ export function MissionsSection({
                   })
                 }}
               >
-                <option value="text_answer">
-                  text_answer — текстовый ответ
-                </option>
-                <option value="code_repair">
-                  code_repair — восстановить код
-                </option>
                 <option value="cipher">cipher — кодовый замок</option>
                 <option value="memory">memory — память / пары карточек</option>
                 <option value="team">team — командная миссия</option>

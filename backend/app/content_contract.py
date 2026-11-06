@@ -301,8 +301,22 @@ def validate_mission_content(
             "rewardPreview",
         }
         text_keys = {"label", "instruction", "combination", "successTitle", "successText", "wrongAnswerText"}
+    elif mission_type == "memory":
+        # Sprint Memory-2d: публичный контент memory-миссии — только тексты.
+        # Сложность (grid_size/time_limit_seconds) живёт в профиле мини-игры,
+        # раскладка карточек и лимит времени — в серверной сессии
+        # (mission.memorySession); в content.ui их нет.
+        allowed = {
+            "label",
+            "instruction",
+            "successTitle",
+            "successText",
+            "wrongAnswerText",
+            "rewardPreview",
+        }
+        text_keys = allowed - {"rewardPreview"}
     else:
-        _fail("mission.missionType", "must be text_answer, code_repair, team, or cipher for public content schemaVersion 1")
+        _fail("mission.missionType", "must be text_answer, code_repair, team, cipher, or memory for public content schemaVersion 1")
     _only(ui, allowed, "mission.content.ui")
     for key in text_keys:
         if key in ui:

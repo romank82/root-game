@@ -131,7 +131,7 @@ function formatAwarded(response: MissionSubmission, t: TFunction): string {
 
   return parts.length > 0
     ? parts.join(' · ')
-    : t('cipher:success.noAwards')
+    : t('memory:success.noAwards')
 }
 
 export function MemoryScreen({
@@ -140,7 +140,7 @@ export function MemoryScreen({
   onSubmitMission,
   onExpireMission,
 }: MemoryScreenProps) {
-  const { t } = useTranslation(['cipher', 'common'])
+  const { t } = useTranslation(['memory', 'common'])
   const [resetSignal, setResetSignal] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -183,14 +183,14 @@ export function MemoryScreen({
 
     setSubmitting(false)
     if (!response) {
-      setError(t('cipher:errors.serverUnavailable'))
+      setError(t('memory:errors.serverUnavailable'))
       return
     }
     if (!response.accepted) {
       setError(
         response.message ??
           content?.wrongAnswerText ??
-          t('cipher:game.wrongFallback'),
+          t('memory:game.wrongFallback'),
       )
       // Новая попытка — свежий таймер и закрытое поле (MemoryGame
       // пересобирается по resetSignal).
@@ -217,15 +217,15 @@ export function MemoryScreen({
   if (successAward) {
     return (
       <section className="segment-screen">
-        <p className="eyebrow">{t('cipher:header.completedEyebrow')}</p>
+        <p className="eyebrow">{t('memory:header.completedEyebrow')}</p>
         <section className="mission-success-card">
-          <span className="file-label">{t('cipher:success.label')}</span>
+          <span className="file-label">{t('memory:success.label')}</span>
           <div className="mission-success-symbol">✓</div>
-          <h3>{successTitle ?? t('cipher:success.titleFallback')}</h3>
-          <p>{successText ?? t('cipher:success.textFallback')}</p>
+          <h3>{successTitle ?? t('memory:success.titleFallback')}</h3>
+          <p>{successText ?? t('memory:success.textFallback')}</p>
           <div className="mission-reward-grid">
             <div>
-              <span>{t('cipher:success.receivedLabel')}</span>
+              <span>{t('memory:success.receivedLabel')}</span>
               <strong>{successAward}</strong>
             </div>
           </div>
@@ -233,7 +233,7 @@ export function MemoryScreen({
             className="repair-submit-button"
             onClick={() => onScreenChange('terminal')}
           >
-            {t('cipher:buttons.backToContour')}
+            {t('memory:buttons.backToContour')}
           </button>
         </section>
       </section>
@@ -243,17 +243,17 @@ export function MemoryScreen({
   if (timedOut) {
     return (
       <section className="segment-screen">
-        <p className="eyebrow">{t('cipher:header.timeUpEyebrow')}</p>
+        <p className="eyebrow">{t('memory:header.timeUpEyebrow')}</p>
         <section className="mission-success-card">
-          <span className="file-label">{t('cipher:timeUp.label')}</span>
+          <span className="file-label">{t('memory:timeUp.label')}</span>
           <div className="mission-success-symbol">!</div>
-          <h3>{t('cipher:timeUp.title')}</h3>
-          <p>{content?.wrongAnswerText ?? t('cipher:timeUp.wrongFallback')}</p>
+          <h3>{t('memory:timeUp.title')}</h3>
+          <p>{content?.wrongAnswerText ?? t('memory:timeUp.wrongFallback')}</p>
           <button
             className="repair-submit-button"
             onClick={() => onScreenChange('terminal')}
           >
-            {t('cipher:buttons.backToContour')}
+            {t('memory:buttons.backToContour')}
           </button>
         </section>
       </section>
@@ -264,12 +264,12 @@ export function MemoryScreen({
   if (!mission || !content) {
     return (
       <section className="segment-screen">
-        <p className="eyebrow">{t('cipher:errors.noMissionEyebrow')}</p>
+        <p className="eyebrow">{t('memory:errors.noMissionEyebrow')}</p>
         <section className="location-status">
           <span className="location-status-icon">⌖</span>
           <div>
-            <strong>{t('cipher:errors.noMissionTitle')}</strong>
-            <p>{t('cipher:errors.noMissionBody')}</p>
+            <strong>{t('memory:errors.noMissionTitle')}</strong>
+            <p>{t('memory:errors.noMissionBody')}</p>
           </div>
         </section>
         <button className="back-button" onClick={() => onScreenChange('terminal')}>
@@ -288,21 +288,21 @@ export function MemoryScreen({
 
   const attemptLabel =
     maxAttempts !== null
-      ? `${t('cipher:timer.attemptOfMax', {
+      ? `${t('memory:timer.attemptOfMax', {
           current: currentAttempt,
           max: maxAttempts,
-        })}${isLastAttempt ? t('cipher:timer.attemptLastMark') : ''}`
-      : t('cipher:timer.attemptCurrent', { current: currentAttempt })
+        })}${isLastAttempt ? t('memory:timer.attemptLastMark') : ''}`
+      : t('memory:timer.attemptCurrent', { current: currentAttempt })
 
   // 3. Иначе — игровой UI.
   return (
     <section className="segment-screen">
-      <p className="eyebrow">{t('cipher:header.activeMissionEyebrow')}</p>
+      <p className="eyebrow">{t('memory:header.activeMissionEyebrow')}</p>
 
       {mission.deadlineAt && (
         <MissionTimer
           deadlineAt={mission.deadlineAt}
-          label={t('cipher:header.timerLabel')}
+          label={t('memory:header.timerLabel')}
           onClick={() => onExpireMission(mission.id)}
         />
       )}

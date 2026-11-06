@@ -738,8 +738,6 @@ function AdminApp() {
                       onChange={(e) => setMinigameProfileGameType(e.target.value)}
                     >
                       <option value="cipher">cipher</option>
-                      <option value="code_repair">code_repair</option>
-                      <option value="text_answer">text_answer</option>
                       <option value="memory">memory</option>
                     </select>
                   </label>

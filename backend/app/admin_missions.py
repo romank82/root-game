@@ -84,15 +84,6 @@ def _validate_public_mission_content(
     mission_type: str, content: Any, *, require_full_cipher_ui: bool = True
 ) -> None:
     """Do not expose submitted content or protected values in validation errors."""
-    # Sprint Memory-2c: контракта публичного content для memory в
-    # app.content_contract пока нет (validate_mission_content поддерживает
-    # text_answer / code_repair / team / cipher). Пока контракт memory не описан
-    # отдельным шагом, публикацию memory-миссии контент-валидатор не блокирует:
-    # экран memory рендерится по серверной сессии (mission.memorySession), а
-    # content.ui даёт только опциональные тексты (label/instruction/success*/
-    # wrongAnswerText). Убрать ветку, когда контракт появится в content_contract.
-    if mission_type == "memory":
-        return
     try:
         validate_mission_content(
             mission_type,

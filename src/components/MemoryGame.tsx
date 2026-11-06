@@ -48,7 +48,7 @@ export function MemoryGame({
   title,
   error,
 }: MemoryGameProps) {
-  const { t } = useTranslation(['cipher'])
+  const { t } = useTranslation(['memory'])
   // Открытые (ещё не проверенные) и совпавшие карточки — внутреннее состояние.
   const [openCards, setOpenCards] = useState<number[]>([])
   const [matchedCards, setMatchedCards] = useState<Set<number>>(new Set())
@@ -168,7 +168,7 @@ export function MemoryGame({
         <div
           className={`cipher-timer${timeLeft <= 10 ? ' cipher-timer-critical' : ''}`}
         >
-          {t('cipher:timer.seconds', { seconds: Math.max(timeLeft, 0) })}
+          {t('memory:timer.seconds', { seconds: Math.max(timeLeft, 0) })}
         </div>
       )}
 
@@ -217,7 +217,7 @@ export function MemoryGame({
             }
           }}
         >
-          {t('cipher:buttons.reset')}
+          {t('memory:buttons.reset')}
         </button>
         <button
           className="repair-submit-button"
@@ -227,8 +227,8 @@ export function MemoryGame({
           disabled={boardLocked || !boardComplete}
         >
           {isSubmitting
-            ? t('cipher:buttons.submitting')
-            : t('cipher:buttons.submit')}
+            ? t('memory:buttons.submitting')
+            : t('memory:buttons.submit')}
         </button>
       </div>
     </>

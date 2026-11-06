@@ -1,0 +1,41 @@
+{
+  "header": {
+    "activeMissionEyebrow": "ACTIVE MISSION",
+    "completedEyebrow": "ACTIVE MISSION / COMPLETED",
+    "timeUpEyebrow": "ACTIVE MISSION / TIME IS UP",
+    "timerLabel": "until the task ends"
+  },
+  "game": {
+    "wrongFallback": "WRONG, TRY AGAIN"
+  },
+  "timer": {
+    "seconds": "⏱ {{seconds}} sec",
+    "attemptCurrent": "ATTEMPT {{current}}",
+    "attemptOfMax": "ATTEMPT {{current}} / {{max}}",
+    "attemptLastMark": " (LAST)"
+  },
+  "success": {
+    "label": "MEMORY CLEARED",
+    "titleFallback": "All pairs found",
+    "textFallback": "Progress and rewards confirmed by the server.",
+    "receivedLabel": "RECEIVED",
+    "noAwards": "Progress confirmed by the server."
+  },
+  "timeUp": {
+    "label": "TIME IS UP",
+    "title": "Not all pairs found",
+    "wrongFallback": "Attempt not counted."
+  },
+  "errors": {
+    "serverUnavailable": "SERVER UNAVAILABLE. CHECK CONNECTION.",
+    "noMissionEyebrow": "MEMORY / MINI-GAME UNAVAILABLE",
+    "noMissionTitle": "NO ACTIVE MEMORY MISSION",
+    "noMissionBody": "The published memory mission has not been received from the game bootstrap or contains invalid public content."
+  },
+  "buttons": {
+    "reset": "RESET",
+    "submit": "CHECK →",
+    "submitting": "CHECKING…",
+    "backToContour": "TO CONTOUR →"
+  }
+}
