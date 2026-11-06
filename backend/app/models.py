@@ -844,6 +844,19 @@ class GamePlayer(TimestampMixin, Base):
         index=True,
     )
 
+    # Referral-1: кто пригласил игрока (ref_<player_id> из start_param).
+    # Nullable: игроки до фичи и игроки без реферальной ссылки остаются NULL
+    # (backfill не делаем — как у country_source/last_seen_at). ondelete
+    # RESTRICT: история приглашений не должна пропадать при удалении игрока;
+    # запрет self-reference проверяется в сервисе (assign_referrer) и в
+    # ck_referral_rewards_self на таблице referral_rewards.
+    referred_by_player_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -1526,6 +1539,64 @@ class PlayerTransfer(TimestampMixin, Base):
         CheckConstraint(
             "status IN ('completed','rejected')",
             name="ck_player_transfers_status",
+        ),
+    )
+
+
+class ReferralReward(TimestampMixin, Base):
+    """Реферальная награда (Sprint Referral R-1). Одна запись = одна пара
+    «пригласивший → приглашённый».
+
+    Жизненный цикл: pending → credited | cancelled. Логики начисления здесь
+    нет — только модель (сервис и точка вызова — R-3…R-6). Физическое
+    удаление записей запрещено (immutable-история).
+
+    Идемпотентность на уровне БД: uq_referral_rewards_referred — один
+    приглашённый игрок может быть награждён только один раз (повторный
+    ref_-параметр у уже привязанного игрока не создаёт вторую запись).
+
+    amount_root фиксируется в момент создания записи (значение CMS
+    referral.reward_root на тот момент) — историю задним числом не меняем.
+    ondelete RESTRICT у обоих FK на game_players.id: история приглашений не
+    должна пропадать при удалении игрока.
+    """
+
+    __tablename__ = "referral_rewards"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    referrer_player_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    referred_player_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    amount_root: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", index=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "referred_player_id",
+            name="uq_referral_rewards_referred",
+        ),
+        CheckConstraint(
+            "amount_root > 0",
+            name="ck_referral_rewards_amount_positive",
+        ),
+        CheckConstraint(
+            "status IN ('pending','credited','cancelled')",
+            name="ck_referral_rewards_status",
+        ),
+        CheckConstraint(
+            "referrer_player_id <> referred_player_id",
+            name="ck_referral_rewards_self",
         ),
     )
 
