@@ -1341,6 +1341,26 @@ def _award_mission_rewards(
 
     session.flush()
 
+    # Sprint Referral R-6: реферальный бонус — побочный эффект награды.
+    # SAVEPOINT + try/except: провал бонуса не ломает уже выданную награду
+    # миссии (упавший flush отравил бы транзакцию — PendingRollbackError на
+    # commit; ровно та же схема, что у player_events ниже). Вызывается только
+    # если ROOT реально начислен: без earned-кредита порог недостижим.
+    if awarded_root > 0:
+        try:
+            # Lazy импорт: referral_service импортирует _get_root_wallet_for_update
+            # и _new_id из этого модуля — top-level импорт дал бы цикл.
+            from app.referral_service import check_and_reward
+
+            with session.begin_nested():
+                check_and_reward(session, player_id)
+        except Exception:  # noqa: BLE001 — бонус не важнее награды миссии
+            logger.warning(
+                "referral check_and_reward failed for player %s",
+                player_id,
+                exc_info=True,
+            )
+
     return {
         "root": awarded_root,
         "items": awarded_items,
