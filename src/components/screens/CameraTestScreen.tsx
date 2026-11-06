@@ -287,11 +287,18 @@ export function CameraTestScreen({
   }
   const isRootLogoScene = missionArScene.object_type === 'root_logo'
 
-  // Тап по кубу открывает мини-игру cipher (только для миссий типа cipher).
+  // Тап по кубу открывает мини-игру миссии: cipher (кодовый замок) или
+  // memory (пары карточек, Sprint Memory-2b). Остальные типы — без мини-игры.
   const handleCubeTap = () => {
     if (!isNear || !isCentered) return
-    if (!mission || mission.missionType !== 'cipher') return
-    onScreenChange('cipher')
+    if (!mission) return
+    if (mission.missionType === 'cipher') {
+      onScreenChange('cipher')
+      return
+    }
+    if (mission.missionType === 'memory') {
+      onScreenChange('memory')
+    }
   }
 
   return (
@@ -327,7 +334,10 @@ export function CameraTestScreen({
         {status === 'ready' && isNear && (
           <div
             className={`ar-cube-world${isCentered ? ' is-centered' : ''}${
-              isNear && isCentered && mission?.missionType === 'cipher'
+              isNear &&
+              isCentered &&
+              (mission?.missionType === 'cipher' ||
+                mission?.missionType === 'memory')
                 ? ' is-tappable'
                 : ''
             }`}

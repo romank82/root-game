@@ -11,6 +11,7 @@ export type Screen =
   | 'map'
   | 'camera-test'
   | 'cipher'
+  | 'memory'
 
 export type AuthStatus = 'checking' | 'authenticated' | 'unavailable' | 'error'
 export type ApiStatus = 'checking' | 'online' | 'offline'

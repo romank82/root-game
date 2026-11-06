@@ -49,6 +49,16 @@ export type EngineMission = {
     // 8.17-timer: лимит времени на попытку cipher (null = без лимита).
     timeLimitSeconds: number | null
   } | null
+  // Sprint Memory-2b: сгенерированная backend-сессия memory-игры (Memory-2a).
+  // Раскладка карточек и размер сетки создаются при accept и пересоздаются при
+  // каждом промахе. Без сессии экран memory неиграбелен (legacy-пути нет).
+  memorySession?: {
+    gridSize: number
+    // Значение каждой карточки: gridSize * gridSize элементов, каждый id 2 раза.
+    pairs: number[]
+    // Лимит времени на попытку memory (null = без лимита).
+    timeLimitSeconds: number | null
+  } | null
   geoZoneId: string | null
   arObjectId: string | null
   spawn: EngineMissionSpawn | null

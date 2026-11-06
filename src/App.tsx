@@ -20,6 +20,7 @@ import { MapScreen } from './components/screens/MapScreen'
 // TEMP: dev-only camera test screen — удалить в Sprint 8.6.g.
 import { CameraTestScreen } from './components/screens/CameraTestScreen'
 import { CipherScreen } from './components/screens/CipherScreen'
+import { MemoryScreen } from './components/screens/MemoryScreen'
 import { TeamSessionScreen } from './components/screens/TeamSessionScreen'
 
 function App() {
@@ -176,6 +177,16 @@ function App() {
 
       {screen === 'cipher' && (
         <CipherScreen
+          missions={missions}
+          onScreenChange={setScreen}
+          onSubmitMission={submitMission}
+          onExpireMission={expireMission}
+        />
+      )}
+
+      {/* Sprint Memory-2b: мини-игра «память» (пары карточек). */}
+      {screen === 'memory' && (
+        <MemoryScreen
           missions={missions}
           onScreenChange={setScreen}
           onSubmitMission={submitMission}

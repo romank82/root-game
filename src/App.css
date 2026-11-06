@@ -2787,6 +2787,82 @@ h2 {
   transform: scale(1.15);
 }
 
+/* === MemoryGame (Sprint Memory-2b) === */
+
+/* Сетка карточек: число колонок задаёт компонент через --grid-size. */
+.memory-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-size, 4), 1fr);
+  gap: 10px;
+  margin: 24px 0;
+  perspective: 900px;
+}
+
+/* Карточка: контейнер 3D-переворота (лицо «?» / значение пары). */
+.memory-card {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transform-style: preserve-3d;
+  transition: transform 0.35s ease;
+}
+
+.memory-card:disabled {
+  cursor: default;
+}
+
+.memory-card.is-flipped,
+.memory-card.is-matched {
+  transform: rotateY(180deg);
+}
+
+/* Обе стороны карточки лежат друг на друге; видны только «лицом». */
+.memory-card-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-btn);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  font-family: monospace;
+  font-size: 22px;
+  font-weight: 700;
+  user-select: none;
+}
+
+/* Закрытая карточка. */
+.memory-card-front {
+  border: 1px solid var(--stroke);
+  background: var(--surface);
+  color: var(--muted);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Открытая карточка (повёрнута на 180deg вместе с контейнером). */
+.memory-card-back {
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+  text-shadow: 0 0 8px rgba(46, 230, 160, 0.7);
+  transform: rotateY(180deg);
+}
+
+/* Совпавшая пара остаётся открытой и приглушается. */
+.memory-card.is-matched .memory-card-back {
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
+  opacity: 0.7;
+}
+
+
 /* Кликабельный куб */
 /* Примечание: .ar-cube-world базово имеет pointer-events: none — для
    кликабельного состояния переопределяем в auto здесь (не трогая базовый). */
