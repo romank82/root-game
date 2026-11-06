@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import { ChaptersSection } from './ChaptersSection'
 import { MissionsSection } from './MissionsSection'
 import { SeasonsSection } from './SeasonsSection'
@@ -142,6 +143,50 @@ export function AdminTree({
   // Режим создания сущности (кнопки «+» в узлах дерева). Когда задан,
   // правая панель рендерит секцию создания вместо формы выбранного элемента.
   const [createContext, setCreateContext] = useState<CreateContext>(null)
+
+  // Sprint Admin-CSS-Fix-2: split-pane для дерева структуры. Ширина колонки
+  // дерева в px, инициализация из localStorage, перетаскивание разделителя,
+  // clamp 240..600 (значения вне диапазона при инициализации игнорируются).
+  const [treeWidth, setTreeWidth] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem('adminTreeWidth'))
+      return Number.isFinite(stored) && stored >= 240 && stored <= 600
+        ? stored
+        : 320
+    } catch {
+      return 320
+    }
+  })
+  const treeDragRef = useRef<{ startX: number; startWidth: number } | null>(
+    null,
+  )
+
+  const handleTreeResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    treeDragRef.current = { startX: event.clientX, startWidth: treeWidth }
+    let latest = treeWidth
+    const onMove = (moveEvent: MouseEvent) => {
+      if (treeDragRef.current === null) return
+      const delta = moveEvent.clientX - treeDragRef.current.startX
+      latest = Math.min(
+        600,
+        Math.max(240, treeDragRef.current.startWidth + delta),
+      )
+      setTreeWidth(latest)
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      treeDragRef.current = null
+      try {
+        localStorage.setItem('adminTreeWidth', String(latest))
+      } catch {
+        // localStorage недоступен — ширина не сохранится, но drag работает.
+      }
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -520,8 +565,17 @@ export function AdminTree({
 
   return (
     <div className="admin-layout">
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-        <div style={{ flex: '0 0 320px', minWidth: 0, overflow: 'auto' }}>
+      <div style={{ display: 'flex', gap: 0, alignItems: 'flex-start' }}>
+        <div
+          className="admin-tree"
+          style={{
+            width: treeWidth,
+            flex: '0 0 auto',
+            minWidth: 240,
+            maxWidth: 600,
+            overflow: 'auto',
+          }}
+        >
           {error && <p className="admin-alert admin-error">{error}</p>}
           {loading && seasons.length === 0 && (
             <p className="admin-muted">Загрузка структуры…</p>
@@ -566,7 +620,7 @@ export function AdminTree({
                     <span className={`admin-status admin-status-${season.status}`}>
                       {season.status}
                     </span>
-                    <strong>{seasonOpen ? '▾ ' : '▸ '}{season.title}</strong>
+                    <strong><span className="admin-tree-caret">{seasonOpen ? '▾' : '▸'}</span>{season.title}</strong>
                     <small>{season.slug} · sortOrder {season.sortOrder}</small>
                   </button>
                   {canWrite && (
@@ -634,7 +688,7 @@ export function AdminTree({
                               {chapter.status}
                             </span>
                             <strong>
-                              {chapterOpen ? '▾ ' : '▸ '}
+                              <span className="admin-tree-caret">{chapterOpen ? '▾' : '▸'}</span>
                               {chapter.title}
                             </strong>
                             <small>
@@ -760,7 +814,7 @@ export function AdminTree({
                                         {segment.status}
                                       </span>
                                       <strong>
-                                        {segmentOpen ? '▾ ' : '▸ '}
+                                        <span className="admin-tree-caret">{segmentOpen ? '▾' : '▸'}</span>
                                         {segment.title}
                                       </strong>
                                       <small>
@@ -839,6 +893,13 @@ export function AdminTree({
           })}
         </ul>
         </div>
+        <div
+          className="admin-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          title="Перетащите, чтобы изменить ширину дерева"
+          onMouseDown={handleTreeResizeStart}
+        />
         <div style={{ flex: 1, minWidth: 0 }}>
           {renderDetailPanel()}
         </div>

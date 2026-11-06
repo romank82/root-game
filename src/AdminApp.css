@@ -13,6 +13,19 @@
   box-sizing: border-box;
 }
 
+/* Sprint Admin-CSS-Fix-2: компенсация глобального reset `* { margin:0; padding:0 }`
+   из App.css (тот файл грузится и на /admin через общий бандл).
+   Возвращаем спискам индентацию (иначе дерево «наезжает»),
+   а параграфам — межблочный отступ. */
+.admin-shell ul,
+.admin-shell ol {
+  padding-left: 1.1em;
+}
+
+.admin-shell p {
+  margin: 0 0 0.6em;
+}
+
 .admin-shell button,
 .admin-shell input,
 .admin-shell textarea,
@@ -63,7 +76,7 @@
 .admin-kicker {
   margin: 0 0 7px;
   color: #72b99a;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 10px;
   letter-spacing: 0.13em;
 }
@@ -72,7 +85,7 @@
   align-items: center;
   gap: 14px;
   color: #9fc7b3;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 12px;
 }
 
@@ -96,6 +109,40 @@
   padding: 28px;
   border: 1px solid rgba(190, 255, 226, 0.16);
   background: rgba(9, 27, 21, 0.78);
+}
+
+/* Sprint Admin-CSS-Fix-2: перетаскиваемый разделитель split-pane
+   (дерево структуры и список миссий). */
+.admin-resize-handle {
+  flex: 0 0 6px;
+  align-self: stretch;
+  width: 6px;
+  min-height: 200px;
+  margin: 0 9px;
+  background: var(--stroke);
+  border-radius: 3px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.admin-resize-handle:hover {
+  background: var(--accent);
+}
+
+/* Sprint Admin-CSS-Fix-2: caret-иконка дерева (адаптивная к ширине).
+   Фиксированная ширина + запрет сжатия, чтобы глиф не «наезжал» на
+   заголовок при узкой колонке; при этом сам заголовок переносится. */
+.admin-tree-caret {
+  display: inline-block;
+  width: 1.1em;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .admin-tree-caret {
+    width: 1em;
+  }
 }
 
 .admin-editor-title,
@@ -136,6 +183,15 @@
   font-size: 14px;
 }
 
+/* Sprint Admin-CSS-Fix-2: в дереве структуры разрешаем перенос названий
+   (scoped через .admin-tree), чтобы длинные заголовки не обрезались.
+   Глобальное правило выше (список миссий) не трогаем. */
+.admin-tree .admin-mission-row strong {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .admin-mission-row small,
 .admin-muted,
 .admin-readonly {
@@ -147,7 +203,7 @@
   width: fit-content;
   padding: 3px 7px;
   border: 1px solid;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 9px;
   letter-spacing: 0.08em;
 }
@@ -176,7 +232,7 @@
   display: grid;
   gap: 7px;
   color: #afcebe;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
 }
 
@@ -196,7 +252,7 @@
 .admin-editor textarea {
   min-height: 100px;
   resize: vertical;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -259,7 +315,7 @@
 .admin-refresh {
   border: 1px solid;
   padding: 11px 15px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -352,7 +408,7 @@
   display: grid;
   gap: 7px;
   color: #afcebe;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import {
   createAdminMission,
   getMissionRuntimePolicyByMission,
@@ -796,6 +797,50 @@ export function MissionsSection({
   // Sprint Trans-3b: модалка ручного перевода контента миссии.
   const [translationsModalOpen, setTranslationsModalOpen] = useState(false)
 
+  // Sprint Admin-CSS-Fix-2: split-pane для списка миссий (sidebar / редактор).
+  // Ширина колонки списка в px, инициализация из localStorage, перетаскивание
+  // разделителя, clamp 240..500 (значения вне диапазона игнорируются).
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem('adminMissionsSidebarWidth'))
+      return Number.isFinite(stored) && stored >= 240 && stored <= 500
+        ? stored
+        : 310
+    } catch {
+      return 310
+    }
+  })
+  const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(
+    null,
+  )
+
+  const handleSidebarResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    sidebarDragRef.current = { startX: event.clientX, startWidth: sidebarWidth }
+    let latest = sidebarWidth
+    const onMove = (moveEvent: MouseEvent) => {
+      if (sidebarDragRef.current === null) return
+      const delta = moveEvent.clientX - sidebarDragRef.current.startX
+      latest = Math.min(
+        500,
+        Math.max(240, sidebarDragRef.current.startWidth + delta),
+      )
+      setSidebarWidth(latest)
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      sidebarDragRef.current = null
+      try {
+        localStorage.setItem('adminMissionsSidebarWidth', String(latest))
+      } catch {
+        // localStorage недоступен — ширина не сохранится, но drag работает.
+      }
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
   const selectedMission = useMemo(
     () => missions.find((mission) => mission.id === selectedId) ?? null,
     [missions, selectedId],
@@ -1330,9 +1375,17 @@ export function MissionsSection({
   const showMissionList = editingId === null || editingId === undefined
 
   return (
-    <div className="admin-layout">
+    <div className="admin-layout" style={{ gap: 0 }}>
       {showMissionList && (
-      <aside className="admin-sidebar">
+      <aside
+        className="admin-sidebar"
+        style={{
+          width: sidebarWidth,
+          flex: '0 0 auto',
+          minWidth: 240,
+          maxWidth: 500,
+        }}
+      >
           <button
             className="admin-primary"
             onClick={startNewMission}
@@ -1373,6 +1426,15 @@ export function MissionsSection({
             )}
           </div>
         </aside>
+      )}
+      {showMissionList && (
+        <div
+          className="admin-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          title="Перетащите, чтобы изменить ширину списка"
+          onMouseDown={handleSidebarResizeStart}
+        />
       )}
       <section className="admin-editor">
         <div className="admin-editor-title">

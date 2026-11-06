@@ -881,12 +881,19 @@ def _validate_for_publish(
                                 ),
                             )
 
+        elif validator == "memory_match":
+            # Sprint Memory-Validation-Fix-2: memory валидируется по серверной
+            # сессии (progress.memory_session) при проверке ответа;
+            # validation_config не требуется — no-op.
+            pass
+
         else:
             raise HTTPException(
                 status_code=422,
                 detail=(
                     "Миссию нельзя опубликовать: validation_config.validator "
-                    "должен быть normalized_text_match, ordered_blocks_match или cipher_match."
+                    "должен быть normalized_text_match, ordered_blocks_match, "
+                    "cipher_match или memory_match."
                 ),
             )
 
