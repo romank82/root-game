@@ -319,6 +319,36 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         ),
         is_sensitive=False,
     ),
+    # Sprint Referral R-2: реферальная программа (механика — R-3…R-6).
+    # referral.enabled — рубильник: по умолчанию выключен, включение — осознанное
+    # решение через CMS, а не побочный эффект деплоя. referral.reward_root —
+    # сумма ROOT пригласившему, когда приглашённый достигает порога переводов
+    # (economy.transfer_minimum_earned_root). is_sensitive=True: денежный
+    # параметр, правка не-суперадмином — только через approval workflow.
+    "referral.enabled": SystemSettingDefinition(
+        key="referral.enabled",
+        value_type="boolean",
+        default_value=False,
+        category="referral",
+        title="Реферальная программа вкл/выкл",
+        description=(
+            "Если true — пригласивший получает ROOT, когда приглашённый "
+            "достигает порога переводов."
+        ),
+        is_sensitive=False,
+    ),
+    "referral.reward_root": SystemSettingDefinition(
+        key="referral.reward_root",
+        value_type="integer",
+        default_value=25,
+        category="referral",
+        title="Вознаграждение за приглашение (ROOT)",
+        description=(
+            "Сколько ROOT получает пригласивший, когда приглашённый "
+            "достигает порога переводов."
+        ),
+        is_sensitive=True,
+    ),
 }
 
 
