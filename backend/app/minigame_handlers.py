@@ -91,9 +91,107 @@ class CipherHandler:
         )
 
 
+def _normalize_card_indices(sequence: list | None, pairs_total: int) -> list[int] | None:
+    """Привести sequence memory к list[int] индексов карточек.
+
+    Player API (MissionSubmitPayload) объявляет sequence как list[str], поэтому
+    цифровые строки приводим к int: фронт может прислать как "3", так и 3.
+    Любой нецифровой/отрицательный/вне диапазона элемент или неверная длина —
+    None (ответ невалиден, side-effect'ов нет).
+    """
+    if not isinstance(sequence, list):
+        return None
+    if len(sequence) != pairs_total:
+        return None
+    indices: list[int] = []
+    for raw in sequence:
+        if isinstance(raw, bool):
+            return None
+        if isinstance(raw, int):
+            index = raw
+        elif isinstance(raw, str) and raw.strip().isdigit():
+            index = int(raw.strip())
+        else:
+            return None
+        if index < 0 or index >= pairs_total:
+            return None
+        indices.append(index)
+    return indices
+
+
+class MemoryHandler:
+    """Memory (пары карточек): генерация поля и проверка порядка открытий.
+
+    sequence — порядок открытых карточек (индексы в session_data["pairs"]),
+    по две карточки на ход: пара (sequence[2i], sequence[2i+1]) должна
+    указывать на одинаковые значения pairs. Хендлер не начисляет награды и не
+    меняет статусы — это делает mission_engine.py.
+    """
+
+    def generate_session(self, settings: dict) -> dict:
+        """Сгенерировать поле карточек.
+
+        settings: {grid_size: int 4..8 (чётное), time_limit_seconds: int|None}.
+        Возврат: {"grid_size": int, "pairs": list[int],
+                  "time_limit_seconds": int|None}.
+        pairs — grid_size * grid_size элементов: каждый id 1..N/2 ровно 2 раза,
+        перемешан. Скрывать pairs от игрока не нужно: игра на память, порядок
+        проверяет сервер.
+        """
+        grid_size = settings.get("grid_size", 4)
+        try:
+            grid_size = int(grid_size)
+        except (TypeError, ValueError):
+            grid_size = 4
+        grid_size = max(4, min(grid_size, 8))
+        if grid_size % 2 != 0:
+            # Нечётная сетка не разбивается на пары — округляем вниз (5→4, 7→6).
+            grid_size -= 1
+        pairs_count = grid_size * grid_size // 2
+        pairs = [card_id for card_id in range(1, pairs_count + 1) for _ in range(2)]
+        random.shuffle(pairs)
+        time_limit = settings.get("time_limit_seconds")
+        if time_limit is not None:
+            try:
+                time_limit = int(time_limit)
+            except (TypeError, ValueError):
+                time_limit = None
+        return {
+            "grid_size": grid_size,
+            "pairs": pairs,
+            "time_limit_seconds": time_limit,
+        }
+
+    def validate_submission(self, session_data: dict | None, sequence: list | None) -> bool:
+        """Проверить порядок открытий.
+
+        session_data: player_mission.progress["memory_session"] или None.
+        sequence: список открытых карточек (индексы pairs) в порядке открытия.
+        Возврат: bool. Без side-effect'ов.
+        """
+        if not isinstance(session_data, dict):
+            return False
+        pairs = session_data.get("pairs")
+        if not isinstance(pairs, list) or not pairs:
+            return False
+        indices = _normalize_card_indices(sequence, len(pairs))
+        if indices is None:
+            return False
+        # Все карточки должны быть открыты ровно по одному разу.
+        if len(set(indices)) != len(pairs):
+            return False
+        for position in range(0, len(indices), 2):
+            first = indices[position]
+            second = indices[position + 1]
+            if pairs[first] != pairs[second]:
+                return False
+        return True
+
+
 # Реестр: game_type -> handler. Новая мини-игра = новый класс + одна строка здесь.
 MINIGAME_HANDLERS: dict[str, MinigameHandler] = {
     "cipher": CipherHandler(),
+    "memory": MemoryHandler(),
 }
 
 

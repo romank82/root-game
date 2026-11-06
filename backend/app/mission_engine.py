@@ -843,6 +843,12 @@ def _build_bootstrap(
                     mission,
                     progress[mission.id],
                 ),
+                # Sprint Memory-2a: серверная сессия memory по аналогии с cipher
+                # (gridSize/pairs/timeLimitSeconds); для других типов — None.
+                "memorySession": _serialize_memory_session_for_bootstrap(
+                    mission,
+                    progress[mission.id],
+                ),
                 "status": progress[mission.id].status,
                 "attemptCount": progress[mission.id].attempt_count,
                 "maxAttempts": max_attempts_by_mission[mission.id],
@@ -1048,10 +1054,38 @@ def _serialize_cipher_session_for_bootstrap(
     }
 
 
+def _serialize_memory_session_for_bootstrap(
+    mission: Mission,
+    player_mission: PlayerMission,
+) -> dict | None:
+    """Sprint Memory-2a: публичная сессия memory для экрана мини-игры.
+
+    Отдаём раскладку карточек (pairs) и размер сетки: memory — игра на память,
+    сервер сверяет порядок открытий по progress.memory_session. Ключи ответа —
+    camelCase, как у cipherSession (стиль публичного bootstrap).
+    """
+    if mission.mission_type != "memory":
+        return None
+    session_data = (player_mission.progress or {}).get("memory_session")
+    if not isinstance(session_data, dict):
+        return None
+    pairs = session_data.get("pairs")
+    grid_size = session_data.get("grid_size")
+    if not isinstance(pairs, list) or not isinstance(grid_size, int):
+        return None
+    if grid_size <= 0 or len(pairs) != grid_size * grid_size:
+        return None
+    return {
+        "gridSize": grid_size,
+        "pairs": pairs,
+        "timeLimitSeconds": session_data.get("time_limit_seconds"),
+    }
+
+
 def _validate_submission(
     mission: Mission,
     answer: str | None,
-    sequence: list[str] | None,
+    sequence: list[str] | list[int] | None,
     player_mission: PlayerMission | None = None,
 ) -> bool:
     """
@@ -1093,6 +1127,17 @@ def _validate_submission(
         session_data = None
         if player_mission is not None:
             session_data = (player_mission.progress or {}).get("cipher_session")
+        return handler.validate_submission(session_data=session_data, sequence=sequence)
+
+    if validator == "memory_match":
+        # Sprint Memory-2a: порядок открытий сверяется с сессией, созданной при
+        # accept (progress.memory_session); validation_config не используется.
+        handler = get_handler("memory")
+        if handler is None:
+            return False
+        session_data = None
+        if player_mission is not None:
+            session_data = (player_mission.progress or {}).get("memory_session")
         return handler.validate_submission(session_data=session_data, sequence=sequence)
 
     return False
@@ -1486,6 +1531,23 @@ def _consume_entry_resources(
     )
 
 
+# Sprint Memory-2a: ключ сессии мини-игры в PlayerMission.progress по game_type.
+# Cipher-ключ остаётся прежним ("cipher_session") — обратная совместимость с
+# уже выданными сессиями, тестами и team-сервисом.
+MINIGAME_SESSION_PROGRESS_KEYS: dict[str, str] = {
+    "cipher": "cipher_session",
+    "memory": "memory_session",
+}
+
+
+def _minigame_session_progress_key(mission_type: str) -> str | None:
+    """Ключ PlayerMission.progress, в котором живёт сессия мини-игры.
+
+    None — для типа миссии серверной сессии нет (text_answer / code_repair / team).
+    """
+    return MINIGAME_SESSION_PROGRESS_KEYS.get(mission_type)
+
+
 def _resolve_minigame_settings(session: Session, mission: Mission) -> dict:
     """Sprint 8.17.15: параметры мини-игры.
 
@@ -1618,14 +1680,17 @@ def _submit_mission_once(
             # Sprint 8.17 (шаг 6): неверная попытка закрыта — следующая попытка
             # получает новый код и новые барабаны (сгенерированная при accept
             # сессия больше недействительна).
+            # Sprint Memory-2a: ключ сессии — по game_type (memory_session), для
+            # cipher поведение прежнее.
             handler = get_handler(mission.mission_type)
-            if handler is not None:
+            session_key = _minigame_session_progress_key(mission.mission_type)
+            if handler is not None and session_key is not None:
                 # Sprint 8.17.15: profile.settings, если есть published-профиль;
                 # иначе legacy content.ui.
                 settings = _resolve_minigame_settings(session, mission)
                 new_session = handler.generate_session(settings)
                 progress = dict(player_mission.progress or {})
-                progress["cipher_session"] = new_session
+                progress[session_key] = new_session
                 player_mission.progress = progress
             return {
                 "accepted": False,
@@ -1870,14 +1935,17 @@ def _accept_mission_once(
         # Sprint 8.17 (шаг 6): cipher-игра получает при accept новый случайный
         # код и символы барабанов. Сессия хранится в progress.cipher_session:
         # при submit сервер сверяется именно с ней, а не с validation_config.
+        # Sprint Memory-2a: сессия пишется в ключ по game_type
+        # (cipher_session / memory_session) — логика cipher не меняется.
         handler = get_handler(mission.mission_type)
-        if handler is not None:
+        session_key = _minigame_session_progress_key(mission.mission_type)
+        if handler is not None and session_key is not None:
             # Sprint 8.17.15: profile.settings, если есть published-профиль;
             # иначе legacy content.ui.
             settings = _resolve_minigame_settings(session, mission)
             session_data = handler.generate_session(settings)
             progress = dict(player_mission.progress or {})
-            progress["cipher_session"] = session_data
+            progress[session_key] = session_data
             player_mission.progress = progress
 
         if player_mission.started_at is None:

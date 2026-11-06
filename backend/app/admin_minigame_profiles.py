@@ -33,7 +33,8 @@ MINIGAME_PROFILES_READ_PERMISSION = "minigame_profiles.read"
 MINIGAME_PROFILES_MANAGE_PERMISSION = "minigame_profiles.manage"
 
 # Сверено с mission_type в content_contract.py / admin_missions.py.
-VALID_GAME_TYPES = frozenset({"cipher", "code_repair", "text_answer"})
+# Sprint Memory-2a: добавлен game_type "memory" (пары карточек).
+VALID_GAME_TYPES = frozenset({"cipher", "code_repair", "text_answer", "memory"})
 
 
 def _validate_settings(game_type: str, settings: dict) -> dict:
@@ -46,6 +47,8 @@ def _validate_settings(game_type: str, settings: dict) -> dict:
         "cipher": {"drumCount", "falseChoicesPerDrum", "timeLimitSeconds"},
         "code_repair": {"maxBlocks"},  # пока заглушка
         "text_answer": set(),  # пока заглушка
+        # Sprint Memory-2a: параметры сложности memory (пары карточек).
+        "memory": {"grid_size", "time_limit_seconds"},
     }
     allowed = allowed_by_type.get(game_type)
     if allowed is None:
@@ -70,6 +73,31 @@ def _validate_settings(game_type: str, settings: dict) -> dict:
             not isinstance(time_limit, int) or not (1 <= time_limit <= 3600)
         ):
             raise HTTPException(422, "timeLimitSeconds должен быть null или int 1..3600.")
+    # Sprint Memory-2a: валидация значений memory.
+    if game_type == "memory":
+        # grid_size отсутствует → дефолт 4 (чётная сетка обязательна: сетка
+        # разбивается на пары, нечётное число клеток дало бы «лишнюю» карточку).
+        grid_size = settings.get("grid_size", 4)
+        if (
+            not isinstance(grid_size, int)
+            or isinstance(grid_size, bool)
+            or grid_size % 2 != 0
+            or not (4 <= grid_size <= 8)
+        ):
+            raise HTTPException(
+                422,
+                "grid_size должен быть чётным int 4..8 (нечётный размер запрещён).",
+            )
+        time_limit_seconds = settings.get("time_limit_seconds")
+        if time_limit_seconds is not None and (
+            not isinstance(time_limit_seconds, int)
+            or isinstance(time_limit_seconds, bool)
+            or not (1 <= time_limit_seconds <= 3600)
+        ):
+            raise HTTPException(
+                422,
+                "time_limit_seconds должен быть null или int 1..3600.",
+            )
     return settings
 
 
