@@ -34,6 +34,14 @@ from app.mission_engine import (
 from app.models import GamePlayer, GasWallet, TonWallet
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
 from app.shop_service import list_catalog_items, purchase_catalog_item
+from app.referral_service import (
+    DEFAULT_REFERRAL_REWARD_ROOT,
+    REFERRAL_ENABLED_KEY,
+    REFERRAL_REWARD_ROOT_KEY,
+    _read_bool_setting,
+    _read_int_setting,
+    assign_referrer,
+)
 from app.slug_utils import generate_nickname
 from app.teams_service import (
     accept_invitation_entrypoint,
@@ -455,8 +463,16 @@ def _upsert_telegram_player(
     last_name: str | None,
     username: str | None,
     photo_url: str | None,
+    start_param: str | None = None,
 ) -> GamePlayer:
-    """Find or create a profile by immutable Telegram user.id."""
+    """Find or create a profile by immutable Telegram user.id.
+
+    start_param — подписанный Telegram ``start_param`` из initData
+    (``ref_<player_id>``). Учитывается ТОЛЬКО при создании нового профиля:
+    уже существующий игрок никогда не переатрибутируется другому рефереру.
+    Значение приходит только из verify_init_data (покрыто подписью), из тела
+    запроса его не принимаем.
+    """
     normalized_username = normalize_telegram_username(username)
 
     with SessionLocal.begin() as session:
@@ -509,6 +525,13 @@ def _upsert_telegram_player(
             )
             session.add(player)
             session.flush()
+
+            # Referral-5: привязка пригласившего — только для нового профиля,
+            # в той же транзакции регистрации. assign_referrer возвращает None
+            # вместо исключений (плохой ref_/нет реферера/повтор), поэтому
+            # вход игрока не ломается никогда.
+            if start_param:
+                assign_referrer(session, player.id, start_param)
         else:
             if (
                 normalized_username
@@ -646,6 +669,9 @@ def authenticate_telegram(
             last_name=telegram_user.last_name,
             username=telegram_user.username,
             photo_url=telegram_user.photo_url,
+            # Referral-5: атрибуция реферера — только из подписанного initData
+            # (verified.start_param), не из тела запроса.
+            start_param=telegram_user.start_param,
         )
     except TelegramAuthError as error:
         raise HTTPException(
@@ -766,6 +792,42 @@ def get_my_profile_route(
                 "age": player.age,
             }
         }
+
+
+@app.get("/api/v1/engine/me/referral")
+def get_my_referral_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Моя рефералка (Sprint Referral R-5): флаг, награда, share-ссылка.
+
+    Только чтение: enabled/rewardRoot берутся из CMS (system_settings, с
+    фолбэком на каталог), shareLink собирается из
+    settings.telegram_bot_username — фронт имя бота не знает и не хардкодит.
+    referredBy — кто пригласил игрока (None, если без реферальной ссылки).
+    """
+    with SessionLocal() as session:
+        enabled = _read_bool_setting(session, REFERRAL_ENABLED_KEY, False)
+        reward_root = _read_int_setting(
+            session, REFERRAL_REWARD_ROOT_KEY, DEFAULT_REFERRAL_REWARD_ROOT
+        )
+        player = session.get(GamePlayer, player_id)
+
+    bot_username = settings.telegram_bot_username.strip()
+    share_link = (
+        f"https://t.me/{bot_username}?start=ref_{player_id}"
+        if bot_username
+        else None
+    )
+
+    return {
+        "enabled": enabled,
+        "rewardRoot": reward_root,
+        "shareLink": share_link,
+        "referredBy": (
+            player.referred_by_player_id if player is not None else None
+        ),
+    }
 
 
 @app.patch("/api/v1/engine/me/profile")
