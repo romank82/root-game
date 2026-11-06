@@ -26,6 +26,10 @@ class VerifiedTelegramUser:
     last_name: str | None
     username: str | None
     photo_url: str | None
+    # Referral-3: start_param из initData (например "ref_<player_id>").
+    # None — запуск без параметра. Формат валидируется в ReferralService
+    # (R-4/R-5), здесь — только достоверно прочитанное (подписанное) значение.
+    start_param: str | None = None
 
 
 def normalize_telegram_username(value: str | None) -> str | None:
@@ -100,6 +104,16 @@ def verify_init_data(
     if not hmac.compare_digest(expected_hash, received_hash):
         raise TelegramAuthError("Ошибка авторизации Telegram. Откройте игру заново.")
 
+    # Referral-3: start_param (например "ref_<player_id>") передаётся Telegram
+    # в составе initData и уже покрыт подписью выше (поле входит в
+    # data_check_string), поэтому читаем его ТОЛЬКО после успешной проверки
+    # hash. Сам формат здесь не валидируется — это задача ReferralService
+    # (R-4/R-5); пустая строка трактуется как отсутствие параметра.
+    # 512 — документированный предел длины startapp-параметра Telegram.
+    start_param = values.get("start_param") or None
+    if start_param is not None:
+        start_param = start_param[:512]
+
     try:
         auth_date = int(values["auth_date"])
     except (KeyError, TypeError, ValueError) as error:
@@ -150,6 +164,7 @@ def verify_init_data(
         last_name=last_name[:128] if last_name else None,
         username=normalize_telegram_username(username),
         photo_url=photo_url[:2048] if photo_url else None,
+        start_param=start_param,
     )
 
 
