@@ -84,6 +84,15 @@ def _validate_public_mission_content(
     mission_type: str, content: Any, *, require_full_cipher_ui: bool = True
 ) -> None:
     """Do not expose submitted content or protected values in validation errors."""
+    # Sprint Memory-2c: контракта публичного content для memory в
+    # app.content_contract пока нет (validate_mission_content поддерживает
+    # text_answer / code_repair / team / cipher). Пока контракт memory не описан
+    # отдельным шагом, публикацию memory-миссии контент-валидатор не блокирует:
+    # экран memory рендерится по серверной сессии (mission.memorySession), а
+    # content.ui даёт только опциональные тексты (label/instruction/success*/
+    # wrongAnswerText). Убрать ветку, когда контракт появится в content_contract.
+    if mission_type == "memory":
+        return
     try:
         validate_mission_content(
             mission_type,
@@ -732,15 +741,18 @@ def _validate_for_publish(
             detail="Для публикации миссии обязательна привязка AR-объекта (ar_object_id).",
         )
 
-    # Sprint 8.17.19: для cipher-миссии профиль мини-игры обязателен.
-    # Legacy-published без профиля не ломаем задним числом, но любая
-    # новая публикация / редактирование content или validation_config
-    # требует профиль (см. docs/roadmap-detailed.md, расхождение №2).
-    if mission.mission_type == "cipher" and not mission.minigame_profile_id:
+    # Sprint 8.17.19 + Memory-2c: для cipher- и memory-миссии профиль мини-игры
+    # обязателен. Legacy-published без профиля не ломаем задним числом, но любая
+    # новая публикация / редактирование content или validation_config требует
+    # профиль (см. docs/roadmap-detailed.md, расхождение №2).
+    if (
+        mission.mission_type in ("cipher", "memory")
+        and not mission.minigame_profile_id
+    ):
         raise HTTPException(
             status_code=422,
             detail=(
-                "Для cipher-миссии обязателен профиль мини-игры. "
+                f"Для {mission.mission_type}-миссии обязателен профиль мини-игры. "
                 "Выберите профиль в форме миссии перед публикацией."
             ),
         )
@@ -775,6 +787,9 @@ def _validate_for_publish(
             "text_answer": "normalized_text_match",
             "code_repair": "ordered_blocks_match",
             "cipher": "cipher_match",
+            # Sprint Memory-2c: memory проверяется сервером по сессии
+            # (progress.memory_session), validator фиксирован.
+            "memory": "memory_match",
         }
         expected_validator = expected_validator_by_type.get(mission.mission_type)
         if expected_validator is not None and validator != expected_validator:

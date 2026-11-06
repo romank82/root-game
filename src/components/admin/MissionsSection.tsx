@@ -178,8 +178,10 @@ function formFromMission(mission: AdminMission): MissionForm {
   const isCodeRepair = mission.missionType === 'code_repair'
   const isCipher = mission.missionType === 'cipher'
   const isTeam = mission.missionType === 'team'
+  // Sprint Memory-2c: missionType memory (пары карточек).
+  const isMemory = mission.missionType === 'memory'
   const hasContentObject =
-    (isTextAnswer || isCodeRepair || isCipher || isTeam) &&
+    (isTextAnswer || isCodeRepair || isCipher || isTeam || isMemory) &&
     mission.content !== null &&
     typeof mission.content === 'object'
   const ui =
@@ -211,7 +213,8 @@ function formFromMission(mission: AdminMission): MissionForm {
   const isStructuredValidation =
     mission.missionType === 'text_answer' ||
     mission.missionType === 'code_repair' ||
-    mission.missionType === 'cipher'
+    mission.missionType === 'cipher' ||
+    mission.missionType === 'memory'
 
   let validationConfig: string
   let validationValidator: string
@@ -233,7 +236,9 @@ function formFromMission(mission: AdminMission): MissionForm {
           ? 'ordered_blocks_match'
           : mission.missionType === 'cipher'
             ? 'cipher_match'
-            : 'normalized_text_match'
+            : mission.missionType === 'memory'
+              ? 'memory_match'
+              : 'normalized_text_match'
 
     const acceptedRaw = Array.isArray(cfg.acceptedAnswers)
       ? cfg.acceptedAnswers
@@ -293,7 +298,7 @@ function formFromMission(mission: AdminMission): MissionForm {
     title: mission.title,
     description: mission.description ?? '',
     content:
-      isTextAnswer || isCodeRepair || isCipher || isTeam
+      isTextAnswer || isCodeRepair || isCipher || isTeam || isMemory
         ? '{}'
         : prettyJson(mission.content),
     contentLabel: uiEntry('label'),
@@ -302,7 +307,9 @@ function formFromMission(mission: AdminMission): MissionForm {
     contentSuccessTitle: uiEntry('successTitle'),
     contentSuccessText: uiEntry('successText'),
     contentInstruction:
-      isCodeRepair || isCipher || isTeam ? uiEntry('instruction') : '',
+      isCodeRepair || isCipher || isTeam || isMemory
+        ? uiEntry('instruction')
+        : '',
     contentBlocks:
       isCodeRepair && cleanBlocks.length > 0 ? cleanBlocks : [''],
     contentLineNumber: isCodeRepair ? uiEntry('lineNumber') : '',
@@ -310,7 +317,7 @@ function formFromMission(mission: AdminMission): MissionForm {
     contentWrongAnswerText:
       isTeam
         ? (uiEntry('failureText') || uiEntry('wrongAnswerText'))
-        : isCodeRepair || isCipher
+        : isCodeRepair || isCipher || isMemory
           ? uiEntry('wrongAnswerText')
           : '',
     contentDrumCount:
@@ -482,6 +489,20 @@ function formToPayload(
         wrongAnswerText: form.contentWrongAnswerText.trim(),
       },
     }
+  } else if (form.missionType === 'memory') {
+    // Sprint Memory-2c: контент memory — только тексты; сложность
+    // (grid_size/time_limit_seconds) живёт в профиле мини-игры и серверной
+    // сессии (memorySession), а не в content.ui.
+    content = {
+      schemaVersion: 1,
+      ui: {
+        label: form.contentLabel.trim(),
+        instruction: form.contentInstruction.trim(),
+        successTitle: form.contentSuccessTitle.trim(),
+        successText: form.contentSuccessText.trim(),
+        wrongAnswerText: form.contentWrongAnswerText.trim(),
+      },
+    }
   } else if (form.missionType === 'team') {
     // Контракт team-контента (content_contract.team): content.ui допускает
     // label, instruction, successTitle, failureText (успех/провал команды).
@@ -506,6 +527,7 @@ function formToPayload(
     form.missionType === 'text_answer' ||
     form.missionType === 'code_repair' ||
     form.missionType === 'cipher' ||
+    form.missionType === 'memory' ||
     // Командная миссия тоже использует структурированные поля контента:
     // Заголовок, Инструкция, Текст при успехе/провале (content.ui).
     form.missionType === 'team'
@@ -519,7 +541,8 @@ function formToPayload(
   const isStructuredValidation =
     form.missionType === 'text_answer' ||
     form.missionType === 'code_repair' ||
-    form.missionType === 'cipher'
+    form.missionType === 'cipher' ||
+    form.missionType === 'memory'
   // team НЕ попадает в isStructuredValidation: validation-config для команды
   // собирается не из validator-полей, а из JSON (гео-конфиг команды, см.
   // admin_missions._validate_team_mission_config).
@@ -621,6 +644,12 @@ function formToPayload(
                 .filter((s) => s.length > 0),
             }
           : {}),
+      }
+    } else if (form.validationValidator === 'memory_match') {
+      // Sprint Memory-2c: у memory нет настраиваемых параметров проверки —
+      // порядок открытий сервер сверяет с progress.memory_session.
+      validation_config = {
+        validator: 'memory_match',
       }
     } else {
       validation_config = {
@@ -1538,7 +1567,9 @@ export function MissionsSection({
                       ? 'ordered_blocks_match'
                       : nextType === 'cipher'
                         ? 'cipher_match'
-                        : 'normalized_text_match'
+                        : nextType === 'memory'
+                          ? 'memory_match'
+                          : 'normalized_text_match'
                   // Бэкенд требует согласованность: слой team ⟺ тип team
                   // (admin_missions.py). При выборе команды синхронизируем слой.
                   setDraftForm({
@@ -1557,6 +1588,7 @@ export function MissionsSection({
                   code_repair — восстановить код
                 </option>
                 <option value="cipher">cipher — кодовый замок</option>
+                <option value="memory">memory — память / пары карточек</option>
                 <option value="team">team — командная миссия</option>
               </select>
             </label>
@@ -1904,7 +1936,7 @@ export function MissionsSection({
                 />
               </label>
             </>
-          ) : form.missionType === 'cipher' ? (
+          ) : form.missionType === 'cipher' || form.missionType === 'memory' ? (
             <>
               <label className="admin-span-2">
                 Заголовок
@@ -1924,7 +1956,8 @@ export function MissionsSection({
                 />
               </label>
 
-              {form.missionType !== 'cipher' && (
+              {form.missionType !== 'cipher' &&
+                form.missionType !== 'memory' && (
                 <>
                   <label>
                     Количество барабанов
@@ -2001,7 +2034,8 @@ export function MissionsSection({
                 />
               </label>
 
-              {form.missionType !== 'cipher' && (
+              {form.missionType !== 'cipher' &&
+                form.missionType !== 'memory' && (
                 <div className="admin-validation-list">
                   <div className="admin-section-heading">
                     <h4>Алфавит символов (публичный)</h4>
@@ -2102,7 +2136,8 @@ export function MissionsSection({
             </section>
           ) : form.missionType === 'text_answer' ||
             form.missionType === 'code_repair' ||
-            form.missionType === 'cipher' ? (
+            form.missionType === 'cipher' ||
+            form.missionType === 'memory' ? (
             <section className="admin-validation-config">
               <div className="admin-section-heading">
                 <h3>Правила проверки ответа</h3>
@@ -2127,6 +2162,7 @@ export function MissionsSection({
                     ordered_blocks_match — собрать правильную последовательность
                   </option>
                   <option value="cipher_match">cipher_match</option>
+                  <option value="memory_match">memory_match</option>
                 </select>
               </label>
 

@@ -97,6 +97,9 @@ function AdminApp() {
   const [mgFalseChoices, setMgFalseChoices] = useState('2')
   const [mgTimeLimit, setMgTimeLimit] = useState('60')
 
+  // Для memory (Sprint Memory-2c): размер чётной сетки 4..8.
+  const [mgGridSize, setMgGridSize] = useState('4')
+
   // Для code_repair (пока заглушка):
   const [mgMaxBlocks, setMgMaxBlocks] = useState('3')
   const [savingMinigameProfile, setSavingMinigameProfile] = useState(false)
@@ -188,6 +191,7 @@ function AdminApp() {
       setMgDrumCount('4')
       setMgFalseChoices('2')
       setMgTimeLimit('60')
+      setMgGridSize('4')
       setMgMaxBlocks('3')
       setMinigameProfileError(null)
       setMinigameProfileNotice(null)
@@ -206,6 +210,12 @@ function AdminApp() {
       )
     } else if (p.gameType === 'code_repair') {
       setMgMaxBlocks(String(s.maxBlocks ?? '3'))
+    } else if (p.gameType === 'memory') {
+      // Sprint Memory-2c: memory хранит сложность в snake_case (Memory-2a).
+      setMgGridSize(String(s.grid_size ?? '4'))
+      setMgTimeLimit(
+        s.time_limit_seconds != null ? String(s.time_limit_seconds) : '',
+      )
     }
     setMinigameProfileError(null)
     setMinigameProfileNotice(null)
@@ -269,6 +279,13 @@ function AdminApp() {
       case 'code_repair': {
         return { maxBlocks: Number(mgMaxBlocks) }
       }
+      case 'memory': {
+        // Sprint Memory-2c: whitelist memory (admin_minigame_profiles).
+        return {
+          grid_size: Number(mgGridSize),
+          time_limit_seconds: mgTimeLimit.trim() ? Number(mgTimeLimit) : null,
+        }
+      }
       case 'text_answer': {
         return {}
       }
@@ -285,6 +302,7 @@ function AdminApp() {
     setMgDrumCount('4')
     setMgFalseChoices('2')
     setMgTimeLimit('60')
+    setMgGridSize('4')
     setMgMaxBlocks('3')
     setMinigameProfileError(null)
     setMinigameProfileNotice(null)
@@ -722,6 +740,7 @@ function AdminApp() {
                       <option value="cipher">cipher</option>
                       <option value="code_repair">code_repair</option>
                       <option value="text_answer">text_answer</option>
+                      <option value="memory">memory</option>
                     </select>
                   </label>
                   {minigameProfileGameType === 'cipher' && (
@@ -774,6 +793,34 @@ function AdminApp() {
                         onChange={(e) => setMgMaxBlocks(e.target.value)}
                       />
                     </label>
+                  )}
+
+                  {minigameProfileGameType === 'memory' && (
+                    <>
+                      <label>
+                        Размер сетки (чётный, 4–8) *
+                        <input
+                          type="number"
+                          min={4}
+                          max={8}
+                          step={2}
+                          value={mgGridSize}
+                          disabled={!canWrite}
+                          onChange={(e) => setMgGridSize(e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Время на решение (сек, пусто = без лимита)
+                        <input
+                          type="number"
+                          min={1}
+                          max={3600}
+                          value={mgTimeLimit}
+                          disabled={!canWrite}
+                          onChange={(e) => setMgTimeLimit(e.target.value)}
+                        />
+                      </label>
+                    </>
                   )}
 
                   {minigameProfileGameType === 'text_answer' && (
