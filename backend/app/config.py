@@ -1,12 +1,29 @@
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
+
 # Загружаем backend/.env независимо от текущей рабочей директории.
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+# Диагностика: откуда взялось значение (env vs backend/.env vs дефолт).
+# Значение (username) — не секрет, токены/секреты НЕ логировать.
+_env_username_before = os.environ.get("TELEGRAM_BOT_USERNAME")
 load_dotenv(BACKEND_DIR / ".env")
+_env_username_after = os.environ.get("TELEGRAM_BOT_USERNAME")
+if _env_username_before:
+    # override=False: переменная окружения (shell, uvicorn --env-file,
+    # docker compose) имеет приоритет над backend/.env.
+    logger.warning(
+        "TELEGRAM_BOT_USERNAME взят из окружения (%s), backend/.env не "
+        "переопределил (override=False); итоговое значение: %s",
+        _env_username_before,
+        _env_username_after,
+    )
 
 def _csv_env(name: str, default: str) -> list[str]:
     raw_value = os.getenv(name, default)
