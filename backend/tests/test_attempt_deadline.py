@@ -227,6 +227,9 @@ class AttemptDeadlineTests(unittest.TestCase):
             longitude=37.618423,
         )
 
+    # @deprecated: после фикса 8.x-attempt-deadline-fix тесты переведены на
+    # обычный submit_mission (реальный sync). Оставлен как legacy-хелпер на
+    # случай, если понадобится изолировать ветку attempt_expired без sync.
     def _submit_isolated_from_sync(
         self,
         player_id: str,
@@ -324,7 +327,7 @@ class AttemptDeadlineTests(unittest.TestCase):
         # «Время вышло»: дедлайн попытки в прошлом (за пределами grace).
         self._expire_attempt_deadline(ids["player"], mission_id, seconds_ago=10)
 
-        rejected = self._submit_isolated_from_sync(
+        rejected = self.mission_engine.submit_mission(
             ids["player"],
             mission_id,
             sequence=before["correct_code"],  # код верный, но время вышло
@@ -362,7 +365,7 @@ class AttemptDeadlineTests(unittest.TestCase):
         before = self._read_cipher_session(ids["player"], mission_id)
         self._expire_attempt_deadline(ids["player"], mission_id, seconds_ago=10)
 
-        rejected = self._submit_isolated_from_sync(
+        rejected = self.mission_engine.submit_mission(
             ids["player"],
             mission_id,
             sequence=before["correct_code"],
@@ -387,6 +390,42 @@ class AttemptDeadlineTests(unittest.TestCase):
         self.assertIsNone(player_mission.attempt_deadline_at)
         # reentry_cooldown_seconds у тестовой миссии = 0 → без окна возврата.
         self.assertIsNone(player_mission.available_again_at)
+
+    def test_late_submit_consumes_exactly_one_attempt(self) -> None:
+        """Поздний submit сжигает РОВНО одну попытку (регресс на двойное списание).
+
+        До фикса: sync сжигал попытку №1, затем submit валил старый ответ на
+        новой сессии → попытка №2. Теперь должен сжигаться только №1, а
+        ответ помечается timedOut=true.
+        """
+        ids = self._fixture()
+        mission_id = self._create_cipher_mission_with_limit(
+            ids, time_limit_seconds=60
+        )
+        self.assertTrue(self._accept(ids["player"], mission_id)["accepted"])
+        before = self._read_cipher_session(ids["player"], mission_id)
+        # Убедимся, что попыток ещё не было.
+        self.assertEqual(
+            self._read_player_mission(ids["player"], mission_id).attempt_count, 0
+        )
+        # Просрочили попытку (дедлайн в прошлом, за пределами grace).
+        self._expire_attempt_deadline(ids["player"], mission_id, seconds_ago=10)
+        # Обычный submit (не изолированный) — с реальным sync.
+        rejected = self.mission_engine.submit_mission(
+            ids["player"],
+            mission_id,
+            sequence=before["correct_code"],
+        )
+        self.assertFalse(rejected["accepted"])
+        self.assertTrue(rejected["timedOut"])
+        # Главное: ровно ОДНА попытка сожжена (а не две).
+        player_mission = self._read_player_mission(ids["player"], mission_id)
+        self.assertEqual(player_mission.attempt_count, 1)
+        self.assertEqual(player_mission.status, "in_progress")
+        self.assertIsNotNone(player_mission.attempt_deadline_at)
+        # Новая сессия: код перегенерирован.
+        after = self._read_cipher_session(ids["player"], mission_id)
+        self.assertNotEqual(after["correct_code"], before["correct_code"])
 
     def test_repeated_bootstrap_does_not_extend_attempt_deadline(self) -> None:
         """Повторный bootstrap/sync НЕ продлевает время попытки (ядро бага).

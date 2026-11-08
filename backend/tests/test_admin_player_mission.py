@@ -60,6 +60,9 @@ class _ScalarsResult:
     def all(self):
         return self._rows
 
+    def first(self):
+        return self._rows[0] if self._rows else None
+
 
 class FakeSession:
     """Минимальная фейк-сессия: очередь scalar/scalars + запись add/flush."""
@@ -1459,6 +1462,7 @@ class EngineGuardTests(unittest.TestCase):
         session = FakeSession(
             scalar_script=[mission],  # Mission (published, solo)
             scalars_script=[
+                [pm],       # pre-read PlayerMission в _submit_mission_once (перед sync)
                 [mission],  # published Mission inside synchronize
                 [],         # MissionRequirement
                 [pm],       # PlayerMission rows

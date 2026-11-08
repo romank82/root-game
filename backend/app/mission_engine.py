@@ -1697,6 +1697,25 @@ def _submit_mission_once(
                 "Team Mission требует отдельного geo/team runtime API.",
             )
 
+        # Sprint 8.x-attempt-deadline-fix: снимок ДО sync. Sync авто-истекает
+        # просроченную попытку (строки 326-365) и мутирует этот же объект
+        # (flush в 412) — после вызова отличить «попытку сжёг sync» от
+        # «игрок прислал неверный ответ» невозможно. Сохраняем только bool.
+        _pm_before_sync = session.scalars(
+            select(PlayerMission).where(
+                PlayerMission.player_id == player_id,
+                PlayerMission.mission_id == mission_id,
+            )
+        ).first()
+        attempt_overdue_in_sync = bool(
+            _pm_before_sync is not None
+            and _pm_before_sync.status == "in_progress"
+            and _pm_before_sync.attempt_deadline_at is not None
+            and ensure_utc(_pm_before_sync.attempt_deadline_at)
+            + timedelta(seconds=ATTEMPT_DEADLINE_GRACE_SECONDS)
+            < _utcnow()
+        )
+
         progress = _synchronize_player_missions(session, player_id)
         player_mission = progress[mission.id]
 
@@ -1723,6 +1742,24 @@ def _submit_mission_once(
                     "items": [],
                     "storyNodeIds": [],
                 },
+                "bootstrap": _build_bootstrap(session, player_id),
+            }
+
+        # Sprint 8.x-attempt-deadline-fix: sync уже сжёг РОВНО одну попытку
+        # (строка 333) и выдал новую сессию + новый attempt_deadline_at
+        # (349-365); при исчерпанном лимите — перевёл в expired. Второй
+        # инкремент (1756) и валидация старого ответа не нужны.
+        # _consume_entry_resources не вызывается: attempt_deadline_at != NULL
+        # бывает только после accept/reissue, а accept уже выставил entry_count >= 1.
+        if attempt_overdue_in_sync:
+            return {
+                "accepted": False,
+                "alreadyCompleted": False,
+                "missionId": mission.id,
+                "missionStatus": player_mission.status,
+                "timedOut": True,
+                "message": "Время попытки истекло. Попытка сгорела.",
+                "awarded": {"root": 0, "items": [], "storyNodeIds": []},
                 "bootstrap": _build_bootstrap(session, player_id),
             }
 
