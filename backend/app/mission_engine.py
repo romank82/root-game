@@ -63,6 +63,10 @@ ENTRY_ITEM_EVENT_TYPE = "consumed"
 # CMS-поле для этого параметра (сейчас — фиксированная механика).
 CANCEL_DEADLINE_SECONDS = 180
 
+# Sprint 8.x-attempt-deadline: допуск на рассинхрон часов клиента/сервера и
+# submit «в последнюю секунду» (ответ дошёл чуть позже attempt_deadline_at).
+ATTEMPT_DEADLINE_GRACE_SECONDS = 3
+
 # Возврат платы при отказе в окне cancel_deadline_at: credit-проводка ROOT
 # (тот же per-run reference_id, что и debit при accept) и возврат ключей.
 ENTRY_REFUND_REFERENCE_TYPE = "mission_entry_refund"
@@ -278,6 +282,7 @@ def _synchronize_player_missions(
             player_mission.available_again_at = None
             player_mission.attempt_count = 0
             player_mission.progress = {}
+            player_mission.attempt_deadline_at = None
             # entry_count и successful_completions НЕ сбрасываем —
             # они накопительные (для reference_id).
             continue
@@ -296,6 +301,7 @@ def _synchronize_player_missions(
                 else:
                     player_mission.available_again_at = None
                 player_mission.deadline_at = None
+                player_mission.attempt_deadline_at = None
                 continue
 
         # Авто-expire: если deadline истёк, перевести в 'expired'.
@@ -311,6 +317,52 @@ def _synchronize_player_missions(
                     seconds=mission.reentry_cooldown_seconds,
                 )
             player_mission.deadline_at = None
+            player_mission.attempt_deadline_at = None
+
+        # Sprint 8.x-attempt-deadline: авто-истечение текущей попытки без submit.
+        # Если игрок не нажал ни «ГОТОВО», ни «ЗАНОВО» (кнопки больше нет), и
+        # attempt_deadline_at + grace < now → провал: сжигаем попытку, выдаём
+        # новую сессию. Если лимит попыток исчерпан — expired.
+        if (
+            player_mission.status == "in_progress"
+            and player_mission.attempt_deadline_at is not None
+            and ensure_utc(player_mission.attempt_deadline_at)
+            + timedelta(seconds=ATTEMPT_DEADLINE_GRACE_SECONDS)
+            < now
+        ):
+            player_mission.attempt_count += 1
+            _sync_policy = _get_published_runtime_policy(session, mission.id)
+            if (
+                _sync_policy is not None
+                and player_mission.attempt_count >= _sync_policy.max_attempts
+            ):
+                player_mission.status = "expired"
+                if mission.reentry_cooldown_seconds and mission.reentry_cooldown_seconds > 0:
+                    player_mission.available_again_at = now + timedelta(
+                        seconds=mission.reentry_cooldown_seconds,
+                    )
+                else:
+                    player_mission.available_again_at = None
+                player_mission.deadline_at = None
+                player_mission.attempt_deadline_at = None
+                continue
+            # Новая попытка: свежая сессия + новый дедлайн.
+            _sync_handler = get_handler(mission.mission_type)
+            _sync_session_key = _minigame_session_progress_key(mission.mission_type)
+            if _sync_handler is not None and _sync_session_key is not None:
+                _sync_settings = _resolve_minigame_settings(session, mission)
+                _sync_new_session = _sync_handler.generate_session(_sync_settings)
+                _sync_progress = dict(player_mission.progress or {})
+                _sync_progress[_sync_session_key] = _sync_new_session
+                player_mission.progress = _sync_progress
+            _sync_next_limit = _attempt_time_limit_seconds(
+                mission, player_mission.progress
+            )
+            player_mission.attempt_deadline_at = (
+                now + timedelta(seconds=_sync_next_limit)
+                if _sync_next_limit
+                else None
+            )
 
         # Sprint 8.15 (fix): expired + cooldown, консистентно с completed-веткой.
         # - one_time → остаётся expired (архив).
@@ -335,6 +387,7 @@ def _synchronize_player_missions(
             player_mission.started_at = None
             player_mission.completed_at = None
             player_mission.progress = {}
+            player_mission.attempt_deadline_at = None
             continue
 
         # Expired-миссия (на cooldown или одноразовая) — не пересчитываем через
@@ -852,6 +905,11 @@ def _build_bootstrap(
                 "status": progress[mission.id].status,
                 "attemptCount": progress[mission.id].attempt_count,
                 "maxAttempts": max_attempts_by_mission[mission.id],
+                "attemptDeadlineAt": (
+                    ensure_utc(progress[mission.id].attempt_deadline_at).isoformat()
+                    if progress[mission.id].attempt_deadline_at
+                    else None
+                ),
                 # Публичные данные runtime policy: цена входа (atomic ROOT) и
                 # требуемые ключи — фронт показывает их в карточке миссии ДО
                 # accept. Для legacy-миссий без policy: entryRoot=null, requiredItems=[].
@@ -1568,6 +1626,34 @@ def _minigame_session_progress_key(mission_type: str) -> str | None:
     return MINIGAME_SESSION_PROGRESS_KEYS.get(mission_type)
 
 
+def _attempt_time_limit_seconds(
+    mission: Mission, progress: dict | None
+) -> int | None:
+    """Лимит одной попытки мини-игры из выданной серверной сессии.
+
+    Ключи в сессии задаёт MinigameHandler.generate_session: cipher —
+    "timeLimitSeconds" (camelCase, как в публичном bootstrap), memory —
+    "time_limit_seconds" (snake_case, исторический ключ). None — лимита нет
+    (legacy-миссия или не задан в MinigameProfile) → attempt_deadline_at не
+    ставится. Значение уже клэмпнуто хендлером до 1..3600, здесь только
+    приведение типа и защита от мусора.
+    """
+    session_key = _minigame_session_progress_key(mission.mission_type)
+    if session_key is None:
+        return None
+    session_data = (progress or {}).get(session_key)
+    if not isinstance(session_data, dict):
+        return None
+    raw = session_data.get("timeLimitSeconds")
+    if raw is None:
+        raw = session_data.get("time_limit_seconds")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 1 else None
+
+
 def _resolve_minigame_settings(session: Session, mission: Mission) -> dict:
     """Sprint 8.17.15: параметры мини-игры.
 
@@ -1651,6 +1737,7 @@ def _submit_mission_once(
         policy = _get_published_runtime_policy(session, mission.id)
         if policy is not None and attempt_count_before >= policy.max_attempts:
             player_mission.status = "expired"
+            player_mission.attempt_deadline_at = None
             if mission.reentry_cooldown_seconds > 0:
                 player_mission.available_again_at = _utcnow() + timedelta(
                     seconds=mission.reentry_cooldown_seconds
@@ -1668,6 +1755,18 @@ def _submit_mission_once(
 
         player_mission.attempt_count += 1
 
+        # Sprint 8.x-attempt-deadline: проверка серверного дедлайна попытки.
+        # Grace покрывает сетевую задержку. attempt_expired=True принудительно
+        # валит ответ (просрочка = гарантированный провал, попытка уже сожжена).
+        _now_submit = _utcnow()
+        _attempt_deadline = player_mission.attempt_deadline_at
+        attempt_expired = (
+            _attempt_deadline is not None
+            and ensure_utc(_attempt_deadline)
+            + timedelta(seconds=ATTEMPT_DEADLINE_GRACE_SECONDS)
+            < _now_submit
+        )
+
         if player_mission.started_at is None:
             player_mission.started_at = _utcnow()
 
@@ -1683,7 +1782,7 @@ def _submit_mission_once(
         if player_mission.entry_count == 0:
             _consume_entry_resources(session, player_id, mission, player_mission)
 
-        if not _validate_submission(
+        if attempt_expired or not _validate_submission(
             mission, answer, sequence, player_mission=player_mission
         ):
             # Шаг 4.3a: первый неверный ответ → персональный fallback-entitlement.
@@ -1691,12 +1790,13 @@ def _submit_mission_once(
             # docs/fallback-shop-contract.md): eligible независимо от paid policy,
             # работает и для бесплатных миссий. Функция идемпотентна, вызываем
             # только после успешного _consume_entry_resources и только при отказе.
-            create_first_failure_entitlements(
-                session,
-                player_id,
-                mission.id,
-                attempt_count_before=attempt_count_before,
-            )
+            if not attempt_expired:
+                create_first_failure_entitlements(
+                    session,
+                    player_id,
+                    mission.id,
+                    attempt_count_before=attempt_count_before,
+                )
             # Sprint 8.17 (шаг 6): неверная попытка закрыта — следующая попытка
             # получает новый код и новые барабаны (сгенерированная при accept
             # сессия больше недействительна).
@@ -1712,11 +1812,22 @@ def _submit_mission_once(
                 progress = dict(player_mission.progress or {})
                 progress[session_key] = new_session
                 player_mission.progress = progress
+            # Sprint 8.x-attempt-deadline: новая попытка — новый дедлайн из
+            # обновлённой сессии (или None, если лимита нет).
+            _next_limit = _attempt_time_limit_seconds(
+                mission, player_mission.progress
+            )
+            player_mission.attempt_deadline_at = (
+                _utcnow() + timedelta(seconds=_next_limit)
+                if _next_limit
+                else None
+            )
             return {
                 "accepted": False,
                 "alreadyCompleted": False,
                 "missionId": mission.id,
                 "missionStatus": "in_progress",
+                "timedOut": attempt_expired,
                 "message": (
                     "Ответ не принят. Проверьте структуру пакета и попробуйте снова."
                 ),
@@ -1730,6 +1841,7 @@ def _submit_mission_once(
 
         player_mission.status = "completed"
         player_mission.completed_at = _utcnow()
+        player_mission.attempt_deadline_at = None
 
         # Sprint 8.14 (шаг 2): per-run награда для solo.
         # Счётчик успешных проходов инкрементируется до награды, чтобы
@@ -1981,6 +2093,17 @@ def _accept_mission_once(
             # от миссии с возвратом платы (3 минуты после взятия).
             player_mission.cancel_deadline_at = started + timedelta(
                 seconds=CANCEL_DEADLINE_SECONDS,
+            )
+            # Sprint 8.x-attempt-deadline: серверный дедлайн на ТЕКУЩУЮ попытку.
+            # Лимит — из только что выданной сессии (MinigameProfile.settings).
+            # NULL, если лимит не задан → поведение как раньше (без таймера).
+            _attempt_limit = _attempt_time_limit_seconds(
+                mission, player_mission.progress
+            )
+            player_mission.attempt_deadline_at = (
+                started + timedelta(seconds=_attempt_limit)
+                if _attempt_limit
+                else None
             )
         # Sprint 8.14 (fix): новый заход (НЕ идемпотентный повторный accept)
         # инкрементирует entry_count → per-run reference_id входа
@@ -2524,6 +2647,7 @@ def expire_mission(player_id: str, mission_id: str) -> dict[str, Any]:
                     seconds=mission.reentry_cooldown_seconds,
                 )
             player_mission.deadline_at = None
+            player_mission.attempt_deadline_at = None
             session.flush()
 
             return {

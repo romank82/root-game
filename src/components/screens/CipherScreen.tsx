@@ -319,18 +319,9 @@ export function CipherScreen({
     setSuccessText(content?.successText ?? null)
   }
 
-  // «ЗАНОВО»: пересобрать барабаны из той же сессии/контента и перезапустить
-  // игру (позиции + таймер) через resetSignal.
-  function handleReset() {
-    if (!content || !mission) return
-    const rebuilt = buildDrums(content, mission.cipherSession ?? null)
-    if (rebuilt) {
-      setGameDrums(rebuilt.map((drum) => drum.symbols))
-      setGameIndices(rebuilt.map((drum) => drum.currentIndex))
-    }
-    setError(null)
-    setResetSignal((value) => value + 1)
-  }
+  // Sprint 8.x-attempt-deadline: handleReset («ЗАНОВО») удалён вместе с
+  // кнопкой. Время попытки теперь серверное (attemptDeadlineAt), поэтому
+  // локальный перезапуск игры больше не нужен и не должен продлевать таймер.
 
   // 1. Сначала — финальные состояния (успех, тайм-аут).
   //    Они не зависят от mission — используют локальный state.
@@ -454,12 +445,12 @@ export function CipherScreen({
         drums={gameDrums}
         correctCode={correctCodeChars}
         timeLimitSeconds={content?.timeLimitSeconds ?? null}
+        attemptDeadlineAt={mission.attemptDeadlineAt}
         onSubmit={handleSubmit}
         isSubmitting={submitting}
         resetSignal={resetSignal}
         initialIndices={gameIndices}
         onTimeout={() => setTimedOut(true)}
-        onReset={handleReset}
         error={error}
       />
     </section>

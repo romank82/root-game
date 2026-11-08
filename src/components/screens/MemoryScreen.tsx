@@ -205,12 +205,9 @@ export function MemoryScreen({
     setSuccessText(content?.successText ?? null)
   }
 
-  // «ЗАНОВО»: пересобрать поле и перезапустить игру (позиции + таймер) через
-  // resetSignal. Серверная сессия та же — раскладка не меняется.
-  function handleReset() {
-    setError(null)
-    setResetSignal((value) => value + 1)
-  }
+  // Sprint 8.x-attempt-deadline: handleReset («ЗАНОВО») удалён вместе с
+  // кнопкой. Время попытки теперь серверное (attemptDeadlineAt), поэтому
+  // локальный перезапуск поля больше не нужен и не должен продлевать таймер.
 
   // 1. Сначала — финальные состояния (успех, тайм-аут).
   //    Они не зависят от mission — используют локальный state.
@@ -331,11 +328,11 @@ export function MemoryScreen({
         gridSize={content.gridSize}
         pairs={content.pairs}
         timeLimitSeconds={content.timeLimitSeconds}
+        attemptDeadlineAt={mission.attemptDeadlineAt}
         onSubmit={handleSubmit}
         isSubmitting={submitting}
         resetSignal={resetSignal}
         onTimeout={() => setTimedOut(true)}
-        onReset={handleReset}
         error={error}
       />
     </section>

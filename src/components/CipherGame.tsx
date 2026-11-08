@@ -8,24 +8,36 @@ import { useTranslation } from 'react-i18next'
 // repair-* из App.css (переиспользуются, новых не вводим).
 //
 // Владеет: вращением барабанов (свайп), показом правильного кода открыто
-// (игра на скорость), кнопкой «ГОТОВО →» и таймером попытки. При истечении
-// timeLimitSeconds сам отправляет пустую последовательность (гарантированный
+// (игра на скорость), кнопкой «ГОТОВО →» и таймером попытки. Таймер считает от
+// серверного attemptDeadlineAt (Sprint 8.x-attempt-deadline: кнопка «ЗАНОВО»
+// удалена, время попытки продлить нельзя), а при его отсутствии — legacy-
+// countdown от timeLimitSeconds. При истечении времени сам отправляет пустую
+// последовательность (гарантированный
 // промах для cipher_match → attempt += 1) и оповещает onTimeout.
 
 export interface CipherGameProps {
   drums: string[][]
   correctCode: string[]
   timeLimitSeconds: number | null
+  // Sprint 8.x-attempt-deadline: абсолютный момент окончания ТЕКУЩЕЙ попытки
+  // (mission.attemptDeadlineAt из bootstrap). Приоритетнее timeLimitSeconds:
+  // пересчитывается от Date.now(), поэтому повторный рендер, повторный вход на
+  // экран и смена сессии не продлевают время попытки. null/undefined —
+  // legacy-countdown от timeLimitSeconds (миссии без лимита, team-волны).
+  attemptDeadlineAt?: string | null
   onSubmit: (sequence: string[]) => void
   isSubmitting?: boolean
-  // Внешний сигнал пересборки (новая сессия/волна, «заново», новая попытка
-  // после промаха): сбрасывает позиции барабанов и таймер попытки.
+  // Внешний сигнал пересборки (новая сессия/волна, новая попытка после
+  // промаха): сбрасывает позиции барабанов и пересчитывает таймер от
+  // attemptDeadlineAt (а не «на полный лимит»).
   resetSignal?: number
   // Стартовые позиции барабанов на момент сброса (из buildDrums; default 0).
   initialIndices?: number[]
   onTimeout?: () => void
-  // «ЗАНОВО»: владелец пересобирает барабаны (buildDrums) и инкрементит
-  // resetSignal; без колбэка — локальный сброс позиций в 0.
+  // @deprecated Sprint 8.x-attempt-deadline: кнопка «ЗАНОВО» удалена, пропс
+  // больше не читается. Оставлен только для совместимости с
+  // TeamSessionScreen (там он передаётся) — удалить отдельным шагом вместе с
+  // handleResetWave.
   onReset?: () => void
   // Опциональные тексты для team-экрана (solo их не передаёт).
   title?: string
@@ -33,16 +45,33 @@ export interface CipherGameProps {
   error?: string | null
 }
 
+// Sprint 8.x-attempt-deadline: оставшееся время попытки в секундах.
+// Приоритет — серверный attemptDeadlineAt (абсолютный момент): пересчёт от
+// Date.now() не позволяет «продлить» попытку повторным рендером или повторным
+// входом на экран. null → legacy-countdown от timeLimitSeconds.
+function remainingSeconds(
+  attemptDeadlineAt: string | null,
+  timeLimitSeconds: number | null,
+): number | null {
+  if (attemptDeadlineAt) {
+    const deadlineMs = new Date(attemptDeadlineAt).getTime()
+    if (Number.isFinite(deadlineMs)) {
+      return Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000))
+    }
+  }
+  return timeLimitSeconds
+}
+
 export function CipherGame({
   drums,
   correctCode,
   timeLimitSeconds,
+  attemptDeadlineAt = null,
   onSubmit,
   isSubmitting = false,
   resetSignal = 0,
   initialIndices,
   onTimeout,
-  onReset,
   title,
   error,
 }: CipherGameProps) {
@@ -61,20 +90,23 @@ export function CipherGame({
   })
   const timeoutFiredRef = useRef(false)
 
-  // Пересборка по resetSignal: смена волны/сессии/«заново»/после промаха.
+  // Пересборка по resetSignal: смена волны/сессии/после промаха. Таймер всегда
+  // пересчитывается от серверного attemptDeadlineAt (а не «на полный лимит»):
+  // новая попытка приходит с новым дедлайном, а повторный вход на экран время
+  // не продлевает.
   useEffect(() => {
     const starts =
       initialIndices && initialIndices.length === drums.length
         ? initialIndices
         : drums.map(() => 0)
     setIndices(starts)
-    setTimeLeft(timeLimitSeconds)
+    setTimeLeft(remainingSeconds(attemptDeadlineAt, timeLimitSeconds))
     setTimedOut(false)
     timeoutFiredRef.current = false
     // drums/timeLimitSeconds/initialIndices меняются только вместе с
     // инкрементом resetSignal (эффект инициализации владельца).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resetSignal])
+  }, [resetSignal, attemptDeadlineAt])
 
   // Обратный отсчёт попытки. timeLeft <= 0 → таймаут = промах.
   useEffect(() => {
@@ -88,12 +120,18 @@ export function CipherGame({
       }
       return
     }
-    const id = setInterval(
-      () => setTimeLeft((current) => (current === null ? null : current - 1)),
-      1000,
-    )
+    const id = setInterval(() => {
+      setTimeLeft((current) => {
+        if (current === null) return null
+        // С серверным дедлайном пересчитываем от Date.now(): декремент по
+        // таймеру накапливал бы дрейф и «дарил» секунды.
+        return attemptDeadlineAt
+          ? remainingSeconds(attemptDeadlineAt, current)
+          : current - 1
+      })
+    }, 1000)
     return () => clearInterval(id)
-  }, [timeLeft, timedOut, onTimeout])
+  }, [timeLeft, timedOut, onTimeout, attemptDeadlineAt])
 
   function stepDrum(drumIndex: number, direction: -1 | 1) {
     setIndices((current) =>
@@ -184,18 +222,9 @@ export function CipherGame({
       {error && <p className="repair-error">{error}</p>}
 
       <div className="repair-actions">
-        <button
-          className="repair-clear-button"
-          onClick={() => {
-            if (onReset) {
-              onReset()
-            } else {
-              setIndices(drums.map(() => 0))
-            }
-          }}
-        >
-          {t('cipher:buttons.reset')}
-        </button>
+        {/* Sprint 8.x-attempt-deadline: кнопка «ЗАНОВО» удалена — она
+            перезапускала локальный таймер попытки и позволяла играть
+            бесконечно внутри одной попытки без её потери. */}
         <button
           className="repair-submit-button"
           onClick={() => onSubmit(sequence)}

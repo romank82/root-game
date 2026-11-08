@@ -65,6 +65,11 @@ export type EngineMission = {
   status: EngineMissionStatus
   attemptCount: number
   maxAttempts: number | null
+  // Sprint 8.x-attempt-deadline: абсолютный момент окончания ТЕКУЩЕЙ попытки
+  // мини-игры (ISO-строка с сервера, ставится при accept и при выдаче новой
+  // сессии после провала). null — лимита попытки нет (legacy-миссия или
+  // MinigameProfile без timeLimitSeconds) → фронт считает по timeLimitSeconds.
+  attemptDeadlineAt: string | null
   startedAt: string | null
   completedAt: string | null
   executionTimeLimitSeconds: number | null

@@ -7,8 +7,11 @@ import { useTranslation } from 'react-i18next'
 // как в CipherGame/CipherScreen.
 //
 // Владеет: открытием карточек (клик), локальной проверкой пар (визуально),
-// историей открытий (sequence для сервера) и таймером попытки. При истечении
-// timeLimitSeconds сам отправляет пустую последовательность (гарантированный
+// историей открытий (sequence для сервера) и таймером попытки. Таймер считает
+// от серверного attemptDeadlineAt (Sprint 8.x-attempt-deadline: кнопка
+// «ЗАНОВО» удалена, время попытки продлить нельзя), при его отсутствии —
+// legacy-countdown от timeLimitSeconds. При истечении времени сам отправляет
+// пустую последовательность (гарантированный
 // промах для memory_match → attempt += 1) и оповещает onTimeout.
 // Окончательную проверку порядка открытий делает сервер (MemoryHandler).
 
@@ -18,14 +21,21 @@ export interface MemoryGameProps {
   // каждый id встречается ровно 2 раза.
   pairs: number[]
   timeLimitSeconds: number | null
+  // Sprint 8.x-attempt-deadline: абсолютный момент окончания ТЕКУЩЕЙ попытки
+  // (mission.attemptDeadlineAt из bootstrap). Приоритетнее timeLimitSeconds:
+  // пересчитывается от Date.now(), поэтому повторный рендер и повторный вход на
+  // экран не продлевают время попытки. null/undefined — legacy-countdown от
+  // timeLimitSeconds (миссии без лимита).
+  attemptDeadlineAt?: string | null
   onSubmit: (sequence: string[]) => void
   isSubmitting?: boolean
-  // Внешний сигнал пересборки (новая сессия, «заново», новая попытка после
-  // промаха): сбрасывает открытые карточки, историю открытий и таймер.
+  // Внешний сигнал пересборки (новая сессия, новая попытка после промаха):
+  // сбрасывает открытые карточки, историю открытий и пересчитывает таймер от
+  // attemptDeadlineAt (а не «на полный лимит»).
   resetSignal?: number
   onTimeout?: () => void
-  // «ЗАНОВО»: владелец пересобирает раскладку и инкрементит resetSignal;
-  // без колбэка — локальный сброс поля.
+  // @deprecated Sprint 8.x-attempt-deadline: кнопка «ЗАНОВО» удалена, пропс
+  // больше не читается (сохранён в интерфейсе для совместимости).
   onReset?: () => void
   // Опциональный заголовок (MemoryScreen передаёт его при необходимости).
   title?: string
@@ -36,15 +46,32 @@ export interface MemoryGameProps {
 // Сколько миллисекунд несовпавшая пара остаётся открытой.
 const MISMATCH_HIDE_DELAY_MS = 800
 
+// Sprint 8.x-attempt-deadline: оставшееся время попытки в секундах.
+// Приоритет — серверный attemptDeadlineAt (абсолютный момент): пересчёт от
+// Date.now() не позволяет «продлить» попытку повторным рендером или повторным
+// входом на экран. null → legacy-countdown от timeLimitSeconds.
+function remainingSeconds(
+  attemptDeadlineAt: string | null,
+  timeLimitSeconds: number | null,
+): number | null {
+  if (attemptDeadlineAt) {
+    const deadlineMs = new Date(attemptDeadlineAt).getTime()
+    if (Number.isFinite(deadlineMs)) {
+      return Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000))
+    }
+  }
+  return timeLimitSeconds
+}
+
 export function MemoryGame({
   gridSize,
   pairs,
   timeLimitSeconds,
+  attemptDeadlineAt = null,
   onSubmit,
   isSubmitting = false,
   resetSignal = 0,
   onTimeout,
-  onReset,
   title,
   error,
 }: MemoryGameProps) {
@@ -75,19 +102,22 @@ export function MemoryGame({
     }
   }
 
-  // Пересборка по resetSignal: смена миссии/сессии, «заново», после промаха.
+  // Пересборка по resetSignal: смена миссии/сессии, после промаха. Таймер
+  // всегда пересчитывается от серверного attemptDeadlineAt (а не «на полный
+  // лимит»): новая попытка приходит с новым дедлайном, а повторный вход на
+  // экран время не продлевает.
   useEffect(() => {
     clearHideTimer()
     historyRef.current = []
     setOpenCards([])
     setMatchedCards(new Set())
-    setTimeLeft(timeLimitSeconds)
+    setTimeLeft(remainingSeconds(attemptDeadlineAt, timeLimitSeconds))
     setTimedOut(false)
     timeoutFiredRef.current = false
     // timeLimitSeconds/pairs меняются только вместе с инкрементом
     // resetSignal (эффект инициализации владельца).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resetSignal])
+  }, [resetSignal, attemptDeadlineAt])
 
   // Чистка отложенного скрытия пары при размонтировании.
   useEffect(() => () => clearHideTimer(), [])
@@ -104,12 +134,18 @@ export function MemoryGame({
       }
       return
     }
-    const id = setInterval(
-      () => setTimeLeft((current) => (current === null ? null : current - 1)),
-      1000,
-    )
+    const id = setInterval(() => {
+      setTimeLeft((current) => {
+        if (current === null) return null
+        // С серверным дедлайном пересчитываем от Date.now(): декремент по
+        // таймеру накапливал бы дрейф и «дарил» секунды.
+        return attemptDeadlineAt
+          ? remainingSeconds(attemptDeadlineAt, current)
+          : current - 1
+      })
+    }, 1000)
     return () => clearInterval(id)
-  }, [timeLeft, timedOut, onTimeout])
+  }, [timeLeft, timedOut, onTimeout, attemptDeadlineAt])
 
   const boardLocked = isSubmitting || timedOut
   const boardComplete = pairs.length > 0 && matchedCards.size >= pairs.length
@@ -201,24 +237,9 @@ export function MemoryGame({
       {error && <p className="repair-error">{error}</p>}
 
       <div className="repair-actions">
-        <button
-          className="repair-clear-button"
-          onClick={() => {
-            if (onReset) {
-              onReset()
-            } else {
-              clearHideTimer()
-              historyRef.current = []
-              setOpenCards([])
-              setMatchedCards(new Set())
-              setTimeLeft(timeLimitSeconds)
-              setTimedOut(false)
-              timeoutFiredRef.current = false
-            }
-          }}
-        >
-          {t('memory:buttons.reset')}
-        </button>
+        {/* Sprint 8.x-attempt-deadline: кнопка «ЗАНОВО» удалена — она
+            перезапускала локальный таймер попытки (и позволяла запоминать
+            раскладку между перезапусками), не тратя попыток. */}
         <button
           className="repair-submit-button"
           // Повторная отправка уже собранного порядка (например, после обрыва
