@@ -123,6 +123,35 @@ For the first `cipher` mechanic, backend generates the correct combination when 
 
 The frontend may render visible letters/options and submit its selected combination. It may not receive or decide the correct sequence, validator details, hidden challenge state, award policy, or final outcome. Client timers are UX only; the backend deadline is authoritative.
 
+## Server-side per-attempt deadline for minigames (Sprint 8.x-attempt-deadline)
+
+Historically the per-attempt timer (`MinigameProfile.settings.timeLimitSeconds`)
+lived only on the client: the server learned about a failure only via submit.
+As a result, the "RESET" button (and re-entering the screen) restarted the
+countdown without contacting the server — the player got unlimited time inside
+a single attempt, without losing attempts.
+
+Now the server stores an absolute end moment for the CURRENT attempt:
+
+- `player_missions.attempt_deadline_at` (DateTime tz, nullable) — set on
+  `accept` and when a new session is issued after a failure; `NULL` = no limit
+  (legacy mission / `MinigameProfile` without a limit / missions without a
+  server-side session: `text_answer`, `team`).
+- The duration comes from the already issued server-side session
+  (`cipher_session.timeLimitSeconds` / `memory_session.time_limit_seconds`,
+  sourced from the published `MinigameProfile.settings`).
+- Submit check: if `now > attempt_deadline_at + grace (3 s)` — the answer is
+  forcibly rejected (`accepted: false`, `timedOut: true`), the attempt is
+  consumed, and a new session + new deadline is issued. On the last attempt →
+  409 + `expired`.
+- Auto-expire: `_synchronize_player_missions` consumes an overdue attempt
+  without submit (e.g. the player closed the app) — same semantics as an
+  overdue submit.
+- Cleanup: `attempt_deadline_at = NULL` on `completed`, `expired`, cancel
+  (`expire_mission`), and return to `available`.
+- `attemptDeadlineAt` (ISO string) is returned in `bootstrap` next to
+  `attemptCount` / `maxAttempts`.
+
 ## Public API requirements
 
 Every future state-changing run or attempt endpoint requires authenticated player identity and a request idempotency key. Responses contain only caller-permitted public state and the committed result. They never expose protected snapshots, raw validation answers, reservation internals, private location evidence, audit metadata, secrets, credentials, cookies, or Telegram initData.

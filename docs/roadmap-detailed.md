@@ -32,6 +32,7 @@
 | 17. CMS-разделы (GeoZone/ARObject/Players/Teams/Approvals/RewardPools) | ⚠️ частично | 17.1–17.3 (геозоны, AR-объекты, игроки) | 17.4–17.6 (команды, approvals, пулы) — бэкенд готов, UI нет |
 | Referral R-1…R-8 | ✅ закрыт (2026-11-06) | — | — |
 | Hotfix 8.x-hotfix-ref-link | ✅ закрыт (2026-11-08) | — | долг 8.x-ref-link-cms (имя бота в админку) |
+| 8.x-attempt-deadline (серверный дедлайн попытки) | ✅ закрыт (2026-11-08) | 3A-1…3A-5 (модель + миграция dcc8fb912a89, engine, фронт, 8 тестов) | долг 8.x-attempt-deadline-fix (двойное списание при просрочке) |
 
 ---
 
@@ -1713,3 +1714,37 @@ CMS-first: рубильник, сумма и порог живут в system set
 ключ вида `telegram.bot_username`, с фолбэком на env), чтобы менять имя без
 правки файлов и перезапуска. Маленький спринт: `config.py` → `main.py`
 (чтение из CMS) → `admin_settings`/`catalog` → фронт админки. Пока не начат.
+
+---
+
+## 8.x-attempt-deadline — ✅ закрыт (2026-11-08)
+
+Серверный дедлайн одной попытки мини-игры. Закрывает баг «бесконечное
+ЗАНОВО»: игрок мог перезапускать мини-игру локально, не теряя попыток,
+и получать неограниченное время в рамках одной попытки.
+
+- ✅ **3A-1. Модель + миграция** (`fccaf09`): `PlayerMission.attempt_deadline_at`
+  (DateTime tz, nullable), миграция `dcc8fb912a89`.
+- ✅ **3A-2. Бэкенд** (`959455d`): константа `ATTEMPT_DEADLINE_GRACE_SECONDS=3`,
+  хелпер `_attempt_time_limit_seconds`, постановка дедлайна при accept и
+  после провала, проверка в `_submit_mission_once` (`timedOut: true`),
+  авто-истечение в `_synchronize_player_missions`, очистка при
+  `completed`/`expired`/`available`/`expire_mission`, `attemptDeadlineAt`
+  в bootstrap.
+- ✅ **3A-3. Фронт** (`959455d`): кнопка «ЗАНОВО» удалена из `CipherGame`
+  и `MemoryGame` (не disabled, а вырезана из разметки); таймер считает от
+  `attemptDeadlineAt` (абсолютный момент), а не от `timeLimitSeconds`;
+  legacy-поведение сохранено при `attemptDeadlineAt == null`.
+- ✅ **3A-4. Тесты** (`c13b024`): 8 тестов в `backend/tests/test_attempt_deadline.py`
+  (902 OK, skipped=10). Покрыто: постановка при accept, NULL без лимита,
+  просроченный submit сжигает попытку, последняя попытка → 409 + expired,
+  повторный bootstrap не продлевает, очистка при completed/expired,
+  авто-истечение в sync, team-миссии не затронуты.
+- ✅ **3A-5. Docs** (этот коммит).
+
+**Долг (открыт):** `8.x-attempt-deadline-fix` — при обычном потоке
+submit после просрочки sync сначала сжигает попытку №1, затем старый ответ
+валится как неверный на новой сессии → попытка №2. Итого: игрок теряет
+2 попытки за один поздний submit и не видит `timedOut: true`.
+Починить отдельным шагом (например, не сжигать попытку в sync, если вызов
+из submit, или возвращать timedOut без повторного инкремента).
