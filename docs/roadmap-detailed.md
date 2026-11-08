@@ -1607,3 +1607,44 @@ Backend API для всех этих сущностей уже готов (см.
 ### Спринт 17.6. Раздел «Пулы наград»
 - **Admin UI:** CRUD по образцу KeyRules.
 - **Проверка:** админ создаёт пул.
+
+---
+
+## Referral (R-1…R-8) — ✅ закрыт (2026-11-06)
+
+Реферальная программа: приглашение по ссылке `t.me/<bot>?start=ref_<player_id>`
+и ROOT-награда пригласившему, когда приглашённый достигает порога earned ROOT.
+CMS-first: рубильник, сумма и порог живут в system settings.
+
+- ✅ **R-1. Схема.** Модель `ReferralReward` (`referral_rewards`) +
+  `GamePlayer.referred_by_player_id` (nullable FK, RESTRICT). Миграция
+  `c3d9a71f4b62` (append-only, dialect-aware; SQLite rebuild `game_players`
+  сохранён корректно).
+- ✅ **R-2. CMS.** `referral.enabled` (boolean, false, не sensitive) и
+  `referral.reward_root` (integer, 25, sensitive) в каталоге + идемпотентная
+  seed-миграция `a7e4c1d9b830`.
+- ✅ **R-3. Auth.** `verify_init_data` → `VerifiedTelegramUser.start_param`
+  (читается после HMAC-проверки; поле входит в `data_check_string`).
+- ✅ **R-4. Сервис.** `app/referral_service.py`: `assign_referrer`
+  (`ref_<player_id>`, self-referral, повтор, несуществующий/неактивный
+  реферер) и `check_and_reward` (earned = только `mission_reward`, порог
+  `economy.transfer_minimum_earned_root`, credit `referral_reward`
+  с `reference_id = ReferralReward.id`).
+- ✅ **R-5. HTTP.** `main.py`: привязка реферера при регистрации нового
+  профиля (только из подписанного `start_param`) +
+  `GET /api/v1/engine/me/referral` (`enabled`, `rewardRoot`, `shareLink`,
+  `referredBy`).
+- ✅ **R-6. Точка вызова.** `mission_engine._award_mission_rewards`:
+  `check_and_reward` в SAVEPOINT (`awarded_root > 0`), lazy import;
+  провал бонуса не ломает награду миссии и не отравляет транзакцию.
+- ✅ **R-7. Фронт.** `engineApi.getMyReferralInfo` + блок «Пригласите друга»
+  в `ProfileScreen` (`openTelegramLink` → fallback `window.open`), i18n
+  `referral.*` (ru/en/zh, 6 ключей).
+- ✅ **R-8. Docs.** `api-contracts.md`, `system-settings.md`,
+  `economy-and-root-ledger.md`, `game-rules.md`, этот раздел.
+
+Проверки на момент закрытия: backend `python -m unittest discover -s tests`
+→ `Ran 894 tests, OK (skipped=10)`; frontend `npm run build` → `EXIT=0`.
+Открытые вопросы на будущее: `referral_reward` не входит в earned ROOT
+(решение осознанное); admin-раздел CMS для рефералки не делался (ключи
+правятся через общий раздел System Settings).

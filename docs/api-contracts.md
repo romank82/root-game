@@ -4,6 +4,7 @@
 - `POST /api/v1/auth/telegram`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/engine/bootstrap`
+- `GET /api/v1/engine/me/referral` — карточка рефералки игрока (Sprint Referral R-5), read-only
 - `POST /api/v1/engine/missions/{mission_id}/submit`
 - `GET /api/v1/engine/missions/{mission_id}/qr-payload` — подписанный QR-payload для миссии в `in_progress`
 - `GET /api/v1/engine/fallback-offers`
@@ -691,3 +692,42 @@ Legacy `POST /api/v1/engine/missions/{mission_id}/submit` остаётся от�
 
 Статусы заявки: `pending` → `approved`/`rejected` → `processing` →
 `confirmed`/`failed`.
+
+## Реферальная программа (Sprint Referral R-5 / R-8)
+
+### `GET /api/v1/engine/me/referral`
+Read-only карточка рефералки текущего игрока (identity — подписанная
+HttpOnly cookie, как у остальных игровых роутов). Ничего не мутирует.
+
+Ответ:
+```json
+{
+  "enabled": false,
+  "rewardRoot": 25,
+  "shareLink": "https://t.me/<bot_username>?start=ref_<playerId>",
+  "referredBy": null
+}
+```
+- `enabled` — CMS `referral.enabled` (boolean; при отсутствии строки —
+  default каталога `false`);
+- `rewardRoot` — CMS `referral.reward_root` (integer; default 25);
+- `shareLink` — `https://t.me/<TELEGRAM_BOT_USERNAME>?start=ref_<playerId>`,
+  либо `null`, если имя бота на сервере не задано. Ссылку собирает backend —
+  фронт имя бота не знает и не хардкодит;
+- `referredBy` — `player_id` пригласившего (или `null`, если игрок пришёл без
+  реферальной ссылки).
+
+Флаг `enabled` управляет только начислением награды и видимостью блока в UI;
+привязка реферера при регистрации от него не зависит.
+
+### `POST /api/v1/auth/telegram` — `start_param`
+`Telegram.WebApp.initData` может содержать поле `start_param`
+(например `ref_<player_id>`). Поле входит в `data_check_string`, то есть
+покрыто подписью Telegram, и читается из `verify_init_data`
+(`VerifiedTelegramUser.start_param`) — **из тела запроса start_param не
+принимается**. Реферер привязывается только при создании нового профиля:
+существующий игрок никогда не переатрибутируется по чужой ссылке (иначе
+браузер мог бы приписать себя любому реферальному коду). Формат значения
+(`ref_...`), существование пригласившего, запрет self-referral и
+идемпотентность проверяет `app/referral_service.assign_referrer`; ошибки
+привязки не ломают вход игрока.

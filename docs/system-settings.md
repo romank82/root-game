@@ -48,6 +48,8 @@ TON credentials и иные секретные значения в system settin
 | `economy.daily_transfer_limit` | integer | 50000 | yes |
 | `economy.manual_adjustment_approval_threshold` | integer | 1000 | yes |
 | `economy.mission_force_complete_approval_threshold` | integer | 5000 | yes |
+| `referral.enabled` | boolean | false | no |
+| `referral.reward_root` | integer | 25 | yes |
 | `features.demo_seed_enabled` | boolean | false | yes |
 | `features.demo_reset_enabled` | boolean | false | yes |
 
@@ -59,6 +61,19 @@ TON credentials и иные секретные значения в system settin
 Флаги features.demo_* зарезервированы для development-инструментов вне production
 и не включаются до demo cleanup. Публичный reset endpoint удалён (3.11.a).
 Backup, аудит и удаление demo-данных — отдельная задача.
+
+### Реферальная программа (Sprint Referral R-2)
+
+`referral.enabled` — рубильник программы. По умолчанию выключена: включение —
+осознанное действие через CMS, а не побочный эффект деплоя. Флаг управляет
+только начислением награды (и видимостью блока в профиле); привязка реферера
+при регистрации от него не зависит.
+
+`referral.reward_root` — сколько ROOT получает пригласивший, когда приглашённый
+достигает порога `economy.transfer_minimum_earned_root` (тот же порог, что даёт
+доступ к переводам). Ключ sensitive: правка не-суперадмином — только через
+approval workflow. Значение попадает в `ReferralReward.amount_root` в момент
+привязки, поэтому изменение настройки не переписывает уже созданные награды.
 
 ## Permissions и API
 - `system_settings.read`: чтение каталога и значений;

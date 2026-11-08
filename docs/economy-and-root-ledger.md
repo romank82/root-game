@@ -41,3 +41,26 @@ referencing the original operation; history is never rewritten.
 
 Detailed contracts: `docs/mission-run-contract.md`,
 `docs/inventory-ledger-contract.md`, and `docs/fallback-shop-contract.md`.
+
+## Реферальная награда (Sprint Referral R-4 / R-6)
+
+ROOT пригласившему начисляется отдельной immutable-проводкой:
+
+- `transaction_type = "credit"`, `reference_type = "referral_reward"`,
+  `reference_id = ReferralReward.id`, `amount = ReferralReward.amount_root`,
+  `balance_after` — баланс кошелька пригласившего после начисления;
+- идемпотентность — тот же unique-индекс
+  `(wallet_id, reference_type, reference_id)`: одна запись `ReferralReward`
+  даёт не более одной проводки даже при гонке двух параллельных submit;
+  дополнительно доменный статус `pending → credited | cancelled` исключает
+  повторное начисление;
+- сумма фиксируется в `ReferralReward.amount_root` в момент привязки
+  (значение CMS `referral.reward_root` на тот момент) — настройка не
+  переписывает историю задним числом;
+- `referral_reward` **не входит** в «earned ROOT»: порог
+  `economy.transfer_minimum_earned_root` и `transfer_root` считают только
+  кредиты с `reference_type = "mission_reward"`. Реферальный бонус не даёт
+  доступа к переводам;
+- начисление выполняется в транзакции награды миссии, но в отдельном
+  SAVEPOINT: провал реферального бонуса откатывает только бонус и не ломает
+  выданную награду миссии (никаких «полу-начисленных» состояний).
