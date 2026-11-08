@@ -1391,6 +1391,17 @@ class PlayerMission(TimestampMixin, Base):
         nullable=True,
     )
 
+    # Sprint 8.x-attempt-deadline: абсолютный момент окончания ТЕКУЩЕЙ попытки.
+    # Ставится при accept и при выдаче новой сессии после провала.
+    # NULL — попытка без таймера (legacy или лимит не задан в MinigameProfile).
+    # Не сбрасывается по «ЗАНОВО»/выходу с экрана/повторному accept —
+    # проверяется в _submit_mission_once с grace 3 сек.
+    attempt_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+
     # Время, до которого можно отказаться от миссии с возвратом платы
     # (3 минуты после взятия). None = окно отказа не задано.
     # Заполняется при первом accept: started_at + 180 секунд.
