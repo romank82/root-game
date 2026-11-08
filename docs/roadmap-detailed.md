@@ -1648,3 +1648,39 @@ CMS-first: рубильник, сумма и порог живут в system set
 Открытые вопросы на будущее: `referral_reward` не входит в earned ROOT
 (решение осознанное); admin-раздел CMS для рефералки не делался (ключи
 правятся через общий раздел System Settings).
+
+---
+
+## Hotfix 8.x-hotfix-ref-link — регресс TELEGRAM_BOT_USERNAME — ✅ закрыт (2026-11-08)
+
+Регресс после коммита `c9386d5` (Config-Fix-2): в `.env`-файлах оказался
+`TELEGRAM_BOT_USERNAME=Himera_bot` (дев-бот), из-за чего `shareLink` в
+`GET /api/v1/engine/me/referral` вёл на неправильного бота. Код был корректен
+(`main.py:818`), проблема — только в данных `.env`.
+
+- ✅ **Симптом.** `https://t.me/Himera_bot?start=ref_player-<uuid>` вместо
+  `https://t.me/HimeraProtocolBot?start=ref_player-<uuid>`.
+- ✅ **Причина.** `backend/.env:11` и корневой `.env:8` были синхронизированы
+  на `Himera_bot` (коммит `c9386d5`, «sync env files (Himera_bot)»).
+- ✅ **Исправление.** Оба `.env` возвращены на
+  `TELEGRAM_BOT_USERNAME=HimeraProtocolBot` (правка вручную, `.env` вне git).
+- ✅ **Проверка.** `settings.telegram_bot_username == 'HimeraProtocolBot'`;
+  `test_referral_endpoint` — OK; ссылка в реальном Telegram открывает
+  `@HimeraProtocolBot`.
+
+Правило на будущее:
+
+- `backend/.env` — источник истины для локального `uvicorn` (читается
+  `config.py:16` через `load_dotenv(BACKEND_DIR / ".env")`, независимо от cwd).
+- Корневой `.env` — читается docker compose (интерполяция
+  `${TELEGRAM_BOT_USERNAME:-HimeraProtocolBot}`).
+- Оба файла должны совпадать по `TELEGRAM_BOT_USERNAME`. Рассинхрон — источник
+  регрессов.
+- Правка `.env` — только вручную (там секреты: `TELEGRAM_BOT_TOKEN`,
+  `GAME_SESSION_SECRET`, `POSTGRES_PASSWORD`, `TON_*`). Агенту `Cline` доступ
+  к `.env` не давать.
+
+Долг: **8.x-ref-link-cms** — вынести имя бота в админку (`system_settings`,
+ключ вида `telegram.bot_username`, с фолбэком на env), чтобы менять имя без
+правки файлов и перезапуска. Маленький спринт: `config.py` → `main.py`
+(чтение из CMS) → `admin_settings`/`catalog` → фронт админки. Пока не начат.
