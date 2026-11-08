@@ -349,6 +349,19 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         ),
         is_sensitive=True,
     ),
+    "telegram.bot_username": SystemSettingDefinition(
+        key="telegram.bot_username",
+        value_type="string",
+        default_value="",
+        category="telegram",
+        title="Имя Telegram-бота (username)",
+        description=(
+            "Username бота без @ (например, HimeraProtocolBot). "
+            "Используется для сборки реферальной ссылки. "
+            "Пустое значение — fallback на env TELEGRAM_BOT_USERNAME."
+        ),
+        is_sensitive=False,
+    ),
 }
 
 
