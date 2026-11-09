@@ -646,6 +646,19 @@ def _team_max_members_from_config(mission: Mission) -> int | None:
     return max_members
 
 
+def _nano_or_fallback(nano_value: int | None, root_value: int | None) -> int | None:
+    """Sprint 11.8 NanoROOT: вернуть *_nano, либо вычислить из *_root.
+
+    Для legacy-строк без backfill (поле *_nano == None) считаем из целого
+    ROOT. Если оба значения None — возвращаем None (нет данных).
+    """
+    if nano_value is not None:
+        return nano_value
+    if root_value is not None:
+        return root_value * NANO_PER_ROOT
+    return None
+
+
 def _build_bootstrap(
     session: Session,
     player_id: str,
@@ -878,11 +891,23 @@ def _build_bootstrap(
             "id": player.id,
             "displayName": player.display_name,
             "rootBalance": wallet.available_balance,
+            # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+            "rootBalanceNano": _nano_or_fallback(
+                wallet.available_balance_nano, wallet.available_balance
+            ),
         },
         "wallet": {
             "currency": wallet.currency,
             "availableBalance": wallet.available_balance,
+            # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+            "availableBalanceNano": _nano_or_fallback(
+                wallet.available_balance_nano, wallet.available_balance
+            ),
             "lockedBalance": wallet.locked_balance,
+            # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+            "lockedBalanceNano": _nano_or_fallback(
+                wallet.locked_balance_nano, wallet.locked_balance
+            ),
         },
         "missions": [
             {
@@ -927,6 +952,14 @@ def _build_bootstrap(
                 "entryRoot": (
                     policies_by_mission[mission.id].entry_root_atomic
                     if mission.id in policies_by_mission
+                    else None
+                ),
+                # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+                # entry_root_atomic — целое ROOT, переводим в nano.
+                "entryRootNano": (
+                    policies_by_mission[mission.id].entry_root_atomic * NANO_PER_ROOT
+                    if mission.id in policies_by_mission
+                    and policies_by_mission[mission.id].entry_root_atomic is not None
                     else None
                 ),
                 "requiredItems": (
