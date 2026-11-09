@@ -253,17 +253,24 @@ def _parse_iso_datetime(value: str, param_name: str) -> datetime:
     return ensure_utc(parsed)
 
 
-def _serialize_stars_payment(payment: StarsPayment) -> dict:
+def _serialize_stars_payment(
+    payment: StarsPayment, player_display_name: str | None = None
+) -> dict:
     """StarsPayment -> безопасный JSON журнала (Sprint 12.2).
 
     payload — это reference_id инвойса, telegram_payment_charge_id —
     идентификатор платежа Telegram (nullable до successful_payment). Оба не
     секреты и нужны админу для сверки с инвойсом. gas_amount — Numeric(18,4):
     str() сохраняет точность без float-конверсий (как в stars_service).
+
+    player_display_name — из JOIN с GamePlayer (Sprint 12.2-enhance): админ
+    должен видеть, чей это платёж, особенно при поиске по нику. Nullable:
+    у части игроков display_name не заполнен.
     """
     return {
         "id": payment.id,
         "playerId": payment.player_id,
+        "playerDisplayName": player_display_name,
         "gasAmount": str(payment.gas_amount),
         "amountStars": payment.amount_stars,
         "status": payment.status,
@@ -280,6 +287,7 @@ def _serialize_stars_payment(payment: StarsPayment) -> dict:
 def list_stars_payments(
     status: str | None = None,
     player_id: str | None = None,
+    player_search: str | None = None,
     search: str | None = None,
     from_: Annotated[str | None, Query(alias="from")] = None,
     to: str | None = None,
@@ -292,15 +300,26 @@ def list_stars_payments(
     Одна запись stars_payments = один инвойс (10.4-g-1). Фильтры:
       - status — pending|completed|refunded (иначе 422; CHECK модели);
       - player_id — точное совпадение;
+      - player_search — id ИЛИ подстрока display_name / telegram_username /
+        telegram_first_name / nickname_lower (ILIKE; набор полей как в
+        GET /admin/players); id тоже матчится точно внутри этого фильтра;
       - search — подстрока reference_id / telegram_payment_charge_id /
         payload (ILIKE: регистронезависимо в PostgreSQL и SQLite);
       - from/to — диапазон created_at, ISO 8601 (иначе 422);
       - limit (1..200) / offset — пагинация, как в /transactions.
     Порядок — created_at desc, id desc (свежие платежи первыми).
     Запись StarsPayment делает только stars_service (инвойс/webhook).
+    В ответе есть playerDisplayName (JOIN с GamePlayer; NULL, если у игрока
+    display_name не заполнен).
     """
     with SessionLocal() as session:  # read-only, не begin()
-        query = select(StarsPayment)
+        # JOIN с GamePlayer — всегда, а не только при player_search:
+        # display_name нужен в ответе для каждой строки (playerDisplayName).
+        # INNER JOIN безопасен: stars_payments.player_id NOT NULL + FK
+        # RESTRICT -> строка всегда находит игрока, дублей нет (join по PK).
+        query = select(StarsPayment, GamePlayer.display_name).join(
+            GamePlayer, GamePlayer.id == StarsPayment.player_id
+        )
 
         if status is not None:
             if status not in STARS_PAYMENT_STATUSES:
@@ -312,6 +331,23 @@ def list_stars_payments(
 
         if player_id:
             query = query.where(StarsPayment.player_id == player_id)
+
+        # Sprint 12.2-enhance: поиск по игроку — id ИЛИ ник/имя.
+        # Набор полей и ILIKE — как в list_admin_players (GET /admin/players);
+        # nickname_lower — lowercase-копия (латиница), поэтому value.lower().
+        if player_search:
+            player_value = player_search.strip()
+            if player_value:
+                player_pattern = f"%{player_value}%"
+                query = query.where(
+                    or_(
+                        StarsPayment.player_id == player_value,
+                        GamePlayer.display_name.ilike(player_pattern),
+                        GamePlayer.telegram_username.ilike(player_pattern),
+                        GamePlayer.telegram_first_name.ilike(player_pattern),
+                        GamePlayer.nickname_lower.ilike(f"%{player_value.lower()}%"),
+                    )
+                )
 
         if search:
             search_value = search.strip()
@@ -340,7 +376,7 @@ def list_stars_payments(
             select(func.count()).select_from(query.subquery())
         ) or 0
 
-        rows = session.scalars(
+        rows = session.execute(
             query.order_by(
                 StarsPayment.created_at.desc(),
                 StarsPayment.id.desc(),
@@ -350,7 +386,10 @@ def list_stars_payments(
         ).all()
 
         return {
-            "items": [_serialize_stars_payment(row) for row in rows],
+            "items": [
+                _serialize_stars_payment(payment, display_name)
+                for payment, display_name in rows
+            ],
             "total": total,
             "limit": limit,
             "offset": offset,
