@@ -38,8 +38,10 @@ from app.referral_service import (
     DEFAULT_REFERRAL_REWARD_ROOT,
     REFERRAL_ENABLED_KEY,
     REFERRAL_REWARD_ROOT_KEY,
+    TELEGRAM_BOT_USERNAME_KEY,
     _read_bool_setting,
     _read_int_setting,
+    _read_string_setting,
     assign_referrer,
 )
 from app.slug_utils import generate_nickname
@@ -802,8 +804,9 @@ def get_my_referral_route(
     """Моя рефералка (Sprint Referral R-5): флаг, награда, share-ссылка.
 
     Только чтение: enabled/rewardRoot берутся из CMS (system_settings, с
-    фолбэком на каталог), shareLink собирается из
-    settings.telegram_bot_username — фронт имя бота не знает и не хардкодит.
+    фолбэком на каталог), shareLink собирается из имени бота — CMS-first
+    (``telegram.bot_username``) с фолбэком на env ``TELEGRAM_BOT_USERNAME``;
+    фронт имя бота не знает и не хардкодит.
     referredBy — кто пригласил игрока (None, если без реферальной ссылки).
     """
     with SessionLocal() as session:
@@ -812,8 +815,18 @@ def get_my_referral_route(
             session, REFERRAL_REWARD_ROOT_KEY, DEFAULT_REFERRAL_REWARD_ROOT
         )
         player = session.get(GamePlayer, player_id)
+        # Sprint 8.x-ref-link-cms: CMS-first, фолбэк на env. Читаем внутри
+        # сессии — вне её ORM-запрос к system_settings уже не выполнить.
+        cms_bot_username = _read_string_setting(
+            session, TELEGRAM_BOT_USERNAME_KEY, ""
+        )
+        bot_username = (
+            cms_bot_username or settings.telegram_bot_username
+        ).strip()
+        # Нормализация: username в Telegram без @, админ может ввести с ним.
+        if bot_username.startswith("@"):
+            bot_username = bot_username[1:].strip()
 
-    bot_username = settings.telegram_bot_username.strip()
     share_link = (
         f"https://t.me/{bot_username}?start=ref_{player_id}"
         if bot_username

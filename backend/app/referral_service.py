@@ -52,10 +52,12 @@ from app.models import (
 )
 from app.system_settings_catalog import get_definition
 
-# Ключи CMS (system_settings_catalog.py, категории referral/economy).
+# Ключи CMS (system_settings_catalog.py, категории referral/economy/telegram).
 REFERRAL_ENABLED_KEY = "referral.enabled"
 REFERRAL_REWARD_ROOT_KEY = "referral.reward_root"
 EARNED_THRESHOLD_KEY = "economy.transfer_minimum_earned_root"
+# Sprint 8.x-ref-link-cms: имя бота (CMS-first, фолбэк на env).
+TELEGRAM_BOT_USERNAME_KEY = "telegram.bot_username"
 
 # Префикс реферального start_param: "ref_<player_id>" (Referral-3 читает
 # start_param из подписанного initData, формат валидируется здесь).
@@ -125,6 +127,29 @@ def _read_bool_setting(session: Session, key: str, fallback: bool = False) -> bo
     definition = get_definition(key)
     if definition is not None and isinstance(definition.default_value, bool):
         return definition.default_value
+
+    return fallback
+
+
+def _read_string_setting(session: Session, key: str, fallback: str = "") -> str:
+    """Активная SystemSetting-запись (string) -> default каталога -> fallback.
+
+    Порядок тот же, что у ``_read_int_setting``: сперва активная запись из БД,
+    затем default_value из код-каталога, в конце явный fallback. Если тип в БД
+    не совпадает с ожидаемым («string») — значение не доверяем и идём дальше
+    (несовместимая запись не должна протекать в ссылку).
+    """
+    setting = _read_setting(session, key)
+    if setting is not None and setting.value_type == "string":
+        value = setting.value_json
+        if isinstance(value, str):
+            return value
+
+    definition = get_definition(key)
+    if definition is not None and definition.value_type == "string":
+        default = definition.default_value
+        if isinstance(default, str):
+            return default
 
     return fallback
 
