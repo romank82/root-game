@@ -31,7 +31,7 @@
 | 16. Ежедневки (DailyMissions) | ❌ не начат | — | — |
 | 17. CMS-разделы (GeoZone/ARObject/Players/Teams/Approvals/RewardPools) | ⚠️ частично | 17.1–17.3 (геозоны, AR-объекты, игроки) | 17.4–17.6 (команды, approvals, пулы) — бэкенд готов, UI нет |
 | Referral R-1…R-8 | ✅ закрыт (2026-11-06) | — | — |
-| Hotfix 8.x-hotfix-ref-link | ✅ закрыт (2026-11-08) | — | долг 8.x-ref-link-cms (имя бота в админку) |
+| Hotfix 8.x-hotfix-ref-link | ✅ закрыт (2026-11-08) | — | — |
 | 8.x-attempt-deadline (серверный дедлайн попытки) | ✅ закрыт (2026-11-08) | 3A-1…3A-5 + fix (модель + миграция dcc8fb912a89, engine, фронт, 9 тестов) | — |
 
 ---
@@ -1710,10 +1710,10 @@ CMS-first: рубильник, сумма и порог живут в system set
   `GAME_SESSION_SECRET`, `POSTGRES_PASSWORD`, `TON_*`). Агенту `Cline` доступ
   к `.env` не давать.
 
-Долг: **8.x-ref-link-cms** — вынести имя бота в админку (`system_settings`,
-ключ вида `telegram.bot_username`, с фолбэком на env), чтобы менять имя без
-правки файлов и перезапуска. Маленький спринт: `config.py` → `main.py`
-(чтение из CMS) → `admin_settings`/`catalog` → фронт админки. Пока не начат.
+**Долг закрыт** (`8.x-ref-link-cms`, `17a8c16`, `a360240`, `545e127`): имя бота
+вынесено в CMS (`system_settings`, ключ `telegram.bot_username`, фолбэк на env)
+— менять имя можно через админку без правки файлов и перезапуска. См. раздел
+«8.x-ref-link-cms — ✅ закрыт (2026-11-09)» ниже.
 
 ---
 
@@ -1745,3 +1745,17 @@ CMS-first: рубильник, сумма и порог живут в system set
 **Долг закрыт** (`8.x-attempt-deadline-fix`, `c56d1a2`): поздний submit сжигает
 ровно одну попытку и возвращает `timedOut: true` (pre-read PlayerMission
 ДО sync, early-return без повторного инкремента). 903 OK.
+
+## 8.x-ref-link-cms — ✅ закрыт (2026-11-09)
+
+Имя Telegram-бота вынесено в CMS (`telegram.bot_username`, категория
+telegram, тип string, не sensitive, default ""). CMS-first с fallback на env
+`TELEGRAM_BOT_USERNAME`. Менять можно через админку без правки `.env` и
+перезапуска uvicorn.
+
+- ✅ **Шаг A** (`17a8c16`): каталог + seed-миграция `2f8b4c1a6e0d`.
+- ✅ **Шаг B** (`a360240`): `_read_string_setting`, чтение CMS в
+  `get_my_referral_route`, fallback на env, нормализация `@`.
+- ✅ **Шаг D** (`545e127`): 4 теста CMS-first + docs
+  (`api-contracts.md`, `system-settings.md`). 907 OK.
+- ✅ **Шаг E** (этот коммит): долг закрыт в audit + roadmap.

@@ -25,7 +25,7 @@ TON credentials и иные секретные значения в system settin
 ## Поля
 - `key`: уникальный неизменяемый machine-readable ключ;
 - `value_json`: типизированное не секретное значение;
-- `value_type`: `integer`, `boolean`, `json`;
+- `value_type`: `integer`, `boolean`, `string`, `json`;
 - `category`, `title`, `description`;
 - `is_sensitive`: требует approval для изменения;
 - `status`: `active` или `archived`;
