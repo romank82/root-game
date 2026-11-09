@@ -7,6 +7,9 @@
 2) GET /transactions (9.2) — реестр всех операций ROOT с фильтрами
    (player_id, type, from, to) и пагинацией (limit/offset). Индексы для
    фильтров — миграция ec7a5b3f1984.
+3) GET /stars-payments (Sprint 12.2) — журнал Stars-платежей (покупка газа,
+   10.4) с фильтрами (status, player_id, search, from, to) и пагинацией.
+   Только чтение: StarsPayment пишет исключительно stars_service.
 
 Право: economy.read (сид-миграция f4c2e8a1d9b6, append-only).
 Ядро (модели, ledger, движок) не трогаем — только чтение.
@@ -27,11 +30,21 @@ from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.datetime_utils import ensure_utc
 from app.db import SessionLocal
-from app.models import AdminUser, GamePlayer, Wallet, WalletTransaction
+from app.models import (
+    AdminUser,
+    GamePlayer,
+    StarsPayment,
+    Wallet,
+    WalletTransaction,
+)
 
 router = APIRouter(prefix="/api/v1/admin/economy", tags=["admin-economy"])
 
 ECONOMY_READ_PERMISSION = "economy.read"
+
+# Статусы stars_payments: те же, что в CHECK-constraint модели
+# (ck_stars_payments_status). Значения заданы схемой БД, не CMS.
+STARS_PAYMENT_STATUSES = ("pending", "completed", "refunded")
 
 
 @router.get("/audit")
@@ -217,6 +230,127 @@ def list_economy_transactions(
 
         return {
             "transactions": transactions,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+
+def _parse_iso_datetime(value: str, param_name: str) -> datetime:
+    """Разбор ISO 8601-строки фильтра (from/to) -> aware-UTC.
+
+    Тот же разбор, что инлайн в list_economy_transactions, вынесен в хелпер:
+    журнал Stars принимает два таких параметра. Некорректная строка -> 422.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Некорректная дата в параметре {param_name}.",
+        ) from None
+    # ensure_utc(None) вернул бы None, но fromisoformat всегда даёт datetime.
+    return ensure_utc(parsed)
+
+
+def _serialize_stars_payment(payment: StarsPayment) -> dict:
+    """StarsPayment -> безопасный JSON журнала (Sprint 12.2).
+
+    payload — это reference_id инвойса, telegram_payment_charge_id —
+    идентификатор платежа Telegram (nullable до successful_payment). Оба не
+    секреты и нужны админу для сверки с инвойсом. gas_amount — Numeric(18,4):
+    str() сохраняет точность без float-конверсий (как в stars_service).
+    """
+    return {
+        "id": payment.id,
+        "playerId": payment.player_id,
+        "gasAmount": str(payment.gas_amount),
+        "amountStars": payment.amount_stars,
+        "status": payment.status,
+        "telegramPaymentChargeId": payment.telegram_payment_charge_id,
+        "referenceId": payment.reference_id,
+        "payload": payment.payload,
+        "createdAt": (
+            ensure_utc(payment.created_at).isoformat() if payment.created_at else None
+        ),
+    }
+
+
+@router.get("/stars-payments")
+def list_stars_payments(
+    status: str | None = None,
+    player_id: str | None = None,
+    search: str | None = None,
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    admin: AdminUser = Depends(require_permission(ECONOMY_READ_PERMISSION)),
+) -> dict:
+    """Журнал Stars-платежей (Sprint 12.2) — только чтение, без мутаций.
+
+    Одна запись stars_payments = один инвойс (10.4-g-1). Фильтры:
+      - status — pending|completed|refunded (иначе 422; CHECK модели);
+      - player_id — точное совпадение;
+      - search — подстрока reference_id / telegram_payment_charge_id /
+        payload (ILIKE: регистронезависимо в PostgreSQL и SQLite);
+      - from/to — диапазон created_at, ISO 8601 (иначе 422);
+      - limit (1..200) / offset — пагинация, как в /transactions.
+    Порядок — created_at desc, id desc (свежие платежи первыми).
+    Запись StarsPayment делает только stars_service (инвойс/webhook).
+    """
+    with SessionLocal() as session:  # read-only, не begin()
+        query = select(StarsPayment)
+
+        if status is not None:
+            if status not in STARS_PAYMENT_STATUSES:
+                raise HTTPException(
+                    status_code=422,
+                    detail="status должен быть pending, completed или refunded.",
+                )
+            query = query.where(StarsPayment.status == status)
+
+        if player_id:
+            query = query.where(StarsPayment.player_id == player_id)
+
+        if search:
+            search_value = search.strip()
+            if search_value:
+                pattern = f"%{search_value}%"
+                query = query.where(
+                    or_(
+                        StarsPayment.reference_id.ilike(pattern),
+                        StarsPayment.telegram_payment_charge_id.ilike(pattern),
+                        StarsPayment.payload.ilike(pattern),
+                    )
+                )
+
+        if from_ is not None:
+            query = query.where(
+                StarsPayment.created_at >= _parse_iso_datetime(from_, "from")
+            )
+
+        if to is not None:
+            query = query.where(StarsPayment.created_at <= _parse_iso_datetime(to, "to"))
+
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
+
+        total = session.scalar(
+            select(func.count()).select_from(query.subquery())
+        ) or 0
+
+        rows = session.scalars(
+            query.order_by(
+                StarsPayment.created_at.desc(),
+                StarsPayment.id.desc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        ).all()
+
+        return {
+            "items": [_serialize_stars_payment(row) for row in rows],
             "total": total,
             "limit": limit,
             "offset": offset,
