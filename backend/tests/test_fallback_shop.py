@@ -1878,3 +1878,127 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         self.assertEqual(after.status, "exhausted")
         self.assertEqual(after.consumed_count, 1)
         self.assertEqual(after.run_entry_count, 1)
+
+    def test_fallback_stale_offer_closed_after_award(self):
+        """8.17.13-fix: после награды ключом невыкупленный депозит закрывается.
+
+        Сценарий бага (stale available):
+          1. Заход 1: провал 1-й попытки → entitlement available (quota=1).
+             Ключ НЕ куплен.
+          2. Завершаем заход 1 успехом на 2-й попытке: XOR внутри захода —
+             ключ наградой не выдаётся, депозит остаётся available.
+          3. Заход 2: успех с 1-й попытки → ключ выдан наградой.
+          4. До фикса: старый оффер оставался available → можно было купить
+             второй ключ (ключ дважды).
+          5. После фикса: оффер закрыт (status=exhausted, quota_limit=0,
+             remainingQuota=0), покупка → 409 «Предложение недоступно.»,
+             в инвентаре ровно 1 ключ, ROOT не списан.
+        """
+        ids = self._fixture()
+        self._seed_root_wallet(ids["player"], 1000)
+        self._seed_repeatable_policy(ids["target"])
+        self._attach_geo_zone(ids)
+
+        # Заход 1: провал 1-й попытки → entitlement available, НЕ покупаем.
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="wrong-run-1"
+        )
+        entitlement = self._get_entitlement(ids["player"], ids["target"])
+        self.assertIsNotNone(entitlement)
+        self.assertEqual(entitlement.status, "available")
+        self.assertEqual(entitlement.quota_limit, 1)  # deposit = reward.amount
+        self.assertEqual(entitlement.consumed_count, 0)
+        self.assertEqual(entitlement.run_entry_count, 1)
+        self.assertEqual(
+            [
+                (offer["status"], offer["remainingQuota"])
+                for offer in self.fallback_shop.get_fallback_offers(ids["player"])[
+                    "offers"
+                ]
+            ],
+            [("available", 1)],
+        )
+
+        # Завершаем заход 1 успехом на 2-й попытке: ключ наградой НЕ выдаётся
+        # (XOR внутри захода), депозит законно остаётся доступным.
+        first_run = self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="complete"
+        )
+        self.assertTrue(first_run["accepted"])
+        self.assertEqual(first_run["awarded"]["items"], [])
+
+        # Заход 2: успех с 1-й попытки → ключ выдан наградой.
+        self.mission_engine.accept_mission(
+            ids["player"], ids["target"], latitude=55.751244, longitude=37.618423
+        )
+        second_run = self.mission_engine.submit_mission(
+            ids["player"], ids["target"], answer="complete"
+        )
+        self.assertTrue(second_run["accepted"])
+        self.assertEqual(len(second_run["awarded"]["items"]), 1)
+        self.assertEqual(second_run["awarded"]["items"][0]["id"], ids["item"])
+        self.assertEqual(second_run["awarded"]["items"][0]["quantity"], 1)
+
+        # Инвентарь: ровно один ключ — награда за заход 2.
+        with self.SessionLocal() as session:
+            from app.geo_team_runtime_models import PlayerFallbackEntitlement
+            from app.models import PlayerItem
+
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(player_item)
+            self.assertEqual(player_item.quantity, 1)
+
+            # 8.17.13-fix: невыкупленный депозит срезан, оффер закрыт.
+            closed = session.get(PlayerFallbackEntitlement, entitlement.id)
+            self.assertIsNotNone(closed)
+            self.assertEqual(closed.status, "exhausted")
+            self.assertEqual(closed.quota_limit, 0)
+            self.assertEqual(closed.consumed_count, 0)
+
+        # Магазин: остаток 0, статус exhausted — купить нечего.
+        offers = self.fallback_shop.get_fallback_offers(ids["player"])["offers"]
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0]["status"], "exhausted")
+        self.assertEqual(offers[0]["remainingQuota"], 0)
+
+        # До фикса здесь проходила покупка второго ключа.
+        with self.assertRaises(self.mission_engine.MissionEngineError) as catcher:
+            self.fallback_shop.purchase_fallback_offer_entrypoint(
+                ids["player"], entitlement.id
+            )
+        self.assertEqual(catcher.exception.status_code, 409)
+        self.assertEqual(catcher.exception.detail, "Предложение недоступно.")
+
+        # Отклонённая покупка не создала ни проводки, ни второго ключа.
+        with self.SessionLocal() as session:
+            from app.models import PlayerItem, Wallet, WalletTransaction
+
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == ids["player"])
+            )
+            self.assertIsNotNone(wallet)
+            self.assertEqual(wallet.available_balance, 1000)
+            txs = session.scalars(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.reference_type == "fallback_purchase",
+                )
+            ).all()
+            self.assertEqual(len(txs), 0)
+
+            player_item = session.scalar(
+                select(PlayerItem).where(
+                    PlayerItem.player_id == ids["player"],
+                    PlayerItem.item_id == ids["item"],
+                )
+            )
+            self.assertIsNotNone(player_item)
+            self.assertEqual(player_item.quantity, 1)
