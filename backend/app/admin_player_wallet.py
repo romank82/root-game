@@ -72,6 +72,9 @@ MAX_REASON_LEDGER = 255
 ROOT_CURRENCY = "ROOT"
 ACTIVE_SETTING_STATUS = "active"
 
+# Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT.
+NANO_PER_ROOT = 100_000_000
+
 
 class WalletAdjustmentError(Exception):
     """Доменная ошибка wallet-adjustment с machine-readable code."""
@@ -226,11 +229,16 @@ def _apply_wallet_adjustment(
             currency=ROOT_CURRENCY,
             available_balance=0,
             locked_balance=0,
+            # Sprint 11.8 NanoROOT: 0 * NANO_PER_ROOT = 0 (dual-write).
+            available_balance_nano=0,
+            locked_balance_nano=0,
         )
         session.add(wallet)
         session.flush()
 
     wallet.available_balance = new_balance
+    # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+    wallet.available_balance_nano = new_balance * NANO_PER_ROOT
 
     reference_type = (
         ADMIN_CREDIT_REFERENCE_TYPE if direction == "credit" else ADMIN_DEBIT_REFERENCE_TYPE
@@ -251,7 +259,9 @@ def _apply_wallet_adjustment(
         id=_new_id("wallet-transaction"),
         wallet_id=wallet.id,
         amount=amount,
+        amount_nano=amount * NANO_PER_ROOT,
         balance_after=new_balance,
+        balance_after_nano=wallet.available_balance_nano,
         transaction_type=direction,
         reason=_build_ledger_reason(direction, reason),
         reference_type=reference_type,
