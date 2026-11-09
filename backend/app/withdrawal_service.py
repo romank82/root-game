@@ -221,6 +221,8 @@ def create_withdrawal_request(
         return {
             "withdrawalId": withdrawal_id,
             "amountRoot": amount_root,
+            # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+            "amountRootNano": amount_root * NANO_PER_ROOT,
             "toAddress": canonical_address,
             "status": "pending",
         }
@@ -371,6 +373,12 @@ def _serialize_player_withdrawal(withdrawal: WithdrawalRequest) -> dict:
     return {
         "withdrawalId": withdrawal.id,
         "amountRoot": withdrawal.amount_root,
+        # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+        "amountRootNano": (
+            withdrawal.amount_root_nano
+            if withdrawal.amount_root_nano is not None
+            else withdrawal.amount_root * NANO_PER_ROOT
+        ),
         "toAddress": withdrawal.to_address,
         "status": withdrawal.status,
         "tonTxHash": withdrawal.ton_tx_hash,

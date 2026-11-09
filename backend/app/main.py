@@ -36,6 +36,7 @@ from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entry
 from app.shop_service import list_catalog_items, purchase_catalog_item
 from app.referral_service import (
     DEFAULT_REFERRAL_REWARD_ROOT,
+    NANO_PER_ROOT,
     REFERRAL_ENABLED_KEY,
     REFERRAL_REWARD_ROOT_KEY,
     TELEGRAM_BOT_USERNAME_KEY,
@@ -836,6 +837,8 @@ def get_my_referral_route(
     return {
         "enabled": enabled,
         "rewardRoot": reward_root,
+        # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+        "rewardRootNano": reward_root * NANO_PER_ROOT,
         "shareLink": share_link,
         "referredBy": (
             player.referred_by_player_id if player is not None else None

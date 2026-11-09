@@ -30,7 +30,11 @@ from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
 from app.mission_engine import MissionEngineError
 from app.models import AdminUser, WithdrawalRequest
-from app.withdrawal_service import process_withdrawal_batch, reject_withdrawal
+from app.withdrawal_service import (
+    NANO_PER_ROOT,
+    process_withdrawal_batch,
+    reject_withdrawal,
+)
 
 router = APIRouter(
     prefix="/api/v1/admin/withdrawals",
@@ -71,6 +75,12 @@ def _serialize_withdrawal(withdrawal: WithdrawalRequest) -> dict[str, Any]:
         "id": withdrawal.id,
         "playerId": withdrawal.player_id,
         "amountRoot": withdrawal.amount_root,
+        # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+        "amountRootNano": (
+            withdrawal.amount_root_nano
+            if withdrawal.amount_root_nano is not None
+            else withdrawal.amount_root * NANO_PER_ROOT
+        ),
         "toAddress": withdrawal.to_address,
         "status": withdrawal.status,
         "tonTxHash": withdrawal.ton_tx_hash,
