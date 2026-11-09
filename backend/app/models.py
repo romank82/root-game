@@ -486,6 +486,12 @@ class MissionReward(TimestampMixin, Base):
     )
     reward_type: Mapped[str] = mapped_column(String(64), nullable=False)
     amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Sprint 11.8 NanoROOT: дробный ROOT (10^8 нано = 1 ROOT). Nullable —
+    # для обратной совместимости (dual-write); после backfill заполнено.
+    # Старое поле (Integer ROOT) остаётся для чтения до этапа 2.
+    amount_nano: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
     item_id: Mapped[str | None] = mapped_column(
         ForeignKey("items.id", ondelete="SET NULL"),
         nullable=True,
@@ -1469,6 +1475,15 @@ class Wallet(TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(32), nullable=False, default="ROOT")
     available_balance: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_balance: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Sprint 11.8 NanoROOT: дробный ROOT (10^8 нано = 1 ROOT). Nullable —
+    # для обратной совместимости (dual-write); после backfill заполнено.
+    # Старое поле (Integer ROOT) остаётся для чтения до этапа 2.
+    available_balance_nano: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
+    locked_balance_nano: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -1490,6 +1505,15 @@ class WalletTransaction(TimestampMixin, Base):
     )
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
     balance_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Sprint 11.8 NanoROOT: дробный ROOT (10^8 нано = 1 ROOT). Nullable —
+    # для обратной совместимости (dual-write); после backfill заполнено.
+    # Старые поля (Integer ROOT) остаются для чтения до этапа 2.
+    amount_nano: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
+    balance_after_nano: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
     transaction_type: Mapped[str] = mapped_column(String(64), nullable=False)
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
     reference_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -1530,6 +1554,12 @@ class PlayerTransfer(TimestampMixin, Base):
         index=True,
     )
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Sprint 11.8 NanoROOT: дробный ROOT (10^8 нано = 1 ROOT). Nullable —
+    # для обратной совместимости (dual-write); после backfill заполнено.
+    # Старое поле (Integer ROOT) остаётся для чтения до этапа 2.
+    amount_nano: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -1588,6 +1618,12 @@ class ReferralReward(TimestampMixin, Base):
         index=True,
     )
     amount_root: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Sprint 11.8 NanoROOT: дробный ROOT (10^8 нано = 1 ROOT). Nullable —
+    # для обратной совместимости (dual-write); после backfill заполнено.
+    # Старое поле (Integer ROOT) остаётся для чтения до этапа 2.
+    amount_root_nano: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="pending", index=True
     )
@@ -2041,6 +2077,13 @@ class WithdrawalRequest(TimestampMixin, Base):
         ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=True
     )
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Sprint 11.8 NanoROOT: дробный ROOT (10^8 нано = 1 ROOT). Nullable —
+    # для обратной совместимости (dual-write); после backfill заполнено.
+    # amount_root уже BigInteger; amount_root_nano — единый nano-канал
+    # (старое поле остаётся для чтения до этапа 2).
+    amount_root_nano: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
 
     __table_args__ = (
         CheckConstraint(

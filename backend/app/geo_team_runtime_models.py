@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     Float,
@@ -388,6 +389,12 @@ class WalletReservation(RuntimeTimestampMixin, Base):
         index=True,
     )
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Sprint 11.8 NanoROOT: дробный ROOT (10^8 нано = 1 ROOT). Nullable —
+    # для обратной совместимости (dual-write); после backfill заполнено.
+    # Старое поле (Integer ROOT) остаётся для чтения до этапа 2.
+    amount_nano: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     reserved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
