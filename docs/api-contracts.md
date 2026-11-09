@@ -711,9 +711,11 @@ HttpOnly cookie, как у остальных игровых роутов). Ни
 - `enabled` — CMS `referral.enabled` (boolean; при отсутствии строки —
   default каталога `false`);
 - `rewardRoot` — CMS `referral.reward_root` (integer; default 25);
-- `shareLink` — `https://t.me/<TELEGRAM_BOT_USERNAME>?start=ref_<playerId>`,
-  либо `null`, если имя бота на сервере не задано. Ссылку собирает backend —
-  фронт имя бота не знает и не хардкодит;
+- `shareLink` — `https://t.me/<bot_username>?start=ref_<playerId>`, либо `null`,
+  если имя бота не задано. Имя бота берётся из CMS
+  (`telegram.bot_username`, категория telegram, тип string) с fallback на env
+  `TELEGRAM_BOT_USERNAME`; ведущий `@` нормализуется (обрезается). Ссылку
+  собирает backend — фронт имя бота не знает и не хардкодит;
 - `referredBy` — `player_id` пригласившего (или `null`, если игрок пришёл без
   реферальной ссылки).
 

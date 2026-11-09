@@ -82,13 +82,21 @@ class ReferralEndpointTests(unittest.TestCase):
             patcher.stop()
         self.engine.dispose()
 
-    def _set_setting(self, key: str, value, category: str) -> None:
+    def _set_setting(
+        self,
+        key: str,
+        value,
+        category: str,
+        value_type: str | None = None,
+    ) -> None:
+        if value_type is None:
+            value_type = "boolean" if isinstance(value, bool) else "integer"
         with self.SessionLocal.begin() as session:
             session.merge(
                 SystemSetting(
                     key=key,
                     value_json=value,
-                    value_type="boolean" if isinstance(value, bool) else "integer",
+                    value_type=value_type,
                     category=category,
                     title=key,
                     description="Seeded by referral endpoint test",
@@ -138,6 +146,76 @@ class ReferralEndpointTests(unittest.TestCase):
             f"https://t.me/{TEST_BOT_USERNAME}?start=ref_{REFERRED_ID}",
         )
         self.assertEqual(second["referredBy"], REFERRER_ID)
+
+    def test_share_link_uses_cms_when_set(self) -> None:
+        """CMS-first: telegram.bot_username в CMS перекрывает env TELEGRAM_BOT_USERNAME."""
+        self._set_setting(
+            "telegram.bot_username", "cms_bot", "telegram", value_type="string"
+        )
+        # env в setUp — TEST_BOT_USERNAME ("test_bot"), отличное от CMS.
+        result = main_module.get_my_referral_route(
+            request=SimpleNamespace(),
+            player_id=REFERRER_ID,
+        )
+        self.assertEqual(
+            result["shareLink"],
+            f"https://t.me/cms_bot?start=ref_{REFERRER_ID}",
+        )
+
+    def test_share_link_falls_back_to_env_when_cms_empty(self) -> None:
+        """Пустая CMS-строка → fallback на env TELEGRAM_BOT_USERNAME."""
+        self._set_setting(
+            "telegram.bot_username", "", "telegram", value_type="string"
+        )
+        with patch(
+            "app.main.settings",
+            replace(
+                real_settings,
+                telegram_bot_username="env_bot",
+                game_session_secret=TEST_SESSION_SECRET,
+            ),
+        ):
+            result = main_module.get_my_referral_route(
+                request=SimpleNamespace(),
+                player_id=REFERRER_ID,
+            )
+        self.assertEqual(
+            result["shareLink"],
+            f"https://t.me/env_bot?start=ref_{REFERRER_ID}",
+        )
+
+    def test_share_link_null_when_both_empty(self) -> None:
+        """CMS пусто и env пусто → shareLink = None (как до CMS)."""
+        self._set_setting(
+            "telegram.bot_username", "", "telegram", value_type="string"
+        )
+        with patch(
+            "app.main.settings",
+            replace(
+                real_settings,
+                telegram_bot_username="",
+                game_session_secret=TEST_SESSION_SECRET,
+            ),
+        ):
+            result = main_module.get_my_referral_route(
+                request=SimpleNamespace(),
+                player_id=REFERRER_ID,
+            )
+        self.assertIsNone(result["shareLink"])
+
+    def test_share_link_normalizes_at_prefix(self) -> None:
+        """Ведущий @ в CMS-значении обрезается (username бота в Telegram без @)."""
+        self._set_setting(
+            "telegram.bot_username", "@HimeraProtocolBot", "telegram", value_type="string"
+        )
+        result = main_module.get_my_referral_route(
+            request=SimpleNamespace(),
+            player_id=REFERRER_ID,
+        )
+        self.assertEqual(
+            result["shareLink"],
+            f"https://t.me/HimeraProtocolBot?start=ref_{REFERRER_ID}",
+        )
 
     def test_auth_with_ref_param(self) -> None:
         """Новый игрок со start_param="ref_<id>" получает реферера и pending-запись."""

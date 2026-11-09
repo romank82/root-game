@@ -50,6 +50,7 @@ TON credentials и иные секретные значения в system settin
 | `economy.mission_force_complete_approval_threshold` | integer | 5000 | yes |
 | `referral.enabled` | boolean | false | no |
 | `referral.reward_root` | integer | 25 | yes |
+| `telegram.bot_username` | string | "" | no |
 | `features.demo_seed_enabled` | boolean | false | yes |
 | `features.demo_reset_enabled` | boolean | false | yes |
 
@@ -74,6 +75,19 @@ Backup, аудит и удаление demo-данных — отдельная 
 доступ к переводам). Ключ sensitive: правка не-суперадмином — только через
 approval workflow. Значение попадает в `ReferralReward.amount_root` в момент
 привязки, поэтому изменение настройки не переписывает уже созданные награды.
+
+### Имя Telegram-бота (Sprint 8.x-ref-link-cms)
+
+`telegram.bot_username` — username бота без `@` (например,
+`HimeraProtocolBot`). Используется для сборки реферальной ссылки
+(`https://t.me/<bot_username>?start=ref_<playerId>`).
+
+Приоритет: CMS-first (значение из system_settings) → fallback на env
+`TELEGRAM_BOT_USERNAME`. Ведущий `@` нормализуется (обрезается).
+
+Ключ не sensitive (username публичен — он виден в самой ссылке), менять
+может любой админ с правом `system_settings.manage`. Пустое значение =
+fallback на env (текущее поведение до CMS).
 
 ## Permissions и API
 - `system_settings.read`: чтение каталога и значений;
