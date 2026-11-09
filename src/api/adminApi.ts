@@ -1580,6 +1580,64 @@ export async function listEconomyTransactions(
 }
 
 
+// ---- Журнал Stars-платежей (Sprint 12.2) --------------------------------
+// Read-only: контракт — backend/app/admin_economy.py (list_stars_payments).
+// Ответ — конверт {items, total, limit, offset}. gasAmount приходит строкой:
+// на бэке это Numeric(18,4)/Decimal, str() сохраняет точность.
+// Фильтр игрока уходит как snake_case player_id (query-параметр FastAPI),
+// как и в listEconomyTransactions выше.
+
+export type AdminStarsPaymentStatus = 'pending' | 'completed' | 'refunded'
+
+export type AdminStarsPayment = {
+  id: string
+  playerId: string
+  gasAmount: string
+  amountStars: number
+  status: AdminStarsPaymentStatus
+  telegramPaymentChargeId: string | null
+  referenceId: string
+  payload: string
+  createdAt: string | null
+}
+
+export type StarsPaymentsFilters = {
+  status?: AdminStarsPaymentStatus
+  playerId?: string
+  search?: string
+  from?: string
+  to?: string
+  limit?: number
+  offset?: number
+}
+
+export type AdminStarsPaymentsResponse = {
+  items: AdminStarsPayment[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export async function listStarsPayments(
+  filters: StarsPaymentsFilters = {},
+): Promise<AdminStarsPaymentsResponse> {
+  const params = new URLSearchParams()
+  if (filters.status) params.set('status', filters.status)
+  if (filters.playerId) params.set('player_id', filters.playerId)
+  if (filters.search) params.set('search', filters.search)
+  if (filters.from) params.set('from', filters.from)
+  if (filters.to) params.set('to', filters.to)
+  params.set('limit', String(filters.limit ?? 50))
+  params.set('offset', String(filters.offset ?? 0))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(
+    `/api/v1/admin/economy/stars-payments${query}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return (await response.json()) as AdminStarsPaymentsResponse
+}
+
+
 // ---- Игроки (10.0.3, часть 1) -------------------------------------------
 // Read-only типы и функции для вкладки «Игроки». Контракты — из
 // admin_players.py: _serialize_player_summary, _serialize_player_card,
