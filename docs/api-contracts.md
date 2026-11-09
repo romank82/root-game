@@ -693,6 +693,31 @@ Legacy `POST /api/v1/engine/missions/{mission_id}/submit` остаётся от�
 Статусы заявки: `pending` → `approved`/`rejected` → `processing` →
 `confirmed`/`failed`.
 
+## Админ-экономика — журнал Stars-платежей (Sprint 12.2)
+
+### GET /api/v1/admin/economy/stars-payments
+Журнал Stars-платежей (покупка газа за Telegram Stars, 10.4). Read-only:
+только `SELECT`, мутаций нет — записи `stars_payments` создаёт
+`stars_service` (createInvoiceLink + webhook `successful_payment`).
+Право: `economy.read`.
+
+Query-параметры:
+- `status` — `pending` | `completed` | `refunded` (иначе 422);
+- `player_id` — точное совпадение;
+- `search` — подстрока в `reference_id` / `telegram_payment_charge_id` /
+  `payload` (ILIKE: регистронезависимо в PostgreSQL и SQLite);
+- `from`, `to` — ISO 8601, диапазон по `created_at` (иначе 422);
+- `limit` (1..200, default 50), `offset` (default 0) — пагинация
+  с клампингом, как у `/api/v1/admin/economy/transactions`.
+
+Ответ: `{items: [...], total: number, limit: number, offset: number}`.
+Поля записи: `id`, `playerId`, `gasAmount` (строка — Numeric(18,4)),
+`amountStars`, `status`, `telegramPaymentChargeId` (null до
+`successful_payment`), `referenceId`, `payload`, `createdAt`.
+Порядок: `created_at desc, id desc` (свежие платежи первыми).
+`total` — общее число записей под фильтром, а не размер страницы.
+Фронт: вкладка «Журнал Stars» (`StarsPaymentsSection`).
+
 ## Реферальная программа (Sprint Referral R-5 / R-8)
 
 ### `GET /api/v1/engine/me/referral`
