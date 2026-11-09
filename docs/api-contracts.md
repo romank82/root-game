@@ -704,6 +704,14 @@ Legacy `POST /api/v1/engine/missions/{mission_id}/submit` остаётся от�
 Статусы заявки: `pending` → `approved`/`rejected` → `processing` →
 `confirmed`/`failed`.
 
+### NanoROOT (Sprint 11.8, этап 1 — dual-write)
+
+С Sprint 11.8 все ROOT-поля дублируются: `*_root` (Integer, целый ROOT —
+текущий контракт для игрока/фронта) и `*_nano` (BigInteger, × 10^8 — для
+будущего перехода на дробный ROOT). **Сейчас API отдаёт `*_root`** (целые
+ROOT), игра работает как раньше. Этап 2 (передача `*_nano` и форматирование
+дробных ROOT на фронте) — не начат.
+
 ## Админ-экономика — журнал Stars-платежей (Sprint 12.2)
 
 ### GET /api/v1/admin/economy/stars-payments
