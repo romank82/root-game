@@ -70,6 +70,9 @@ WITHDRAWAL_REJECTABLE_STATUSES = ("pending", "approved", "processing")
 # Лимит заявок в одном батч-выплате (админский операционный лимит).
 WITHDRAWAL_BATCH_DEFAULT_LIMIT = 50
 
+# Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT.
+NANO_PER_ROOT = 100_000_000
+
 
 def _read_int_setting(session: Session, key: str, fallback: int) -> int:
     """Активная SystemSetting-запись -> default каталога -> fallback.
@@ -183,12 +186,18 @@ def create_withdrawal_request(
         # 7. Холд: списание + immutable-проводка + заявка pending.
         withdrawal_id = _new_id("withdrawal")
         wallet.available_balance -= amount_root
+        # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+        wallet.available_balance_nano = (
+            wallet.available_balance * NANO_PER_ROOT
+        )
         session.add(
             WalletTransaction(
                 id=_new_id("wallet-transaction"),
                 wallet_id=wallet.id,
                 amount=amount_root,
+                amount_nano=amount_root * NANO_PER_ROOT,
                 balance_after=wallet.available_balance,
+                balance_after_nano=wallet.available_balance_nano,
                 transaction_type="debit",
                 reason=f"Withdrawal hold {withdrawal_id}",
                 reference_type=WITHDRAWAL_HOLD_REFERENCE_TYPE,
@@ -201,6 +210,7 @@ def create_withdrawal_request(
                 id=withdrawal_id,
                 player_id=player_id,
                 amount_root=amount_root,
+                amount_root_nano=amount_root * NANO_PER_ROOT,
                 to_address=canonical_address,
                 status="pending",
             )
@@ -236,12 +246,18 @@ def _refund_withdrawal_hold(
         )
 
     wallet.available_balance += withdrawal.amount_root
+    # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+    wallet.available_balance_nano = (
+        wallet.available_balance * NANO_PER_ROOT
+    )
     session.add(
         WalletTransaction(
             id=_new_id("wallet-transaction"),
             wallet_id=wallet.id,
             amount=withdrawal.amount_root,
+            amount_nano=withdrawal.amount_root * NANO_PER_ROOT,
             balance_after=wallet.available_balance,
+            balance_after_nano=wallet.available_balance_nano,
             transaction_type="credit",
             reason=f"Withdrawal refund {withdrawal.id}",
             reference_type=WITHDRAWAL_REFUND_REFERENCE_TYPE,
@@ -289,7 +305,10 @@ def process_withdrawal_batch(
             withdrawal.admin_id = admin_id
             session.flush()
             try:
-                amount_nano = withdrawal.amount_root * 10**8
+                amount_nano = withdrawal.amount_root_nano  # уже в nano (Sprint 11.8)
+                if amount_nano is None:
+                    # Fallback для legacy-заявок без _nano: вычислить из ROOT.
+                    amount_nano = withdrawal.amount_root * NANO_PER_ROOT
                 tx_hash = send_jetton_transfer_sync(
                     withdrawal.to_address, amount_nano
                 )
