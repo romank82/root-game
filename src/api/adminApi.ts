@@ -1584,14 +1584,16 @@ export async function listEconomyTransactions(
 // Read-only: контракт — backend/app/admin_economy.py (list_stars_payments).
 // Ответ — конверт {items, total, limit, offset}. gasAmount приходит строкой:
 // на бэке это Numeric(18,4)/Decimal, str() сохраняет точность.
-// Фильтр игрока уходит как snake_case player_id (query-параметр FastAPI),
-// как и в listEconomyTransactions выше.
+// playerId уходит как snake_case player_id (точное совпадение), playerSearch —
+// как player_search (id ИЛИ ник/имя: ILIKE по display_name/telegram_*/nickname
+// на бэке); оба — query-параметры FastAPI, как в listEconomyTransactions выше.
 
 export type AdminStarsPaymentStatus = 'pending' | 'completed' | 'refunded'
 
 export type AdminStarsPayment = {
   id: string
   playerId: string
+  playerDisplayName: string | null
   gasAmount: string
   amountStars: number
   status: AdminStarsPaymentStatus
@@ -1604,6 +1606,7 @@ export type AdminStarsPayment = {
 export type StarsPaymentsFilters = {
   status?: AdminStarsPaymentStatus
   playerId?: string
+  playerSearch?: string
   search?: string
   from?: string
   to?: string
@@ -1624,6 +1627,7 @@ export async function listStarsPayments(
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)
   if (filters.playerId) params.set('player_id', filters.playerId)
+  if (filters.playerSearch) params.set('player_search', filters.playerSearch)
   if (filters.search) params.set('search', filters.search)
   if (filters.from) params.set('from', filters.from)
   if (filters.to) params.set('to', filters.to)

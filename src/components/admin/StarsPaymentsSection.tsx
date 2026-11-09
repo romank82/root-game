@@ -76,7 +76,7 @@ export function StarsPaymentsSection() {
   const [error, setError] = useState('')
   const [actionMsg, setActionMsg] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
-  const [playerIdFilter, setPlayerIdFilter] = useState('')
+  const [playerSearchFilter, setPlayerSearchFilter] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
   const [fromFilter, setFromFilter] = useState('')
   const [toFilter, setToFilter] = useState('')
@@ -91,7 +91,7 @@ export function StarsPaymentsSection() {
 
     listStarsPayments({
       status: statusFilter === '' ? undefined : statusFilter,
-      playerId: playerIdFilter.trim() || undefined,
+      playerSearch: playerSearchFilter.trim() || undefined,
       search: searchFilter.trim() || undefined,
       // <input type="date"> даёт yyyy-mm-dd: from — начало суток, to — конец
       // суток, чтобы фильтр «по дату» включал весь выбранный день (бэкенд
@@ -126,7 +126,7 @@ export function StarsPaymentsSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     statusFilter,
-    playerIdFilter,
+    playerSearchFilter,
     searchFilter,
     fromFilter,
     toFilter,
@@ -143,7 +143,7 @@ export function StarsPaymentsSection() {
 
   const resetFilters = () => {
     setStatusFilter('')
-    setPlayerIdFilter('')
+    setPlayerSearchFilter('')
     setSearchFilter('')
     setFromFilter('')
     setToFilter('')
@@ -199,15 +199,15 @@ export function StarsPaymentsSection() {
             </select>
           </label>
           <label style={{ flex: '1 1 200px' }}>
-            Player ID
+            Игрок (ID или ник)
             <input
               type="text"
-              value={playerIdFilter}
+              value={playerSearchFilter}
               onChange={(event) => {
-                setPlayerIdFilter(event.target.value)
+                setPlayerSearchFilter(event.target.value)
                 setOffset(0)
               }}
-              placeholder="например, player-3ab12cd4ef"
+              placeholder="player-3ab12cd4ef или Роман или @roman"
             />
           </label>
           <label style={{ flex: '1 1 200px' }}>
@@ -292,6 +292,7 @@ export function StarsPaymentsSection() {
                 <tr>
                   <th style={thStyle}>ID</th>
                   <th style={thStyle}>PlayerId</th>
+                  <th style={thStyle}>Имя</th>
                   <th style={thStyle}>Stars</th>
                   <th style={thStyle}>Gas</th>
                   <th style={thStyle}>Статус</th>
@@ -305,6 +306,7 @@ export function StarsPaymentsSection() {
                   <tr key={payment.id}>
                     <td style={tdStyle}>{shorten(payment.id)}</td>
                     <td style={tdStyle}>{shorten(payment.playerId)}</td>
+                    <td style={tdStyle}>{payment.playerDisplayName ?? '—'}</td>
                     <td style={tdStyle}>{payment.amountStars}</td>
                     <td style={tdStyle}>{payment.gasAmount}</td>
                     <td style={tdStyle}>
