@@ -28,6 +28,7 @@ import { PlayersSection } from './components/admin/PlayersSection'
 import { AdminTree } from './components/admin/AdminTree'
 import { MonitoringSection } from './components/admin/MonitoringSection'
 import { WithdrawalsSection } from './components/admin/WithdrawalsSection'
+import { StarsPaymentsSection } from './components/admin/StarsPaymentsSection'
 
 // 13.7-j: валидные вкладки админки. 'economy' удалена — реестр операций
 // перенесён в карточку игрока (PlayersSection), настройки — в CMS.
@@ -45,6 +46,7 @@ const ADMIN_SECTIONS = [
   'players',
   'monitoring',
   'withdrawals',
+  'stars-payments',
 ] as const
 
 type AdminSection = (typeof ADMIN_SECTIONS)[number]
@@ -491,6 +493,7 @@ function AdminApp() {
             {section === 'players' && 'Игроки'}
             {section === 'monitoring' && 'Мониторинг'}
             {section === 'withdrawals' && 'Заявки на вывод'}
+            {section === 'stars-payments' && 'Журнал Stars-платежей'}
           </h1>
 
           <nav className="admin-nav">
@@ -546,6 +549,13 @@ function AdminApp() {
               onClick={() => setSection('withdrawals')}
             >
               Заявки на вывод
+            </button>
+
+            <button
+              className={section === 'stars-payments' ? 'is-active' : ''}
+              onClick={() => setSection('stars-payments')}
+            >
+              Журнал Stars
             </button>
 
             <button
@@ -626,6 +636,8 @@ function AdminApp() {
       )}
 
       {section === 'withdrawals' && <WithdrawalsSection />}
+
+      {section === 'stars-payments' && <StarsPaymentsSection />}
 
       {section === 'minigame-profiles' && (
         <div className="admin-layout">
