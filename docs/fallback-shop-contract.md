@@ -75,6 +75,15 @@ narrow subset of the target contract:
 - `shop.fallback.default_available_seconds` is catalog-only in V1: entitlement
   rows have no `expires_at`, so the value is reserved for 4.4+.
 
+### 8.17.13-fix: XOR между заходами (2026-11-09)
+
+Если ключ выдан наградой (успех в новом заходе после провала в прошлом),
+невыкупленный депозит закрывается при выдаче награды
+(`close_unspent_after_award`): `quota_limit = consumed_count`, `status =
+"exhausted"`. Это гарантирует XOR между заходами (нельзя получить ключ
+дважды — наградой и покупкой). Уже выкупленное и `disabled` не
+затрагиваются.
+
 ### Configuration keys (4.3a)
 
 | key | type | default | purpose |

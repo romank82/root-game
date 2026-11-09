@@ -81,6 +81,17 @@ policy) каждый новый заход переармирует fallback-ent
 НЕ сбрасывается. `remainingQuota = quota_limit - consumed_count`
 (накопленное минус купленное).
 
+### XOR между заходами (Sprint 8.17.13-fix, 2026-11-09)
+
+Инвариант «ключ либо награда, либо магазин» соблюдается и МЕЖДУ заходами:
+если игрок получил ключ наградой (успех после провала в новом заходе),
+невыкупленный остаток fallback-депозита закрывается (`quota_limit =
+consumed_count`, `status = "exhausted"`). Игрок не может получить второй
+ключ из магазина за тот же провал. Уже выкупленное не затрагивается,
+`disabled` (админский флаг) не затрагивается. Реализация:
+`fallback_shop.close_unspent_after_award`, вызов в
+`mission_engine._submit_mission_once` после `_award_mission_rewards`.
+
 `POST /api/v1/engine/fallback-offers/{offer_id}/purchases` (4.4) покупает
 fallback-ключ за ROOT в одной атомарной транзакции: debit ROOT
 (`WalletTransaction`, `transaction_type="debit"`, amount всегда положительный)
