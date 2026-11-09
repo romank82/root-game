@@ -704,6 +704,11 @@ Legacy `POST /api/v1/engine/missions/{mission_id}/submit` остаётся от�
 Query-параметры:
 - `status` — `pending` | `completed` | `refunded` (иначе 422);
 - `player_id` — точное совпадение;
+- `player_search` — `id` (точное) ИЛИ подстрока в `display_name` /
+  `telegram_username` / `telegram_first_name` / `nickname_lower` (ILIKE:
+  регистронезависимо в PostgreSQL, на SQLite `lower()` нормализует только
+  ASCII) — набор полей как у `GET /api/v1/admin/players`. Ведущий `@`
+  срезается (Sprint 12.2-enhance: `@roman` находит `roman`);
 - `search` — подстрока в `reference_id` / `telegram_payment_charge_id` /
   `payload` (ILIKE: регистронезависимо в PostgreSQL и SQLite);
 - `from`, `to` — ISO 8601, диапазон по `created_at` (иначе 422);
@@ -711,9 +716,11 @@ Query-параметры:
   с клампингом, как у `/api/v1/admin/economy/transactions`.
 
 Ответ: `{items: [...], total: number, limit: number, offset: number}`.
-Поля записи: `id`, `playerId`, `gasAmount` (строка — Numeric(18,4)),
-`amountStars`, `status`, `telegramPaymentChargeId` (null до
-`successful_payment`), `referenceId`, `payload`, `createdAt`.
+Поля записи: `id`, `playerId`, `playerDisplayName` (display_name игрока из
+JOIN с `GamePlayer`; `null`, если у игрока не заполнен), `gasAmount`
+(строка — Numeric(18,4)), `amountStars`, `status`,
+`telegramPaymentChargeId` (null до `successful_payment`), `referenceId`,
+`payload`, `createdAt`.
 Порядок: `created_at desc, id desc` (свежие платежи первыми).
 `total` — общее число записей под фильтром, а не размер страницы.
 Фронт: вкладка «Журнал Stars» (`StarsPaymentsSection`).
