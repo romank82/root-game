@@ -45,6 +45,9 @@ logger = logging.getLogger(__name__)
 SHOP_ENABLED_KEY = "shop.catalog.enabled"
 SHOP_PRICE_ROOT_KEY = "shop.catalog.default_price_root"
 
+# Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT.
+NANO_PER_ROOT = 100_000_000
+
 # Reference-тип покупки каталога. Уникальные индексы ledger —
 # (wallet_id, reference_type, reference_id) на WalletTransaction и
 # (player_item_id, event_type, reference_type, reference_id) на InventoryEvent —
@@ -85,6 +88,9 @@ def _get_root_wallet_for_update(session: Session, player_id: str) -> Wallet:
             currency=ROOT_CURRENCY,
             available_balance=0,
             locked_balance=0,
+            # Sprint 11.8 NanoROOT: 0 * NANO_PER_ROOT = 0 (dual-write).
+            available_balance_nano=0,
+            locked_balance_nano=0,
         )
         session.add(wallet)
         session.flush()
@@ -277,12 +283,18 @@ def purchase_catalog_item(
     # Списание ROOT. amount всегда положительный (инвариант 4.1):
     # transaction_type="debit" определяет направление.
     wallet.available_balance -= price
+    # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+    wallet.available_balance_nano = (
+        wallet.available_balance * NANO_PER_ROOT
+    )
     session.add(
         WalletTransaction(
             id=_new_id("wallet-transaction"),
             wallet_id=wallet.id,
             amount=price,
+            amount_nano=price * NANO_PER_ROOT,
             balance_after=wallet.available_balance,
+            balance_after_nano=wallet.available_balance_nano,
             transaction_type="debit",
             reason=f"Shop purchase: {item.code}",
             reference_type=SHOP_PURCHASE_REFERENCE_TYPE,
