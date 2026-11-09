@@ -150,6 +150,49 @@ def is_key_reserved_for_player(
     return existing is not None
 
 
+def close_unspent_after_award(
+    session: Session,
+    player_id: str,
+    mission_id: str,
+    awarded_item_ids: list[str],
+) -> None:
+    """Sprint 8.17.13-fix: закрыть невыкупленный fallback-депозит после награды.
+
+    Баг: игрок провалил 1-ю попытку в заходе → создан entitlement (available,
+    quota=1). Не купил. В новом заходе успех с 1-й → ключ выдан наградой, но
+    старый available-оффер остался в магазине → можно купить второй ключ.
+    Нарушение XOR «ключ либо награда, либо магазин» между заходами.
+
+    Фикс: при выдаче ключа наградой срезаем невыкупленный остаток у entitlement
+    (quota_limit = consumed_count, status = exhausted). Уже выкупленное не
+    трогаем (consumed_count >= quota_limit → no-op), disabled (админский флаг)
+    не трогаем. Инвариант XOR становится верным и между заходами.
+    """
+    if not awarded_item_ids:
+        return
+    unique_item_ids = {item_id for item_id in awarded_item_ids if item_id}
+    if not unique_item_ids:
+        return
+    for item_id in unique_item_ids:
+        entitlement = session.scalar(
+            select(PlayerFallbackEntitlement)
+            .where(
+                PlayerFallbackEntitlement.player_id == player_id,
+                PlayerFallbackEntitlement.mission_id == mission_id,
+                PlayerFallbackEntitlement.item_id == item_id,
+            )
+            .with_for_update()
+        )
+        if entitlement is None:
+            continue
+        if entitlement.status == "disabled":
+            continue  # админский флаг — не трогаем
+        if entitlement.consumed_count >= entitlement.quota_limit:
+            continue  # уже выкуплено — no-op
+        entitlement.quota_limit = entitlement.consumed_count
+        entitlement.status = "exhausted"
+
+
 def create_first_failure_entitlements(
     session: Session,
     player_id: str,

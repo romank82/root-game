@@ -14,6 +14,7 @@ from app.country_policy import is_feature_restricted
 from app.datetime_utils import ensure_utc
 from app.db import SessionLocal
 from app.fallback_shop import (
+    close_unspent_after_award,
     create_first_failure_entitlements,
     is_key_reserved_for_player,
 )
@@ -1900,6 +1901,15 @@ def _submit_mission_once(
             # Sprint 8.14 (fix): per-run guard fallback-ключа — был ли
             # провал до этой успешной попытки в текущем заходе.
             attempt_count_before=attempt_count_before,
+        )
+
+        # Sprint 8.17.13-fix: срезать невыкупленный fallback-депозит после награды.
+        # XOR «ключ либо награда, либо магазин» становится верным между заходами.
+        close_unspent_after_award(
+            session,
+            player_id,
+            mission.id,
+            [item["id"] for item in awarded.get("items", [])],
         )
 
         # 13.3-b-2: лог mission.completed (PlayerEvent). Награда уже выдана
