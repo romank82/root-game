@@ -337,6 +337,9 @@ def list_stars_payments(
         # nickname_lower — lowercase-копия (латиница), поэтому value.lower().
         if player_search:
             player_value = player_search.strip()
+            # Sprint 12.2-enhance: @ — стандартный префикс Telegram-username,
+            # в БД хранится без @. Срезаем, чтобы @roman находил roman.
+            player_value = player_value.removeprefix("@")
             if player_value:
                 player_pattern = f"%{player_value}%"
                 query = query.where(

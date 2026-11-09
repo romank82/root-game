@@ -161,17 +161,39 @@ class AdminStarsPaymentsTests(unittest.TestCase):
                 )
             )
 
-    def _make_player(self, player_id: str) -> str:
-        """Игрок с заданным id: player_id фиксирован — на нём фильтр и FK."""
+    def _make_player(
+        self,
+        player_id: str,
+        *,
+        display_name: str | None = None,
+        telegram_username: str | None = None,
+        telegram_first_name: str | None = None,
+        nickname: str | None = None,
+        nickname_lower: str | None = None,
+    ) -> str:
+        """Игрок с заданным id: player_id фиксирован — на нём фильтр и FK.
+
+        display_name по умолчанию «Stars player <id>» (как до Sprint
+        12.2-enhance) — чтобы _seed_three и старые тесты не меняли ожиданий.
+        Остальные поля нужны для player_search (ник/имя/@username): по
+        умолчанию NULL.
+        """
         from app.models import GamePlayer
 
+        resolved_display_name = (
+            display_name if display_name is not None else f"Stars player {player_id}"
+        )
         with self.SessionLocal.begin() as session:
             session.add(
                 GamePlayer(
                     id=player_id,
-                    display_name=f"Stars player {player_id}",
+                    display_name=resolved_display_name,
                     auth_provider="test",
                     external_id=f"test-{uuid.uuid4().hex}",
+                    telegram_username=telegram_username,
+                    telegram_first_name=telegram_first_name,
+                    nickname=nickname,
+                    nickname_lower=nickname_lower,
                     status="active",
                 )
             )
@@ -296,6 +318,13 @@ class AdminStarsPaymentsTests(unittest.TestCase):
         self.assertIsNone(oldest["telegramPaymentChargeId"])
         self.assertEqual(oldest["status"], "pending")
 
+        # Sprint 12.2-enhance: playerDisplayName приходит из JOIN с GamePlayer
+        # (в _seed_three display_name = «Stars player <player_id>»).
+        self.assertTrue(
+            all("playerDisplayName" in item for item in result["items"])
+        )
+        self.assertEqual(newest["playerDisplayName"], "Stars player player-a")
+
     def test_list_stars_payments_filter_status(self) -> None:
         """status=completed -> только completed, total=1."""
         admin = self._make_admin()
@@ -329,6 +358,133 @@ class AdminStarsPaymentsTests(unittest.TestCase):
         other = list_stars_payments(admin=admin, player_id="player-b")
         self.assertEqual(other["total"], 1)
         self.assertEqual(other["items"][0]["playerId"], "player-b")
+
+    def test_player_search_by_display_name(self) -> None:
+        """player_search по display_name: подстрока (кириллица) + ILIKE (латиница)."""
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+        self._make_player("player-a", display_name="Роман Петров")
+        self._make_payment("player-a", reference_id="stars-invoice-search-1")
+
+        result = list_stars_payments(admin=admin, player_search="Роман")
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["items"][0]["playerId"], "player-a")
+        self.assertEqual(result["items"][0]["playerDisplayName"], "Роман Петров")
+
+        # Подстрока в середине имени (не только с начала) — тоже находит.
+        middle = list_stars_payments(admin=admin, player_search="оман")
+        self.assertEqual(middle["total"], 1)
+        self.assertEqual(middle["items"][0]["playerId"], "player-a")
+
+        # Регистронезависимость ILIKE проверяется на ЛАТИНИЦЕ: SQLite lower()
+        # нормализует только ASCII (lower('Роман') == 'Роман'), поэтому
+        # «рома» на SQLite не совпадает, а на PostgreSQL ILIKE совпал бы.
+        # Диалект-независимый кейс — как в test_admin_economy.
+        self._make_player("player-b", display_name="Roman Petrov")
+        self._make_payment("player-b", reference_id="stars-invoice-search-1b")
+
+        lower_latin = list_stars_payments(admin=admin, player_search="roman")
+        self.assertEqual(lower_latin["total"], 1)
+        self.assertEqual(lower_latin["items"][0]["playerId"], "player-b")
+        self.assertEqual(lower_latin["items"][0]["playerDisplayName"], "Roman Petrov")
+
+    def test_player_search_by_exact_id(self) -> None:
+        """player_search с полным id — точное совпадение, не ILIKE."""
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+        self._make_player("player-a", display_name="Роман")
+        self._make_payment("player-a", reference_id="stars-invoice-search-2")
+
+        by_id = list_stars_payments(admin=admin, player_search="player-a")
+        self.assertEqual(by_id["total"], 1)
+        self.assertEqual(by_id["items"][0]["playerId"], "player-a")
+
+        # Нет такого игрока -> пусто (а не «все платежи»).
+        missing = list_stars_payments(admin=admin, player_search="player-b")
+        self.assertEqual(missing["total"], 0)
+
+    def test_player_search_by_telegram_username(self) -> None:
+        """player_search по telegram_username: подстрока и полный логин."""
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+        self._make_player(
+            "player-a", display_name="Роман", telegram_username="roman_p"
+        )
+        self._make_payment("player-a", reference_id="stars-invoice-search-3")
+
+        substring = list_stars_payments(admin=admin, player_search="roman")
+        self.assertEqual(substring["total"], 1)
+        self.assertEqual(substring["items"][0]["playerId"], "player-a")
+
+        full = list_stars_payments(admin=admin, player_search="roman_p")
+        self.assertEqual(full["total"], 1)
+        self.assertEqual(full["items"][0]["playerId"], "player-a")
+
+        # @ — стандартный префикс Telegram-username, бэкенд срезает его
+        # (Sprint 12.2-enhance-fix: strip -> removeprefix("@")), поэтому
+        # «@roman_p» находит игрока с telegram_username="roman_p".
+        with_at = list_stars_payments(admin=admin, player_search="@roman_p")
+        self.assertEqual(with_at["total"], 1)
+        self.assertEqual(with_at["items"][0]["playerId"], "player-a")
+
+    def test_player_search_strips_at_prefix(self) -> None:
+        """Ведущий @ срезается: @roman, roman и « @roman » находят игрока."""
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+        self._make_player(
+            "player-a", display_name="Роман", telegram_username="roman"
+        )
+        self._make_payment("player-a", reference_id="stars-invoice-search-at")
+
+        for query in ("@roman", "roman", " @roman "):
+            with self.subTest(player_search=query):
+                result = list_stars_payments(admin=admin, player_search=query)
+                self.assertEqual(result["total"], 1, query)
+                self.assertEqual(result["items"][0]["playerId"], "player-a")
+
+        # @ не «съедает» неподходящий логин: чужой ник даёт пусто.
+        unknown = list_stars_payments(admin=admin, player_search="@anna")
+        self.assertEqual(unknown["total"], 0)
+
+    def test_player_search_empty_result(self) -> None:
+        """player_search без совпадений -> total=0 и пустой items."""
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+        self._make_player("player-a", display_name="Роман")
+        self._make_payment("player-a", reference_id="stars-invoice-search-4")
+
+        result = list_stars_payments(admin=admin, player_search="нет-такого")
+
+        self.assertEqual(result["total"], 0)
+        self.assertEqual(result["items"], [])
+
+    def test_player_search_combined_with_status(self) -> None:
+        """player_search комбинируется со status по AND (не OR)."""
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+        self._make_player("player-a", display_name="Роман")
+        self._make_payment(
+            "player-a", status="pending", reference_id="stars-invoice-search-5a"
+        )
+        self._make_payment(
+            "player-a", status="completed", reference_id="stars-invoice-search-5b"
+        )
+
+        completed = list_stars_payments(
+            admin=admin, player_search="Роман", status="completed"
+        )
+        self.assertEqual(completed["total"], 1)
+        self.assertEqual(completed["items"][0]["status"], "completed")
+
+        pending = list_stars_payments(
+            admin=admin, player_search="Роман", status="pending"
+        )
+        self.assertEqual(pending["total"], 1)
+        self.assertEqual(pending["items"][0]["status"], "pending")
+
+        # Контроль: без фильтра по игроку видно оба платежа.
+        self.assertEqual(list_stars_payments(admin=admin)["total"], 2)
 
     def test_list_stars_payments_search(self) -> None:
         """search="charge" -> 2 записи (по charge_id), регистр не важен."""
