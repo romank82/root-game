@@ -64,6 +64,10 @@ ENTRY_ITEM_EVENT_TYPE = "consumed"
 # CMS-поле для этого параметра (сейчас — фиксированная механика).
 CANCEL_DEADLINE_SECONDS = 180
 
+# Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT (дробный ROOT).
+# Для dual-write: *_root (Integer) + *_nano (BigInteger).
+NANO_PER_ROOT = 100_000_000
+
 # Sprint 8.x-attempt-deadline: допуск на рассинхрон часов клиента/сервера и
 # submit «в последнюю секунду» (ответ дошёл чуть позже attempt_deadline_at).
 ATTEMPT_DEADLINE_GRACE_SECONDS = 3
@@ -137,6 +141,9 @@ def _get_or_create_root_wallet(session: Session, player_id: str) -> Wallet:
             currency=ROOT_CURRENCY,
             available_balance=0,
             locked_balance=0,
+            # Sprint 11.8 NanoROOT: 0 * NANO_PER_ROOT = 0 (dual-write).
+            available_balance_nano=0,
+            locked_balance_nano=0,
         )
         session.add(wallet)
         session.flush()
@@ -163,6 +170,9 @@ def _get_root_wallet_for_update(session: Session, player_id: str) -> Wallet:
             currency=ROOT_CURRENCY,
             available_balance=0,
             locked_balance=0,
+            # Sprint 11.8 NanoROOT: 0 * NANO_PER_ROOT = 0 (dual-write).
+            available_balance_nano=0,
+            locked_balance_nano=0,
         )
         session.add(wallet)
         session.flush()
@@ -1298,6 +1308,10 @@ def _award_mission_rewards(
                 continue
 
             wallet.available_balance += scaled_amount
+            # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+            wallet.available_balance_nano = (
+                wallet.available_balance * NANO_PER_ROOT
+            )
             awarded_root += scaled_amount
 
             metadata_json: dict = {
@@ -1319,7 +1333,9 @@ def _award_mission_rewards(
                     id=_new_id("wallet-transaction"),
                     wallet_id=wallet.id,
                     amount=scaled_amount,
+                    amount_nano=scaled_amount * NANO_PER_ROOT,
                     balance_after=wallet.available_balance,
+                    balance_after_nano=wallet.available_balance_nano,
                     transaction_type="credit",
                     reason=f"Mission reward: {mission.slug}",
                     reference_type="mission_reward",
@@ -1517,12 +1533,18 @@ def _apply_entry_debit(
         )
         if existing_debit is None:
             wallet.available_balance -= root_debit
+            # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+            wallet.available_balance_nano = (
+                wallet.available_balance * NANO_PER_ROOT
+            )
             session.add(
                 WalletTransaction(
                     id=_new_id("wallet-transaction"),
                     wallet_id=wallet.id,
                     amount=root_debit,
+                    amount_nano=root_debit * NANO_PER_ROOT,
                     balance_after=wallet.available_balance,
+                    balance_after_nano=wallet.available_balance_nano,
                     transaction_type="debit",
                     reason=f"Mission entry debit: {mission.slug}",
                     reference_type=ENTRY_DEBIT_REFERENCE_TYPE,
@@ -2575,12 +2597,18 @@ def _refund_mission_entry(
         )
         if existing_refund is None:
             wallet.available_balance += root_debit
+            # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+            wallet.available_balance_nano = (
+                wallet.available_balance * NANO_PER_ROOT
+            )
             session.add(
                 WalletTransaction(
                     id=_new_id("wallet-transaction"),
                     wallet_id=wallet.id,
                     amount=root_debit,
+                    amount_nano=root_debit * NANO_PER_ROOT,
                     balance_after=wallet.available_balance,
+                    balance_after_nano=wallet.available_balance_nano,
                     transaction_type="credit",
                     reason="Mission entry refund (cancel window)",
                     reference_type=ENTRY_REFUND_REFERENCE_TYPE,
