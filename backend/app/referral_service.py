@@ -56,6 +56,9 @@ from app.system_settings_catalog import get_definition
 REFERRAL_ENABLED_KEY = "referral.enabled"
 REFERRAL_REWARD_ROOT_KEY = "referral.reward_root"
 EARNED_THRESHOLD_KEY = "economy.transfer_minimum_earned_root"
+
+# Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT.
+NANO_PER_ROOT = 100_000_000
 # Sprint 8.x-ref-link-cms: имя бота (CMS-first, фолбэк на env).
 TELEGRAM_BOT_USERNAME_KEY = "telegram.bot_username"
 
@@ -240,6 +243,7 @@ def assign_referrer(
         referrer_player_id=referrer_id,
         referred_player_id=referred_player_id,
         amount_root=amount,
+        amount_root_nano=amount * NANO_PER_ROOT,
         status="pending",
     )
     session.add(reward)
@@ -290,12 +294,18 @@ def check_and_reward(
 
     wallet = _get_root_wallet_for_update(session, reward.referrer_player_id)
     wallet.available_balance += reward.amount_root
+    # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+    wallet.available_balance_nano = (
+        wallet.available_balance * NANO_PER_ROOT
+    )
     session.add(
         WalletTransaction(
             id=_new_id("wallet-transaction"),
             wallet_id=wallet.id,
             amount=reward.amount_root,
+            amount_nano=reward.amount_root * NANO_PER_ROOT,
             balance_after=wallet.available_balance,
+            balance_after_nano=wallet.available_balance_nano,
             transaction_type="credit",
             reason="Referral reward",
             reference_type=REFERRAL_REFERENCE_TYPE,

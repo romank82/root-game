@@ -42,6 +42,9 @@ TRANSFER_DEBIT_REFERENCE_TYPE = "player_transfer_debit"
 TRANSFER_CREDIT_REFERENCE_TYPE = "player_transfer_credit"
 # Комиссия за перевод списывается газом (10.4-i): debit gas-проводка.
 TRANSFER_FEE_GAS_REFERENCE_TYPE = "transfer_fee_gas"
+
+# Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT.
+NANO_PER_ROOT = 100_000_000
 # В mission_engine "mission_reward" — инлайн-строка (константы нет); зеркало здесь.
 MISSION_REWARD_REFERENCE_TYPE = "mission_reward"
 
@@ -270,12 +273,18 @@ def transfer_root(
     # 7. Проводки debit/credit с фиксацией balance_after.
     transfer_id = _new_id("player-transfer")
     wallet_from.available_balance -= amount
+    # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+    wallet_from.available_balance_nano = (
+        wallet_from.available_balance * NANO_PER_ROOT
+    )
     session.add(
         WalletTransaction(
             id=_new_id("wallet-transaction"),
             wallet_id=wallet_from.id,
             amount=amount,
+            amount_nano=amount * NANO_PER_ROOT,
             balance_after=wallet_from.available_balance,
+            balance_after_nano=wallet_from.available_balance_nano,
             transaction_type="debit",
             reason=f"Transfer to {to_player_id}",
             reference_type=TRANSFER_DEBIT_REFERENCE_TYPE,
@@ -284,12 +293,18 @@ def transfer_root(
         )
     )
     wallet_to.available_balance += amount
+    # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
+    wallet_to.available_balance_nano = (
+        wallet_to.available_balance * NANO_PER_ROOT
+    )
     session.add(
         WalletTransaction(
             id=_new_id("wallet-transaction"),
             wallet_id=wallet_to.id,
             amount=amount,
+            amount_nano=amount * NANO_PER_ROOT,
             balance_after=wallet_to.available_balance,
+            balance_after_nano=wallet_to.available_balance_nano,
             transaction_type="credit",
             reason=f"Transfer from {from_player_id}",
             reference_type=TRANSFER_CREDIT_REFERENCE_TYPE,
