@@ -8,7 +8,7 @@ import {
   type SearchPlayerHit,
 } from '../../api/engineApi'
 import { ErrorWithCode } from '../ErrorWithCode'
-import { formatRootFromNano } from '../../utils/formatRoot'
+import { formatRootFromNano, rootToNano } from '../../utils/formatRoot'
 
 interface TransferScreenProps {
   onScreenChange: (screen: Screen) => void
@@ -109,23 +109,41 @@ export function TransferScreen({
 
   async function handleTransfer() {
     if (selected === null || saving) return
-    const value = Number(amount)
-    if (!Number.isFinite(value) || value <= 0) {
+    // Sprint 8.x-fractional-transfer (шаг B): принимаем дробный ввод
+    // («0,5» и «0.5»), нормализуем запятую, вычисляем nanoROOT.
+    const normalized = amount.replace(',', '.')
+    const parsed = parseFloat(normalized)
+    if (!Number.isFinite(parsed) || parsed <= 0) {
       setError(t('transfer:amount.error.notPositive'))
+      return
+    }
+    const nano = rootToNano(parsed)
+    if (nano <= 0) {
+      setError(t('transfer:amount.error.notPositive'))
+      return
+    }
+    if (rootBalanceNano != null && nano > rootBalanceNano) {
+      setError(t('transfer:amount.error.insufficient'))
       return
     }
     setSaving(true)
     setError(null)
     setNotice(null)
     try {
-      // Тело — snake_case (TransferPayload в engineApi),
-      // request_id не менялся с открытия экрана (идемпотентность).
+      // Тело — snake_case (TransferPayload в engineApi). Отправляем точное
+      // наноROOT (дробный ввод), amount не шлём (additive-контракт A1).
       const result = await transferRoot({
         to_player_id: selected.id,
-        amount: value,
+        amount_nano: nano,
         request_id: requestId,
       })
-      setNotice(t('transfer:notices.transferSuccess', { fromBalance: result.fromBalance }))
+      setNotice(
+        t('transfer:notices.transferSuccess', {
+          fromBalance: formatRootFromNano(
+            result.fromBalanceNano ?? rootToNano(result.fromBalance),
+          ),
+        }),
+      )
       // Успешная отправка: новый request_id для следующего перевода.
       setRequestId(makeRequestId())
       setSelected(null)

@@ -111,6 +111,25 @@ def _wallet_balance_or_zero(session: Session, player_id: str) -> int:
     return wallet.available_balance if wallet is not None else 0
 
 
+def _wallet_balance_nano_or_zero(session: Session, player_id: str) -> int:
+    """Баланс ROOT в наноROOT без блокировки (для идемпотентного ответа).
+
+    Sprint 8.x-fractional-transfer (шаг B): additive-поле fromBalanceNano/
+    toBalanceNano для идемпотентного повтора; NULL-nano fallback на legacy.
+    """
+    wallet = session.scalar(
+        select(Wallet).where(
+            Wallet.player_id == player_id,
+            Wallet.currency == ROOT_CURRENCY,
+        )
+    )
+    if wallet is None:
+        return 0
+    if wallet.available_balance_nano is not None:
+        return wallet.available_balance_nano
+    return wallet.available_balance * NANO_PER_ROOT
+
+
 def _wallet_id_or_none(session: Session, player_id: str) -> str | None:
     return session.scalar(
         select(Wallet.id).where(
@@ -173,9 +192,18 @@ def transfer_root(
             "fromPlayerId": existing.from_player_id,
             "toPlayerId": existing.to_player_id,
             "amount": existing.amount,
+            # Sprint 8.x-fractional-transfer (шаг B): additive-нано-поля
+            # для идемпотентного ответа (NULL-nano -> legacy * 10^8).
+            "amountNano": (
+                existing.amount_nano
+                if existing.amount_nano is not None
+                else existing.amount * NANO_PER_ROOT
+            ),
             "status": existing.status,
             "fromBalance": _wallet_balance_or_zero(session, from_player_id),
             "toBalance": _wallet_balance_or_zero(session, to_player_id),
+            "fromBalanceNano": _wallet_balance_nano_or_zero(session, from_player_id),
+            "toBalanceNano": _wallet_balance_nano_or_zero(session, to_player_id),
         }
 
     # 2. Валидация сторон.
@@ -398,9 +426,14 @@ def transfer_root(
         "fromPlayerId": from_player_id,
         "toPlayerId": to_player_id,
         "amount": amount,
+        # Sprint 8.x-fractional-transfer (шаг B): точные наноROOT-суммы
+        # (additive); старые целые ключи оставлены для совместимости.
+        "amountNano": amount_nano,
         "status": "completed",
         "fromBalance": wallet_from.available_balance,
         "toBalance": wallet_to.available_balance,
+        "fromBalanceNano": wallet_from.available_balance_nano,
+        "toBalanceNano": wallet_to.available_balance_nano,
     }
 
 

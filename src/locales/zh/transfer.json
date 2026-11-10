@@ -22,7 +22,8 @@
   "amount": {
     "label": "金额 (ROOT)",
     "error": {
-      "notPositive": "请输入大于 0 的金额。"
+      "notPositive": "请输入大于 0 的金额。",
+      "insufficient": "ROOT 余额不足。"
     }
   },
   "gas": {

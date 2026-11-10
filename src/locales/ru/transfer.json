@@ -22,7 +22,8 @@
   "amount": {
     "label": "Сумма (ROOT)",
     "error": {
-      "notPositive": "Введите сумму больше 0."
+      "notPositive": "Введите сумму больше 0.",
+      "insufficient": "Недостаточно ROOT."
     }
   },
   "gas": {

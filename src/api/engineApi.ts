@@ -651,7 +651,11 @@ export async function searchPlayers(
 // transfer_service.py).
 export type TransferPayload = {
   to_player_id: string
-  amount: number
+  // Sprint 8.x-fractional-transfer (шаг B): передаём ровно одно из двух.
+  // amount — целые ROOT (старый контракт), amount_nano — наноROOT
+  // (дробный ввод 0.5/10.5). При дробном вводе шлём amount_nano.
+  amount?: number
+  amount_nano?: number
   request_id: string
 }
 
@@ -660,9 +664,14 @@ export type TransferResponse = {
   fromPlayerId: string
   toPlayerId: string
   amount: number
+  // Sprint 8.x-fractional-transfer (шаг B): точные наноROOT-значения
+  // (additive; бэкенд отдаёт их с шага B, старые поля сохранены).
+  amountNano?: number
   status: string
   fromBalance: number
   toBalance: number
+  fromBalanceNano?: number
+  toBalanceNano?: number
 }
 
 // 10.1+: перевод ROOT другому игроку. request_id — клиентский
