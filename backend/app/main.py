@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -362,10 +362,24 @@ class AcceptMissionPayload(BaseModel):
     accuracy: float | None = None
 
 class TransferPayload(BaseModel):
-    """POST /api/v1/players/transfer (10.1-b)."""
+    """POST /api/v1/players/transfer (10.1-b).
+
+    Sprint 8.x-fractional-transfer (шаг A1): additive-приём ``amount_nano``
+    (целое наноROOT, 1 ROOT = 10^8). Старый ``amount`` (целый ROOT) работает
+    как раньше — достаточно передать ровно одно из двух полей. Если пришли
+    оба, приоритет у ``amount_nano`` (решение в transfer_service).
+    """
     to_player_id: str = Field(..., min_length=1)
-    amount: int = Field(..., gt=0)
+    amount: int | None = Field(default=None, gt=0)
+    amount_nano: int | None = Field(default=None, gt=0)
     request_id: str = Field(..., min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _require_amount(self) -> "TransferPayload":
+        """Хотя бы одна сумма: amount (ROOT) или amount_nano (наноROOT)."""
+        if self.amount is None and self.amount_nano is None:
+            raise ValueError("amount or amount_nano required")
+        return self
 
 class TonWalletPayload(BaseModel):
     """POST /api/v1/me/ton-wallet (11.0-a): сохранение TON-адреса игрока."""
@@ -976,6 +990,7 @@ def transfer_root_route(
             to_player_id=payload.to_player_id,
             amount=payload.amount,
             request_id=payload.request_id,
+            amount_nano=payload.amount_nano,
         )
     except MissionEngineError as error:
         raise HTTPException(

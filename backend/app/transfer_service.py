@@ -124,8 +124,9 @@ def transfer_root(
     session: Session,
     from_player_id: str,
     to_player_id: str,
-    amount: int,
-    request_id: str,
+    amount: int | None = None,
+    request_id: str | None = None,
+    amount_nano: int | None = None,
 ) -> dict:
     """Атомарный перевод ROOT между игроками (10.5-a).
 
@@ -134,9 +135,30 @@ def transfer_root(
     Идемпотентность — уникальный (from_player_id, reference_id): повторный
     запрос с тем же request_id возвращает сохранённый результат без
     повторного перевода.
+
+    Sprint 8.x-fractional-transfer (шаг A1): additive-приём ``amount_nano``.
+    Достаточно передать одну из сумм; ``amount`` (целый ROOT) сохранён для
+    обратной совместимости (позиция 4-го аргумента не менялась). Вся логика
+    (балансы, ledger) ведётся по ``amount_nano``; legacy-поле ``amount``
+    пишется как floor(amount_nano / 10^8) — для старых читателей.
+    Если переданы оба поля, приоритет у ``amount_nano``.
     """
-    if amount <= 0:
+    # 0. Нормализация суммы: nanoROOT — источник истины.
+    if amount is None and amount_nano is None:
+        raise ValueError("amount or amount_nano required")
+    if not request_id:
+        raise ValueError("request_id required")
+    if amount_nano is None:
+        # amount задан: оба None отсечены проверкой выше.
+        amount_nano = amount * NANO_PER_ROOT
+    if amount_nano <= 0:
         raise MissionEngineError(422, "Сумма должна быть положительной.")
+    # Legacy целое ROOT (старые поля, ответ, CheckConstraint
+    # ck_player_transfers_amount_positive: amount > 0 — models.py:1576-1579).
+    # При сумме < 1 ROOT floor даёт 0, поэтому временно max(1, ...).
+    # TODO(A2): решение по constraint/legacy-полю — отдельной append-only
+    # миграцией; здесь constraint не меняем.
+    amount = max(1, amount_nano // NANO_PER_ROOT)
 
     # 1. Идемпотентность ДО блокировок кошельков.
     existing = session.scalar(
@@ -181,11 +203,11 @@ def transfer_root(
     if _has_transfer_restricted(session, from_player_id):
         raise MissionEngineError(403, "Переводы для отправителя ограничены.")
 
-    # 3. Лимиты суммы из CMS.
+    # 3. Лимиты суммы из CMS (значения — целые ROOT, сравнение — в наноROOT).
     limits = _read_limits(session)
-    if amount < limits["min"]:
+    if amount_nano < limits["min"] * NANO_PER_ROOT:
         raise MissionEngineError(422, f"Сумма меньше минимальной ({limits['min']}).")
-    if amount > limits["max"]:
+    if amount_nano > limits["max"] * NANO_PER_ROOT:
         raise MissionEngineError(422, f"Сумма больше максимальной ({limits['max']}).")
 
     # 4. Порог заработанного ROOT: только подтверждённые mission_reward-кредиты.
@@ -214,7 +236,7 @@ def transfer_root(
             PlayerTransfer.created_at >= start_of_day,
         )
     ) or 0
-    if daily_sum + amount > limits["daily"]:
+    if daily_sum * NANO_PER_ROOT + amount_nano > limits["daily"] * NANO_PER_ROOT:
         raise MissionEngineError(
             429,
             f"Превышен дневной лимит переводов ({limits['daily']} ROOT).",
@@ -224,8 +246,12 @@ def transfer_root(
     # дробная (без ceil). Процент — из CMS (economy.gas_fee_percent).
     # При percent=0 газ не трогаем (обратная совместимость).
     gas_percent = _read_int_setting(session, GAS_FEE_PERCENT_KEY, 1)
+    # Sprint 8.x-fractional-transfer: комиссия от точного наноROOT
+    # (для целых сумм эквивалентно прежнему amount * percent / 100).
     gas_fee = (
-        Decimal(amount) * Decimal(gas_percent) / Decimal(100)
+        Decimal(amount_nano)
+        * Decimal(gas_percent)
+        / (Decimal(100) * Decimal(NANO_PER_ROOT))
         if gas_percent > 0
         else Decimal("0")
     )
@@ -267,22 +293,31 @@ def transfer_root(
     else:
         wallet_from, wallet_to = wallet_second, wallet_first
 
-    if wallet_from.available_balance < amount:
+    # Sprint 8.x-fractional-transfer: балансовая логика — по наноROOT.
+    # Legacy available_balance (Integer ROOT) — производное floor(nano / 10^8):
+    # при сумме < 1 ROOT дробная часть в старом поле не представима, точное
+    # значение хранится в available_balance_nano. Если nano ещё NULL (старые
+    # строки без backfill), восстанавливаем из legacy-поля.
+    wallet_from_nano = wallet_from.available_balance_nano
+    if wallet_from_nano is None:
+        wallet_from_nano = wallet_from.available_balance * NANO_PER_ROOT
+    if wallet_from_nano < amount_nano:
         raise MissionEngineError(409, "Недостаточно ROOT.")
+    wallet_to_nano = wallet_to.available_balance_nano
+    if wallet_to_nano is None:
+        wallet_to_nano = wallet_to.available_balance * NANO_PER_ROOT
 
     # 7. Проводки debit/credit с фиксацией balance_after.
     transfer_id = _new_id("player-transfer")
-    wallet_from.available_balance -= amount
-    # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
-    wallet_from.available_balance_nano = (
-        wallet_from.available_balance * NANO_PER_ROOT
-    )
+    wallet_from_nano -= amount_nano
+    wallet_from.available_balance_nano = wallet_from_nano
+    wallet_from.available_balance = wallet_from_nano // NANO_PER_ROOT
     session.add(
         WalletTransaction(
             id=_new_id("wallet-transaction"),
             wallet_id=wallet_from.id,
             amount=amount,
-            amount_nano=amount * NANO_PER_ROOT,
+            amount_nano=amount_nano,
             balance_after=wallet_from.available_balance,
             balance_after_nano=wallet_from.available_balance_nano,
             transaction_type="debit",
@@ -292,17 +327,15 @@ def transfer_root(
             metadata_json={"toPlayerId": to_player_id, "transferId": transfer_id},
         )
     )
-    wallet_to.available_balance += amount
-    # Sprint 11.8 NanoROOT: зеркальная запись (dual-write).
-    wallet_to.available_balance_nano = (
-        wallet_to.available_balance * NANO_PER_ROOT
-    )
+    wallet_to_nano += amount_nano
+    wallet_to.available_balance_nano = wallet_to_nano
+    wallet_to.available_balance = wallet_to_nano // NANO_PER_ROOT
     session.add(
         WalletTransaction(
             id=_new_id("wallet-transaction"),
             wallet_id=wallet_to.id,
             amount=amount,
-            amount_nano=amount * NANO_PER_ROOT,
+            amount_nano=amount_nano,
             balance_after=wallet_to.available_balance,
             balance_after_nano=wallet_to.available_balance_nano,
             transaction_type="credit",
@@ -320,6 +353,9 @@ def transfer_root(
             from_player_id=from_player_id,
             to_player_id=to_player_id,
             amount=amount,
+            # Sprint 8.x-fractional-transfer: точная сумма в наноROOT
+            # (раньше колонка оставалась NULL — баг dual-write).
+            amount_nano=amount_nano,
             status="completed",
             reference_id=request_id,
         )
@@ -371,9 +407,21 @@ def transfer_root(
 def transfer_root_entrypoint(
     from_player_id: str,
     to_player_id: str,
-    amount: int,
-    request_id: str,
+    amount: int | None = None,
+    request_id: str | None = None,
+    amount_nano: int | None = None,
 ) -> dict:
-    """Точка вызова из HTTP-слоя: перевод в одной атомарной транзакции."""
+    """Точка вызова из HTTP-слоя: перевод в одной атомарной транзакции.
+
+    Sprint 8.x-fractional-transfer (шаг A1): принимает ``amount`` (целый
+    ROOT) и/или ``amount_nano`` (наноROOT) — нормализация в transfer_root.
+    """
     with SessionLocal.begin() as session:
-        return transfer_root(session, from_player_id, to_player_id, amount, request_id)
+        return transfer_root(
+            session,
+            from_player_id,
+            to_player_id,
+            amount,
+            request_id,
+            amount_nano,
+        )
