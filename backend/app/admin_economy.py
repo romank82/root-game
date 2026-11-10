@@ -1,7 +1,8 @@
 """Admin economy endpoints (Этап 9.1 + 9.2, чтение).
 
-1) GET /audit (9.1) — сверка балансов кошельков: для каждого Wallet
-   SUM(credit.amount) - SUM(debit.amount) == available_balance.
+1) GET /audit (9.1) — сверка балансов кошельков в наноROOT: для каждого Wallet
+   SUM(credit.amount_nano) - SUM(debit.amount_nano) == available_balance_nano
+   (legacy amount/available_balance — floor, fallback при NULL-nano).
    Расхождения возвращаются админу целиком; в admin_audit пишется
    только sample (до 10), чтобы не раздувать metadata_json.
 2) GET /transactions (9.2) — реестр всех операций ROOT с фильтрами
@@ -55,50 +56,67 @@ def audit_balances(
     request: Request,
     admin: AdminUser = Depends(require_permission(ECONOMY_READ_PERMISSION)),
 ) -> dict:
-    """Сверка ledger-балансов: SUM(credit) - SUM(debit) == available_balance.
+    """Сверка ledger-балансов: SUM(credit_nano) - SUM(debit_nano) == available_balance_nano.
 
-    Возвращает все кошельки с расхождениями (mismatches) и признак ok.
+    Возвращает все кошельки с расхождениями (mismatches, в наноROOT) и признак ok.
     При наличии расхождений пишет запись в admin_audit (sample <= 10).
     """
     with SessionLocal.begin() as session:
         credit_sum = func.sum(
             case(
-                (WalletTransaction.transaction_type == "credit", WalletTransaction.amount),
+                (
+                    WalletTransaction.transaction_type == "credit",
+                    func.coalesce(
+                        WalletTransaction.amount_nano,
+                        WalletTransaction.amount * NANO_PER_ROOT,
+                    ),
+                ),
                 else_=0,
             )
         )
         debit_sum = func.sum(
             case(
-                (WalletTransaction.transaction_type == "debit", WalletTransaction.amount),
+                (
+                    WalletTransaction.transaction_type == "debit",
+                    func.coalesce(
+                        WalletTransaction.amount_nano,
+                        WalletTransaction.amount * NANO_PER_ROOT,
+                    ),
+                ),
                 else_=0,
             )
         )
 
-        # 1) Ledger-сумма по каждому кошельку (у кошельков без проводок её нет).
+        # 1) Ledger в наноROOT по каждому кошельку (у кошельков без проводок её нет).
         ledger_rows = session.execute(
             select(
                 WalletTransaction.wallet_id,
-                (credit_sum - debit_sum).label("ledger_sum"),
+                (credit_sum - debit_sum).label("ledger_sum_nano"),
             ).group_by(WalletTransaction.wallet_id)
         ).all()
-        ledger = {
-            wallet_id: int(ledger_sum or 0) for wallet_id, ledger_sum in ledger_rows
+        ledger_nano = {
+            wallet_id: int(ledger_sum_nano or 0)
+            for wallet_id, ledger_sum_nano in ledger_rows
         }
 
-        # 2) Все кошельки и сравнение.
+        # 2) Все кошельки и сравнение (в наноROOT).
         wallets = session.scalars(select(Wallet)).all()
         mismatches = []
         for wallet in wallets:
-            expected = ledger.get(wallet.id, 0)
-            actual = int(wallet.available_balance)
-            if expected != actual:
+            expected_nano = ledger_nano.get(wallet.id, 0)
+            actual_nano = (
+                wallet.available_balance_nano
+                if wallet.available_balance_nano is not None
+                else wallet.available_balance * NANO_PER_ROOT
+            )
+            if expected_nano != actual_nano:
                 mismatches.append(
                     {
                         "walletId": wallet.id,
                         "playerId": wallet.player_id,
-                        "expected": expected,
-                        "actual": actual,
-                        "difference": actual - expected,
+                        "expectedNano": expected_nano,
+                        "actualNano": actual_nano,
+                        "differenceNano": actual_nano - expected_nano,
                     }
                 )
 

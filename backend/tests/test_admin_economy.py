@@ -264,9 +264,10 @@ class AdminEconomyTests(unittest.TestCase):
             None,
         )
         self.assertIsNotNone(mismatch)
-        self.assertEqual(mismatch["expected"], 50)
-        self.assertEqual(mismatch["actual"], 100)
-        self.assertEqual(mismatch["difference"], 50)
+        # Sprint 8.x-fractional-transfer: ответ в наноROOT (1 ROOT = 10^8).
+        self.assertEqual(mismatch["expectedNano"], 5_000_000_000)
+        self.assertEqual(mismatch["actualNano"], 10_000_000_000)
+        self.assertEqual(mismatch["differenceNano"], 5_000_000_000)
 
         with self.SessionLocal() as session:
             audit_rows = session.scalars(
