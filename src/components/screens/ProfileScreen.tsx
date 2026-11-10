@@ -20,10 +20,15 @@ import {
   type PlayerWithdrawal,
 } from '../../api/engineApi'
 import { ErrorWithCode } from '../ErrorWithCode'
+import { formatRootFromNano } from '../../utils/formatRoot'
 
 interface ProfileScreenProps {
   onScreenChange: (screen: Screen) => void
 }
+
+// Sprint 11.8 NanoROOT (этап 2C): 1 ROOT = 10^8 наноROOT.
+// Fallback, если ответ пришёл без *_nano (legacy).
+const NANO_PER_ROOT = 100_000_000
 
 // Черновик анкеты: age хранится строкой (инпут type="number"),
 // в число парсится только при сохранении.
@@ -810,7 +815,9 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
                 <li key={item.withdrawalId}>
                   <p>
                     {t('profile:applications.summary', {
-                      amount: item.amountRoot,
+                      amount: formatRootFromNano(
+                        item.amountRootNano ?? item.amountRoot * NANO_PER_ROOT,
+                      ),
                       address: item.toAddress.slice(0, 12),
                     })}
                     <br />

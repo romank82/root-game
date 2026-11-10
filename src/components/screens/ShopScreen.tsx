@@ -9,6 +9,11 @@ import {
   type FallbackPurchaseResult,
 } from '../../api/engineApi'
 import { ErrorWithCode } from '../ErrorWithCode'
+import { formatRootFromNano } from '../../utils/formatRoot'
+
+// Sprint 11.8 NanoROOT (этап 2C): 1 ROOT = 10^8 наноROOT.
+// Fallback, если ответ пришёл без *_nano (legacy).
+const NANO_PER_ROOT = 100_000_000
 
 type ShopScreenProps = {
   inventory: EngineInventoryItem[]
@@ -54,7 +59,13 @@ export function ShopScreen({
       const result: FallbackPurchaseResult = await purchaseFallbackOffer(
         offer.entitlementId,
       )
-      setNotice(t('shop:notices.purchased', { balance: result.rootBalance }))
+      setNotice(
+        t('shop:notices.purchased', {
+          balance: formatRootFromNano(
+            result.rootBalanceNano ?? result.rootBalance * NANO_PER_ROOT,
+          ),
+        }),
+      )
       // Обновить квоту офферов после покупки.
       const refreshed = await listFallbackOffers()
       setOffers(refreshed)
@@ -101,7 +112,13 @@ export function ShopScreen({
               {item.title}
             </h3>
             <p>
-              {t('shop:card.priceLabel')} <b>{offer.priceRoot} ROOT</b>
+              {t('shop:card.priceLabel')}{' '}
+              <b>
+                {formatRootFromNano(
+                  offer.priceRootNano ?? offer.priceRoot * NANO_PER_ROOT,
+                )}{' '}
+                ROOT
+              </b>
             </p>
 
             <p>
@@ -128,7 +145,11 @@ export function ShopScreen({
             >
               {purchasingId === offer.entitlementId
                 ? t('shop:buttons.purchasing')
-                : t('shop:buttons.buy', { price: offer.priceRoot })}
+                : t('shop:buttons.buy', {
+                    price: formatRootFromNano(
+                      offer.priceRootNano ?? offer.priceRoot * NANO_PER_ROOT,
+                    ),
+                  })}
             </button>
           </article>
         )
