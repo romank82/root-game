@@ -349,6 +349,14 @@ def build_fallback_offers(session: Session, player_id: str) -> list[dict]:
         item = _resolve_fallback_key_item(session, entitlement)
         effective_status = entitlement.status if item is not None else "disabled"
         remaining_quota = max(0, entitlement.quota_limit - entitlement.consumed_count)
+        # Sprint 11.8 NanoROOT: цена оффера резолвится один раз — из неё
+        # формируются и priceRoot, и priceRootNano (без повторного чтения CMS).
+        offer_price = resolve_key_price(
+            session,
+            item.id if item is not None else None,
+            global_setting_key=FALLBACK_PRICE_ROOT_KEY,
+            default=1,
+        )
 
         offers.append(
             {
@@ -357,11 +365,12 @@ def build_fallback_offers(session: Session, player_id: str) -> list[dict]:
                 "missionSlug": mission.slug,
                 "missionTitle": mission.title,
                 "offerId": entitlement.offer_id,
-                "priceRoot": resolve_key_price(
-                    session,
-                    item.id if item is not None else None,
-                    global_setting_key=FALLBACK_PRICE_ROOT_KEY,
-                    default=1,
+                "priceRoot": offer_price,
+                # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+                "priceRootNano": (
+                    offer_price * NANO_PER_ROOT
+                    if offer_price is not None
+                    else None
                 ),
                 "quotaLimit": entitlement.quota_limit,
                 "consumedCount": entitlement.consumed_count,

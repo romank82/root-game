@@ -780,6 +780,8 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         )
         self.assertEqual(offer["offerId"], ids["item"])
         self.assertEqual(offer["priceRoot"], 100)
+        # Sprint 11.8 NanoROOT (этап 2): параллельное nano-значение цены.
+        self.assertEqual(offer["priceRootNano"], 100 * 100_000_000)
         self.assertEqual(offer["quotaLimit"], 1)
         self.assertEqual(offer["consumedCount"], 0)
         self.assertEqual(offer["remainingQuota"], 1)
@@ -793,6 +795,7 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                 "missionTitle",
                 "offerId",
                 "priceRoot",
+                "priceRootNano",  # Sprint 11.8 NanoROOT: добавлено (этап 2)
                 "quotaLimit",
                 "consumedCount",
                 "remainingQuota",
