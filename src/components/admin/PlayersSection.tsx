@@ -29,6 +29,11 @@ import {
   type RootAdjustmentPayload,
   type RootTransaction,
 } from '../../api/adminApi'
+import { formatRootFromNano } from '../../utils/formatRoot'
+
+// Sprint 11.8 NanoROOT (этап 2C): 1 ROOT = 10^8 наноROOT.
+// Fallback, если ответ пришёл без *_nano (legacy).
+const NANO_PER_ROOT = 100_000_000
 
 type PlayersSectionProps = {
   admin: AdminUser | null
@@ -780,7 +785,12 @@ export function PlayersSection({
                   >
                     <td style={tdStyle}>{player.nickname ?? '—'}</td>
                     <td style={tdStyle}>{player.displayName ?? '—'}</td>
-                    <td style={tdStyle}>{formatAmount(player.rootBalance)}</td>
+                    <td style={tdStyle}>
+                      {formatRootFromNano(
+                        player.rootBalanceNano ??
+                          (player.rootBalance ?? 0) * NANO_PER_ROOT,
+                      )}
+                    </td>
                     <td style={tdStyle}>
                       <span
                         className="admin-status"
@@ -907,11 +917,19 @@ export function PlayersSection({
                   margin: '4px 0',
                 }}
               >
-                {formatAmount(selectedPlayer.wallet.availableBalance)}{' '}
+                {formatRootFromNano(
+                  selectedPlayer.wallet.availableBalanceNano ??
+                    (selectedPlayer.wallet.availableBalance ?? 0) *
+                      NANO_PER_ROOT,
+                )}{' '}
                 {selectedPlayer.wallet.currency}
               </p>
               <p className="admin-muted">
-                Закрыто: {formatAmount(selectedPlayer.wallet.lockedBalance)}{' '}
+                Закрыто:{' '}
+                {formatRootFromNano(
+                  selectedPlayer.wallet.lockedBalanceNano ??
+                    (selectedPlayer.wallet.lockedBalance ?? 0) * NANO_PER_ROOT,
+                )}{' '}
                 {selectedPlayer.wallet.currency}
               </p>
               <div
@@ -1017,7 +1035,12 @@ export function PlayersSection({
                         </td>
                         <td style={tdStyle}>{tx.transactionType}</td>
                         <td style={tdStyle}>{formatAmount(tx.amount)}</td>
-                        <td style={tdStyle}>{formatAmount(tx.balanceAfter)}</td>
+                        <td style={tdStyle}>
+                          {formatRootFromNano(
+                            tx.balanceAfterNano ??
+                              (tx.balanceAfter ?? 0) * NANO_PER_ROOT,
+                          )}
+                        </td>
                         <td style={tdStyle}>{tx.reason}</td>
                         <td style={tdStyle}>{tx.referenceType ?? '—'}</td>
                       </tr>

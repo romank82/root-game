@@ -5,6 +5,11 @@ import {
   runWithdrawalBatch,
   type Withdrawal,
 } from '../../api/adminApi'
+import { formatRootFromNano } from '../../utils/formatRoot'
+
+// Sprint 11.8 NanoROOT (этап 2C): 1 ROOT = 10^8 наноROOT.
+// Fallback, если ответ пришёл без *_nano (legacy).
+const NANO_PER_ROOT = 100_000_000
 
 type StatusFilter =
   | ''
@@ -296,7 +301,12 @@ export function WithdrawalsSection() {
                   <tr key={withdrawal.id}>
                     <td style={tdStyle}>{shorten(withdrawal.id)}</td>
                     <td style={tdStyle}>{shorten(withdrawal.playerId)}</td>
-                    <td style={tdStyle}>{withdrawal.amountRoot}</td>
+                    <td style={tdStyle}>
+                      {formatRootFromNano(
+                        withdrawal.amountRootNano ??
+                          (withdrawal.amountRoot ?? 0) * NANO_PER_ROOT,
+                      )}
+                    </td>
                     <td style={tdStyle}>{shorten(withdrawal.toAddress)}</td>
                     <td style={tdStyle}>{withdrawal.status}</td>
                     <td style={tdStyle}>
