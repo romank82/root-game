@@ -665,6 +665,7 @@ export function TerminalScreen({
     <section className="terminal-layout">
       <Sidebar
         echo={echo}
+        rootBalanceNano={rootBalanceNano}
         apiStatus={apiStatus}
         onScreenChange={onScreenChange}
       />

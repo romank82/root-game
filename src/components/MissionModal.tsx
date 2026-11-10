@@ -1,6 +1,11 @@
 import type { EngineMission } from '../api/engineApi'
 import { useTranslation } from 'react-i18next'
 import { ErrorWithCode } from './ErrorWithCode'
+import { formatRootFromNano } from '../utils/formatRoot'
+
+// Sprint 11.8 NanoROOT (этап 2C): 1 ROOT = 10^8 наноROOT.
+// Fallback, если ответ пришёл без *_nano (legacy).
+const NANO_PER_ROOT = 100_000_000
 
 interface MissionModalProps {
   mission: EngineMission
@@ -70,7 +75,11 @@ export function MissionModal({
 
         {hasEntryPrice && (
           <p className="mission-modal-line">
-            {t('terminal:missionModal.entryLabel')} {mission.entryRoot} ROOT
+            {t('terminal:missionModal.entryLabel')}{' '}
+            {formatRootFromNano(
+              mission.entryRootNano ?? (mission.entryRoot ?? 0) * NANO_PER_ROOT,
+            )}{' '}
+            ROOT
           </p>
         )}
 
