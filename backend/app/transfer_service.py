@@ -255,16 +255,29 @@ def transfer_root(
             f"Нужно заработать минимум {limits['earned']} ROOT в игре для переводов.",
         )
 
-    # 5. Дневной лимит (UTC-сутки).
+    # 5. Дневной лимит (UTC-сутки). Sprint 8.x-fractional-transfer (A2-1):
+    # сумма считается в наноROOT по точной amount_nano; для старых строк
+    # (amount_nano IS NULL) — legacy amount * 10^8 внутри coalesce, чтобы
+    # NULL-строки не выпадали из суммы.
     start_of_day = _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    daily_sum = session.scalar(
-        select(func.coalesce(func.sum(PlayerTransfer.amount), 0)).where(
+    daily_sum_nano = session.scalar(
+        select(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(
+                        PlayerTransfer.amount_nano,
+                        PlayerTransfer.amount * NANO_PER_ROOT,
+                    )
+                ),
+                0,
+            )
+        ).where(
             PlayerTransfer.from_player_id == from_player_id,
             PlayerTransfer.status == "completed",
             PlayerTransfer.created_at >= start_of_day,
         )
     ) or 0
-    if daily_sum * NANO_PER_ROOT + amount_nano > limits["daily"] * NANO_PER_ROOT:
+    if daily_sum_nano + amount_nano > limits["daily"] * NANO_PER_ROOT:
         raise MissionEngineError(
             429,
             f"Превышен дневной лимит переводов ({limits['daily']} ROOT).",
