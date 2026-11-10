@@ -144,6 +144,7 @@ function App() {
           apiStatus={apiStatus}
           missions={missions}
           rootBalance={echo}
+          rootBalanceNano={rootBalanceNano}
           inventory={inventory}
           onScreenChange={setScreen}
           onSubmitMission={submitMission}

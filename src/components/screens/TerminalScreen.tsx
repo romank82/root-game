@@ -18,7 +18,12 @@ import { CooldownCountdown } from '../CooldownCountdown'
 import { MissionTimer } from '../MissionTimer'
 import { MissionModal } from '../MissionModal'
 import { missionText } from '../../utils/missionHelpers'
+import { formatRootFromNano } from '../../utils/formatRoot'
 import { MISSION_LAYER_ORDER as LAYER_ORDER } from '../../constants/missionLayerColors'
+
+// Sprint 11.8 NanoROOT (этап 2C): 1 ROOT = 10^8 наноROOT.
+// Fallback, если ответ пришёл без *_nano (legacy).
+const NANO_PER_ROOT = 100_000_000
 
 // Окно отказа с возвратом платы (3 минуты после взятия миссии).
 // Зеркало CANCEL_DEADLINE_SECONDS = 180 на бэкенде (mission_engine.py):
@@ -44,6 +49,9 @@ interface TerminalScreenProps {
   apiStatus: ApiStatus
   missions: EngineMission[]
   rootBalance: number
+  // Sprint 11.8 NanoROOT (этап 2C): дробный баланс в nano (1 ROOT = 10^8).
+  // null/undefined — старый ответ без поля, тогда fallback на rootBalance.
+  rootBalanceNano?: number | null
   inventory: EngineInventoryItem[]
   onScreenChange: (screen: Screen) => void
   onSubmitMission: (
@@ -70,6 +78,7 @@ export function TerminalScreen({
   apiStatus,
   missions,
   rootBalance,
+  rootBalanceNano,
   inventory,
   onScreenChange,
   onAcceptMission,
@@ -401,10 +410,15 @@ export function TerminalScreen({
     const isInProgress = mission.status === 'in_progress'
 
     // Sprint 8.x: цена входа (atomic ROOT) и требуемые ключи из runtime policy.
+    // Sprint 11.8 NanoROOT (этап 2C): сравнение баланса — в nano; fallback на
+    // целый ROOT × 10^8 для старых ответов без *_nano.
+    const balanceForCompare = rootBalanceNano ?? rootBalance * NANO_PER_ROOT
+    const entryForCompare =
+      mission.entryRootNano ?? (mission.entryRoot ?? 0) * NANO_PER_ROOT
     const missingRoot =
       typeof mission.entryRoot === 'number' &&
       mission.entryRoot > 0 &&
-      rootBalance < mission.entryRoot
+      balanceForCompare < entryForCompare
     const requiredItems = mission.requiredItems ?? []
     const hasAllKeys = requiredItems.every((requirement) => {
       const owned =
@@ -601,11 +615,19 @@ export function TerminalScreen({
           <>
             {typeof mission.entryRoot === 'number' && mission.entryRoot > 0 && (
               <>
-                <p>{t('terminal:missionCard.entryLabel')} {mission.entryRoot} ROOT</p>
+                <p>
+                  {t('terminal:missionCard.entryLabel')}{' '}
+                  {formatRootFromNano(
+                    mission.entryRootNano ?? mission.entryRoot * NANO_PER_ROOT,
+                  )}{' '}
+                  ROOT
+                </p>
                 {missingRoot && (
                   <p className="repair-error">
                     {t('terminal:errors.notEnoughRoot', {
-                      amount: mission.entryRoot - rootBalance,
+                      amount: formatRootFromNano(
+                        Math.max(0, entryForCompare - balanceForCompare),
+                      ),
                     })}
                   </p>
                 )}
