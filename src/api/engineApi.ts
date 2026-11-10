@@ -79,6 +79,9 @@ export type EngineMission = {
   // ROOT и требуемые ключи). Отдаются движком в bootstrap для показа в карточке
   // миссии ДО accept; у старых ответов отсутствуют → поля опциональны.
   entryRoot?: number | null
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное дробное значение entryRoot
+  // в nano (1 ROOT = 10^8 nano). Опционально — старые ответы без поля.
+  entryRootNano?: number | null
   requiredItems?: {
     itemId: string
     // Sprint 8.x: человекочитаемый код ключа (Item.code, например
@@ -185,11 +188,16 @@ export type EngineBootstrap = {
     id: string
     displayName: string
     rootBalance: number
+    // Sprint 11.8 NanoROOT (этап 2C): параллельное значение в nano.
+    rootBalanceNano?: number | null
   }
   wallet: {
     currency: string
     availableBalance: number
+    // Sprint 11.8 NanoROOT (этап 2C): параллельные значения в nano.
+    availableBalanceNano?: number | null
     lockedBalance: number
+    lockedBalanceNano?: number | null
   }
   // 10.4-j-0: баланс газа — строка (дробный Numeric(18,4) с бэка).
   gasBalance: string
@@ -244,6 +252,8 @@ export type FallbackOffer = {
   missionTitle: string
   offerId: string
   priceRoot: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное значение цены в nano.
+  priceRootNano?: number | null
   quotaLimit: number
   consumedCount: number
   remainingQuota: number
@@ -258,7 +268,10 @@ export type FallbackPurchaseResult = {
   remainingQuota: number
   status: string
   priceRoot: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельные значения в nano.
+  priceRootNano?: number | null
   rootBalance: number
+  rootBalanceNano?: number | null
   item: FallbackOfferItem | null
 }
 
@@ -589,6 +602,8 @@ export async function saveMyProfile(
 export type MyReferralInfo = {
   enabled: boolean
   rewardRoot: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное значение награды в nano.
+  rewardRootNano?: number | null
   shareLink: string | null
   referredBy: string | null
 }
@@ -774,6 +789,8 @@ export async function deleteMyTonWallet(): Promise<{ deleted: boolean }> {
 export type PlayerWithdrawal = {
   withdrawalId: string
   amountRoot: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное значение суммы в nano.
+  amountRootNano?: number | null
   toAddress: string
   status: string
   tonTxHash: string | null
@@ -792,6 +809,8 @@ export type WithdrawalsListResponse = {
 export type CreateWithdrawalResult = {
   withdrawalId: string
   amountRoot: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное значение суммы в nano.
+  amountRootNano?: number | null
   toAddress: string
   status: string
 }

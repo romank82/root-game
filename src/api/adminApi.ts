@@ -638,6 +638,8 @@ export type MissionRuntimePolicy = {
   version: number
   status: string
   entryRootAtomic: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное значение в nano.
+  entryRootAtomicNano?: number | null
   maxAttempts: number
   repeatabilityPolicy: string
   requiredItemsJson: Record<string, unknown>
@@ -1534,6 +1536,8 @@ export type AdminEconomyTransaction = {
   playerDisplayName: string | null
   amount: number
   balanceAfter: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное значение в nano.
+  balanceAfterNano?: number | null
   transactionType: 'credit' | 'debit'
   reason: string
   referenceType: string | null
@@ -1662,6 +1666,8 @@ export type AdminPlayerSummary = {
   telegramPhotoUrl: string | null
   createdAt: string | null
   rootBalance: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное значение в nano.
+  rootBalanceNano?: number | null
 }
 
 export type AdminProfileField = {
@@ -1700,7 +1706,10 @@ export type AdminPlayerCard = {
   wallet: {
     currency: string
     availableBalance: number
+    // Sprint 11.8 NanoROOT (этап 2C): параллельные значения в nano.
+    availableBalanceNano?: number | null
     lockedBalance: number
+    lockedBalanceNano?: number | null
   }
   gasBalance: string
   inventory: Array<{
@@ -1751,6 +1760,8 @@ export type AdminPlayerCard = {
     id: string
     amount: number
     balanceAfter: number
+    // Sprint 11.8 NanoROOT (этап 2C): параллельное значение в nano.
+    balanceAfterNano?: number | null
     transactionType: 'credit' | 'debit'
     reason: string
     referenceType: string | null
@@ -1971,6 +1982,8 @@ export type RootTransaction = {
   id: string
   amount: number // ROOT — int
   balanceAfter: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное значение в nano.
+  balanceAfterNano?: number | null
   transactionType: string
   reason: string
   referenceType: string | null
@@ -2142,6 +2155,8 @@ export type Withdrawal = {
   id: string
   playerId: string
   amountRoot: number
+  // Sprint 11.8 NanoROOT (этап 2C): параллельное значение суммы в nano.
+  amountRootNano?: number | null
   toAddress: string
   status: string
   tonTxHash: string | null
