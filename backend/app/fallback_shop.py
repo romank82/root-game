@@ -404,7 +404,15 @@ def _build_purchase_result(
         "remainingQuota": max(0, entitlement.quota_limit - entitlement.consumed_count),
         "status": entitlement.status,
         "priceRoot": price,
+        # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+        "priceRootNano": price * NANO_PER_ROOT,
         "rootBalance": wallet.available_balance,
+        # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+        "rootBalanceNano": (
+            getattr(wallet, "available_balance_nano", None)
+            if getattr(wallet, "available_balance_nano", None) is not None
+            else wallet.available_balance * NANO_PER_ROOT
+        ),
         "item": {
             "id": item.id,
             "slug": item.slug,

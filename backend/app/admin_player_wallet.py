@@ -318,6 +318,12 @@ def _serialize_wallet_adjustment_result(
             "id": tx.id,
             "amount": tx.amount,
             "balanceAfter": tx.balance_after,
+            # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+            "balanceAfterNano": (
+                getattr(tx, "balance_after_nano", None)
+                if getattr(tx, "balance_after_nano", None) is not None
+                else tx.balance_after * NANO_PER_ROOT
+            ),
             "transactionType": tx.transaction_type,
             "reason": tx.reason,
             "referenceType": tx.reference_type,
@@ -333,7 +339,19 @@ def _serialize_wallet_adjustment_result(
             "playerId": wallet.player_id,
             "currency": wallet.currency,
             "availableBalance": wallet.available_balance,
+            # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+            "availableBalanceNano": (
+                getattr(wallet, "available_balance_nano", None)
+                if getattr(wallet, "available_balance_nano", None) is not None
+                else wallet.available_balance * NANO_PER_ROOT
+            ),
             "lockedBalance": wallet.locked_balance,
+            # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+            "lockedBalanceNano": (
+                getattr(wallet, "locked_balance_nano", None)
+                if getattr(wallet, "locked_balance_nano", None) is not None
+                else wallet.locked_balance * NANO_PER_ROOT
+            ),
         },
         "idempotent": idempotent,
     }
@@ -770,6 +788,12 @@ def execute_player_wallet_adjustment(
             "amount": amount,
             "transactionId": transaction.id,
             "balanceAfter": transaction.balance_after,
+            # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+            "balanceAfterNano": (
+                getattr(transaction, "balance_after_nano", None)
+                if getattr(transaction, "balance_after_nano", None) is not None
+                else transaction.balance_after * NANO_PER_ROOT
+            ),
         }
         approval.execution_error = None
         session.flush()

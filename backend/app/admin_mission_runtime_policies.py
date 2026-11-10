@@ -43,6 +43,9 @@ POLICY_MANAGE_PERMISSION = "missions.manage"
 
 VALID_POLICY_STATUSES = {"draft", "published", "archived"}
 
+# Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT.
+NANO_PER_ROOT = 100_000_000
+
 # Mirrors backend/app/runtime_policy_contract.py constants so Pydantic rejects
 # out-of-range values early. The contract remains the single source of truth.
 ENTRY_ROOT_ATOMIC_MAX = 2_147_483_647
@@ -275,6 +278,12 @@ def _serialize_policy(policy: MissionRuntimePolicy) -> dict[str, Any]:
         "version": policy.version,
         "status": policy.status,
         "entryRootAtomic": policy.entry_root_atomic,
+        # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+        "entryRootAtomicNano": (
+            policy.entry_root_atomic * NANO_PER_ROOT
+            if policy.entry_root_atomic is not None
+            else None
+        ),
         "maxAttempts": policy.max_attempts,
         "repeatabilityPolicy": policy.repeatability_policy,
         "requiredItemsJson": policy.required_items_json,
