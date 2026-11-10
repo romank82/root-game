@@ -1773,6 +1773,9 @@ export type AdminPlayerCard = {
     totalMissionsCompleted: number
     totalRootEarned: number
     totalRootSpent: number
+    // Sprint 8.x-fractional-transfer: те же суммы в nanoROOT (1 ROOT = 10^8).
+    totalRootEarnedNano?: number | null
+    totalRootSpentNano?: number | null
   }
 }
 

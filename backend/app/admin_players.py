@@ -397,9 +397,46 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
                 WalletTransaction.transaction_type == "debit",
             )
         ) or 0
+        # Sprint 8.x-fractional-transfer: те же суммы в наноROOT (additive,
+        # legacy-поля выше не меняются). coalesce — fallback на amount * 10^8
+        # для проводок без заполненного amount_nano.
+        total_root_earned_nano = session.scalar(
+            select(
+                func.coalesce(
+                    func.sum(
+                        func.coalesce(
+                            WalletTransaction.amount_nano,
+                            WalletTransaction.amount * NANO_PER_ROOT,
+                        )
+                    ),
+                    0,
+                )
+            ).where(
+                WalletTransaction.wallet_id == wallet.id,
+                WalletTransaction.transaction_type == "credit",
+            )
+        ) or 0
+        total_root_spent_nano = session.scalar(
+            select(
+                func.coalesce(
+                    func.sum(
+                        func.coalesce(
+                            WalletTransaction.amount_nano,
+                            WalletTransaction.amount * NANO_PER_ROOT,
+                        )
+                    ),
+                    0,
+                )
+            ).where(
+                WalletTransaction.wallet_id == wallet.id,
+                WalletTransaction.transaction_type == "debit",
+            )
+        ) or 0
     else:
         total_root_earned = 0
         total_root_spent = 0
+        total_root_earned_nano = 0
+        total_root_spent_nano = 0
 
     return {
         "player": {
@@ -466,6 +503,9 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
             "totalMissionsCompleted": total_missions_completed,
             "totalRootEarned": total_root_earned,
             "totalRootSpent": total_root_spent,
+            # Sprint 8.x-fractional-transfer: nano-дубли (additive).
+            "totalRootEarnedNano": total_root_earned_nano,
+            "totalRootSpentNano": total_root_spent_nano,
         },
     }
 
