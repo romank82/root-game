@@ -46,6 +46,9 @@ from app.models import (
     WalletTransaction,
 )
 
+# Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT (как в admin_player_wallet).
+NANO_PER_ROOT = 100_000_000
+
 router = APIRouter(prefix="/api/v1/admin/players", tags=["admin-players"])
 
 PLAYERS_READ_PERMISSION = "players.read"
@@ -187,6 +190,13 @@ def _serialize_player_summary(
         "telegramPhotoUrl": player.telegram_photo_url,
         "createdAt": player.created_at.isoformat() if player.created_at else None,
         "rootBalance": wallet.available_balance if wallet is not None else 0,
+        # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+        "rootBalanceNano": (
+            getattr(wallet, "available_balance_nano", None)
+            if wallet is not None
+            and getattr(wallet, "available_balance_nano", None) is not None
+            else (wallet.available_balance * NANO_PER_ROOT if wallet is not None else None)
+        ),
     }
 
 def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, Any]:
@@ -342,6 +352,12 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
                 "id": tx.id,
                 "amount": tx.amount,
                 "balanceAfter": tx.balance_after,
+                # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+                "balanceAfterNano": (
+                    getattr(tx, "balance_after_nano", None)
+                    if getattr(tx, "balance_after_nano", None) is not None
+                    else tx.balance_after * NANO_PER_ROOT
+                ),
                 "transactionType": tx.transaction_type,
                 "reason": tx.reason,
                 "referenceType": tx.reference_type,
@@ -421,7 +437,19 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
             {
                 "currency": wallet.currency,
                 "availableBalance": wallet.available_balance,
+                # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+                "availableBalanceNano": (
+                    getattr(wallet, "available_balance_nano", None)
+                    if getattr(wallet, "available_balance_nano", None) is not None
+                    else wallet.available_balance * NANO_PER_ROOT
+                ),
                 "lockedBalance": wallet.locked_balance,
+                # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+                "lockedBalanceNano": (
+                    getattr(wallet, "locked_balance_nano", None)
+                    if getattr(wallet, "locked_balance_nano", None) is not None
+                    else wallet.locked_balance * NANO_PER_ROOT
+                ),
             }
             if wallet is not None
             else {"currency": "ROOT", "availableBalance": 0, "lockedBalance": 0}
@@ -465,6 +493,12 @@ def _serialize_root_transaction(tx: WalletTransaction) -> dict[str, Any]:
         "id": tx.id,
         "amount": tx.amount,
         "balanceAfter": tx.balance_after,
+        # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+        "balanceAfterNano": (
+            getattr(tx, "balance_after_nano", None)
+            if getattr(tx, "balance_after_nano", None) is not None
+            else tx.balance_after * NANO_PER_ROOT
+        ),
         "transactionType": tx.transaction_type,
         "reason": tx.reason,
         "referenceType": tx.reference_type,

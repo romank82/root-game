@@ -38,6 +38,9 @@ from app.models import (
     WalletTransaction,
 )
 
+# Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT (как в admin_player_wallet).
+NANO_PER_ROOT = 100_000_000
+
 router = APIRouter(prefix="/api/v1/admin/economy", tags=["admin-economy"])
 
 ECONOMY_READ_PERMISSION = "economy.read"
@@ -219,6 +222,12 @@ def list_economy_transactions(
                 "playerDisplayName": display_name,
                 "amount": tx.amount,
                 "balanceAfter": tx.balance_after,
+                # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
+                "balanceAfterNano": (
+                    getattr(tx, "balance_after_nano", None)
+                    if getattr(tx, "balance_after_nano", None) is not None
+                    else tx.balance_after * NANO_PER_ROOT
+                ),
                 "transactionType": tx.transaction_type,
                 "reason": tx.reason,
                 "referenceType": tx.reference_type,
