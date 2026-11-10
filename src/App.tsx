@@ -239,6 +239,7 @@ function App() {
       {screen === 'transfer' && (
         <TransferScreen
           rootBalance={echo}
+          rootBalanceNano={rootBalanceNano}
           onScreenChange={setScreen}
           onBalanceChange={async () => {
             // Refetch bootstrap: rootBalance после перевода.

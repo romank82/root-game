@@ -8,17 +8,24 @@ import {
   type SearchPlayerHit,
 } from '../../api/engineApi'
 import { ErrorWithCode } from '../ErrorWithCode'
+import { formatRootFromNano } from '../../utils/formatRoot'
 
 interface TransferScreenProps {
   onScreenChange: (screen: Screen) => void
   // Баланс для отображения: App знает его из bootstrap (echo).
   rootBalance?: number
+  // Sprint 11.8 NanoROOT (этап 2C): дробный баланс в nano (1 ROOT = 10^8).
+  // null/undefined — старый ответ без поля, тогда fallback на rootBalance.
+  rootBalanceNano?: number | null
   // 10.4-j-1: баланс газа из bootstrap (строка). App его пока не хранит —
   // при отсутствии пропса экран сам подтягивает газ при открытии.
   gasBalance?: string
   // После успешного перевода App обновляет bootstrap (как ShopScreen).
   onBalanceChange?: () => void
 }
+
+// 1 ROOT = 10^8 наноROOT — fallback, если nano-поле не пришло.
+const NANO_PER_ROOT = 100_000_000
 
 // Клиентский request_id для идемпотентности перевода: генерируется при
 // открытии экрана и НЕ меняется до успешной отправки. Повторный запрос с
@@ -36,6 +43,7 @@ function makeRequestId(): string {
 export function TransferScreen({
   onScreenChange,
   rootBalance,
+  rootBalanceNano,
   gasBalance,
   onBalanceChange,
 }: TransferScreenProps) {
@@ -139,7 +147,10 @@ export function TransferScreen({
 
       {typeof rootBalance === 'number' && (
         <p>
-          {t('transfer:header.availableLabel')} <b>{rootBalance} ROOT</b>
+          {t('transfer:header.availableLabel')}{' '}
+          <b>
+            {formatRootFromNano(rootBalanceNano ?? rootBalance * NANO_PER_ROOT)} ROOT
+          </b>
         </p>
       )}
 
