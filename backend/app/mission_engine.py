@@ -2330,6 +2330,106 @@ def submit_mission(
     ) from last_error
 
 
+def _solo_proof_freshness_seconds() -> int:
+    """Sprint 8.5-2: срок годности solo location proof, сек.
+
+    Пока константа 60: CMS-ключ geo.solo.proof_freshness_seconds — отдельный
+    шаг (8.5-5, docs/CMS). System Settings в этом шаге не трогаем.
+    """
+    return 60
+
+
+def _submit_solo_location_proof(
+    session: Session,
+    *,
+    player_id: str,
+    mission_id: str,
+    latitude: float,
+    longitude: float,
+    accuracy_meters: float,
+) -> dict:
+    """Sprint 8.5-2: solo location proof (без гейта на награду — это 8.5-2b).
+
+    Проверяет присутствие (is_inside_zone) и accuracy (по
+    GeoZone.max_location_accuracy_meters); создаёт LocationProof
+    (zone_id = zone.slug, единое пространство с team). Сырые координаты НЕ
+    сохраняются. Возвращает {missionId, zoneId, verified, expiresAt}.
+    """
+    from app.geo_location_proof import create_location_proof, is_inside_zone
+
+    player = _ensure_player(session, player_id)
+
+    mission = session.get(Mission, mission_id)
+    if mission is None or mission.status != "published":
+        raise MissionEngineError(404, "Миссия не найдена или не опубликована.")
+    if mission.mission_type == "team":
+        raise MissionEngineError(
+            409,
+            "Командные миссии берутся через отдельный API.",
+        )
+    if mission.geo_zone_id is None:
+        raise MissionEngineError(422, "У миссии не настроена геозона.")
+
+    # Страновой гейт (как в accept_mission). is_feature_restricted принимает
+    # country_code, а не player_id.
+    if is_feature_restricted(session, player.country, "mission"):
+        raise MissionEngineError(403, "Миссии из вашей страны ограничены.")
+
+    zone = session.get(GeoZone, mission.geo_zone_id)
+    if zone is None or zone.status != "published":
+        raise MissionEngineError(409, "Геозона недоступна.")
+
+    player_mission = session.scalar(
+        select(PlayerMission).where(
+            PlayerMission.player_id == player_id,
+            PlayerMission.mission_id == mission_id,
+        )
+    )
+    if player_mission is None:
+        raise MissionEngineError(404, "Прогресс миссии не найден.")
+    if player_mission.status != "in_progress":
+        raise MissionEngineError(409, "Миссия не в процессе выполнения.")
+
+    verified = is_inside_zone(zone, latitude, longitude)
+    # Accuracy проверяем только если лимит задан в геозоне (NULL -> пропуск).
+    if zone.max_location_accuracy_meters is not None:
+        if accuracy_meters > float(zone.max_location_accuracy_meters):
+            verified = False
+
+    proof = create_location_proof(
+        session,
+        player_id=player_id,
+        zone_id=zone.slug,
+        verified=verified,
+        freshness_seconds=_solo_proof_freshness_seconds(),
+    )
+    return {
+        "missionId": mission.id,
+        "zoneId": zone.slug,
+        "verified": verified,
+        "expiresAt": proof.expires_at.isoformat(),
+    }
+
+
+def submit_solo_location_proof_entrypoint(
+    player_id: str,
+    mission_id: str,
+    latitude: float,
+    longitude: float,
+    accuracy_meters: float,
+) -> dict:
+    """HTTP entrypoint (Sprint 8.5-2): solo location proof в одной транзакции."""
+    with SessionLocal.begin() as session:
+        return _submit_solo_location_proof(
+            session,
+            player_id=player_id,
+            mission_id=mission_id,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy_meters=accuracy_meters,
+        )
+
+
 def _serialize_team_accept_response(
     mission: Mission,
     team_session: dict[str, Any],

@@ -30,6 +30,7 @@ from app.mission_engine import (
     get_mission_qr_payload,
     process_qr_scan,
     submit_mission,
+    submit_solo_location_proof_entrypoint,
 )
 from app.models import GamePlayer, GasWallet, TonWallet
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
@@ -968,6 +969,31 @@ def accept_engine_mission(
             latitude=payload.latitude,
             longitude=payload.longitude,
             accuracy=payload.accuracy,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+# Sprint 8.5-2: solo location proof. Гейта нет (8.5-2b); создаёт LocationProof
+# и возвращает {missionId, zoneId, verified, expiresAt}.
+@limiter.limit("10/minute")
+@app.post("/api/v1/engine/missions/{mission_id}/location-proof")
+def submit_solo_location_proof_route(
+    request: Request,
+    mission_id: str,
+    payload: LocationSubmitPayload,
+    player_id: str = Depends(get_current_player_id),
+):
+    try:
+        return submit_solo_location_proof_entrypoint(
+            player_id=player_id,
+            mission_id=mission_id,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy_meters=payload.accuracy_meters,
         )
     except MissionEngineError as error:
         raise HTTPException(
