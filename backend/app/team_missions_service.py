@@ -33,6 +33,17 @@ from sqlalchemy.orm import Session
 from app.country_policy import is_feature_restricted
 from app.datetime_utils import ensure_utc
 from app.geo_country import resolve_country_or_none
+# Sprint 8.5-1: общие гео-примитивы вынесены в app.geo_location_proof (используются
+# и team, и solo). Константы реэкспортируются отсюда для обратной совместимости.
+from app.geo_location_proof import (
+    DEV_LOCATION_PROOF_PROVIDER,
+    LOCATION_PROOF_STATUS_REJECTED,
+    LOCATION_PROOF_STATUS_VERIFIED,
+    SUPPORTED_ZONE_TYPES,
+    create_location_proof,
+    has_fresh_verified_proof,
+    is_inside_zone,
+)
 
 # Активные командные сессии — в этих статусах игрок задействован в миссии.
 ACTIVE_SESSION_STATUSES = frozenset({"collecting", "ready_to_start", "active"})
@@ -60,12 +71,8 @@ MISSION_RUN_STATUS_ACTIVE = "active"
 MISSION_RUN_OPEN_STATUSES = frozenset({"active", "reserved"})
 
 # ---- 7.1.d: гео-присутствие ---------------------------------------------
-# Dev-режим сам выступает trusted verifier; для prod появится внешний verifier.
-# Эти константы — единственное место смены провайдера при переходе на prod.
-DEV_LOCATION_PROOF_PROVIDER = "dev_mock"
-LOCATION_PROOF_STATUS_VERIFIED = "verified"
-LOCATION_PROOF_STATUS_REJECTED = "rejected"
-SUPPORTED_ZONE_TYPES = frozenset({"radius"})  # polygon/poi — позже
+# Константы и примитивы LocationProof живут в app.geo_location_proof (общие с
+# solo) и импортированы выше; здесь остаются только team-специфичные правила.
 
 # ---- Join proximity (сбор команды): «рядом» -------------------------------
 # Лимит расстояния между участниками при create/join — по умолчанию 50 км
@@ -624,28 +631,19 @@ def _all_ready_members_have_fresh_geo_proof(
     Единая точка проверки гео-присутствия для авто-старта (_mark_ready) и
     fallback-активации (_activate_session). Только SELECT, без записи.
     proofFreshnessSeconds уже «зашит» в expires_at proof при его создании.
+    Проверка одного игрока — общий примитив has_fresh_verified_proof
+    (app.geo_location_proof); здесь остаётся team-специфика «все участники».
     """
-    from app.geo_team_runtime_models import LocationProof
-
     zone_id = config["geo"]["zoneId"]
-    now = _utcnow()
 
-    for member_row in members:
-        latest_proof = session.scalar(
-            select(LocationProof)
-            .where(
-                LocationProof.player_id == member_row.player_id,
-                LocationProof.status == LOCATION_PROOF_STATUS_VERIFIED,
-                LocationProof.zone_id == zone_id,
-                LocationProof.expires_at > now,
-            )
-            .order_by(LocationProof.issued_at.desc())
-            .limit(1)
+    return all(
+        has_fresh_verified_proof(
+            session,
+            player_id=member_row.player_id,
+            zone_id=zone_id,
         )
-        if latest_proof is None:
-            return False
-
-    return True
+        for member_row in members
+    )
 
 
 def _mark_ready(
@@ -1190,27 +1188,7 @@ def leave_team_session(player_id: str, session_id: str) -> dict:
         return _leave_team_session(session, player_id, session_id)
 
 
-def _is_inside_zone(
-    zone,
-    latitude: float,
-    longitude: float,
-) -> bool:
-    """Dev check: is the point inside a radius zone (equirectangular approximation).
-
-    Single spot to swap an external trusted verifier in prod."""
-    if zone.zone_type != "radius":
-        return False
-
-    if zone.latitude is None or zone.longitude is None or zone.radius_meters is None:
-        return False
-
-    meters_per_degree = 111_320.0
-    d_lat_m = (zone.latitude - latitude) * meters_per_degree
-    d_lon_m = (zone.longitude - longitude) * meters_per_degree
-    return (
-        d_lat_m * d_lat_m + d_lon_m * d_lon_m
-        <= zone.radius_meters * zone.radius_meters
-    )
+# is_inside_zone вынесена в app.geo_location_proof (импортируется выше).
 
 
 def _submit_location(
@@ -1294,22 +1272,16 @@ def _submit_location(
         raise _mission_error(409, "Этот тип геозоны пока не поддерживается.")
 
     # Presence: verified/rejected via the dev verifier.
-    verified = _is_inside_zone(zone, latitude, longitude)
+    verified = is_inside_zone(zone, latitude, longitude)
 
-    from app.geo_team_runtime_models import LocationProof
-    now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(seconds=config["geo"]["proofFreshnessSeconds"])
-    session.add(LocationProof(
-        id=_new_id("location-proof"),
+    proof = create_location_proof(
+        session,
         player_id=player_id,
-        provider=DEV_LOCATION_PROOF_PROVIDER,
-        status=LOCATION_PROOF_STATUS_VERIFIED if verified else LOCATION_PROOF_STATUS_REJECTED,
         zone_id=config["geo"]["zoneId"],
-        verifier_reference=None,
-        issued_at=now,
-        expires_at=expires_at,
-    ))
-    session.flush()
+        verified=verified,
+        freshness_seconds=config["geo"]["proofFreshnessSeconds"],
+    )
+    expires_at = proof.expires_at
 
     # 10.0.5: фактическая страна игрока по координатам (geo-intel-offline).
     # Обновляем country, только если резолв дал iso2 с confidence >= 0.7;
