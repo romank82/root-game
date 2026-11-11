@@ -312,7 +312,7 @@ export function SegmentsEditor({
   async function handleCreateSegment() {
     const title = segmentTitle.trim()
     const chapterId = segmentChapterId.trim()
-    if (title.length < 1) { setSegmentError('Название сегмента обязательно.'); return }
+    if (title.length < 1) { setSegmentError('Название части обязательно.'); return }
     if (chapterId.length < 1) { setSegmentError('Chapter ID обязателен.'); return }
     let content: Record<string, unknown>
     try { content = parseSegmentContentJson() }
@@ -336,7 +336,7 @@ export function SegmentsEditor({
       setSelectedSegmentId(created.id)
       setShowCreateSegment(false)
       setIsDirty(false)
-      setSegmentNotice('Сегмент создан.')
+      setSegmentNotice('Часть создана.')
       await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setSavingSegment(false) }
@@ -347,7 +347,7 @@ export function SegmentsEditor({
     if (!s) return
     const title = segmentTitle.trim()
     const chapterId = segmentChapterId.trim()
-    if (title.length < 1) { setSegmentError('Название сегмента обязательно.'); return }
+    if (title.length < 1) { setSegmentError('Название части обязательно.'); return }
     if (chapterId.length < 1) { setSegmentError('Chapter ID обязателен.'); return }
     let content: Record<string, unknown>
     try { content = parseSegmentContentJson() }
@@ -385,7 +385,7 @@ export function SegmentsEditor({
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       removeDraft(draftKeyFor(s.id))
       setIsDirty(false)
-      setSegmentNotice('Сегмент опубликован.')
+      setSegmentNotice('Часть опубликована.')
       await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setPublishingSegment(false) }
@@ -400,7 +400,7 @@ export function SegmentsEditor({
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       removeDraft(draftKeyFor(s.id))
       setIsDirty(false)
-      setSegmentNotice('Сегмент снят с публикации.')
+      setSegmentNotice('Часть снята с публикации.')
       await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setPublishingSegment(false) }
@@ -415,7 +415,7 @@ export function SegmentsEditor({
       setSegments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       removeDraft(draftKeyFor(s.id))
       setIsDirty(false)
-      setSegmentNotice('Сегмент архивирован.')
+      setSegmentNotice('Часть архивирована.')
       await reloadSegments()
     } catch (err) { setSegmentError((err as Error).message) }
     finally { setPublishingSegment(false) }
@@ -447,7 +447,7 @@ export function SegmentsEditor({
       (m, i) => i !== index && m.missionId === missionId,
     )
     if (duplicate) {
-      setSegmentError('Эта миссия уже добавлена в текущий сегмент.')
+      setSegmentError('Эта миссия уже добавлена в текущую часть.')
       return
     }
     setSegmentError(null)
@@ -515,7 +515,7 @@ export function SegmentsEditor({
             onClick={handleShowCreateSegment}
             disabled={!canWrite}
           >
-            + Новый сегмент
+            + Новая часть
           </button>
           <button
             className="admin-secondary"
@@ -554,7 +554,7 @@ export function SegmentsEditor({
               </button>
             ))}
             {!loadingSegments && segments.length === 0 && !segmentsError && (
-              <p className="admin-muted">Сегментов нет.</p>
+              <p className="admin-muted">Частей нет.</p>
             )}
           </div>
         </>
@@ -566,13 +566,13 @@ export function SegmentsEditor({
             <div>
               <p className="admin-kicker">
                 {showCreateSegment
-                  ? 'НОВЫЙ СЕГМЕНТ'
+                  ? 'НОВАЯ ЧАСТЬ'
                   : selectedSegment() ? selectedSegment()!.id : '—'}
               </p>
               <h2>
                 {showCreateSegment
-                  ? 'Создание сегмента'
-                  : selectedSegment() ? 'Редактирование сегмента' : 'Редактор сегмента'}
+                  ? 'Создание части'
+                  : selectedSegment() ? 'Редактирование части' : 'Редактор части'}
               </h2>
               {selectedSegment() && !showCreateSegment && (
                 <span
@@ -593,12 +593,12 @@ export function SegmentsEditor({
 
           {(!showCreateSegment && selectedSegment() === null) ? (
             <p className="admin-muted">
-              Выберите сегмент слева или создайте новый.
+              Выберите часть слева или создайте новую.
             </p>
           ) : (
             <>
               <label className="admin-field">
-                <span>Название сегмента</span>
+                <span>Название части</span>
                 <input
                   type="text"
                   value={segmentTitle}
