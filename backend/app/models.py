@@ -1574,8 +1574,10 @@ class PlayerTransfer(TimestampMixin, Base):
             name="uq_player_transfers_from_reference",
         ),
         CheckConstraint(
-            "amount > 0",
-            name="ck_player_transfers_amount_positive",
+            # Sprint 8.x-fractional-transfer (A2-5a): floor(amount_nano / 10^8)
+            # для дробей < 1 ROOT равен 0 — legacy-поле допускает ноль.
+            "amount >= 0",
+            name="ck_player_transfers_amount_non_negative",
         ),
         CheckConstraint(
             "status IN ('completed','rejected')",
