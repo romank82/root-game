@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import BigInteger, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.admin_access import require_permission
@@ -406,7 +406,10 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
                     func.sum(
                         func.coalesce(
                             WalletTransaction.amount_nano,
-                            WalletTransaction.amount * NANO_PER_ROOT,
+                            # CAST в BIGINT: в PG amount — INTEGER, и в fallback
+                            # amount * 10^8 возможен int4-overflow.
+                            cast(WalletTransaction.amount, BigInteger)
+                            * NANO_PER_ROOT,
                         )
                     ),
                     0,
@@ -422,7 +425,10 @@ def _serialize_player_card(session: Session, player: GamePlayer) -> dict[str, An
                     func.sum(
                         func.coalesce(
                             WalletTransaction.amount_nano,
-                            WalletTransaction.amount * NANO_PER_ROOT,
+                            # CAST в BIGINT: в PG amount — INTEGER, и в fallback
+                            # amount * 10^8 возможен int4-overflow.
+                            cast(WalletTransaction.amount, BigInteger)
+                            * NANO_PER_ROOT,
                         )
                     ),
                     0,

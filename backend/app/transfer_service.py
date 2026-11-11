@@ -284,7 +284,10 @@ def transfer_root(
                 func.sum(
                     func.coalesce(
                         PlayerTransfer.amount_nano,
-                        PlayerTransfer.amount * NANO_PER_ROOT,
+                        # CAST в BIGINT: в PG amount — INTEGER, и в fallback
+                        # amount * 10^8 возможен int4-overflow.
+                        cast(PlayerTransfer.amount, BigInteger)
+                        * NANO_PER_ROOT,
                     )
                 ),
                 0,

@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import BigInteger, case, cast, func, or_, select
 
 from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
@@ -68,7 +68,10 @@ def audit_balances(
                     WalletTransaction.transaction_type == "credit",
                     func.coalesce(
                         WalletTransaction.amount_nano,
-                        WalletTransaction.amount * NANO_PER_ROOT,
+                        # CAST в BIGINT: в PG amount — INTEGER, и в fallback
+                        # amount * 10^8 возможен int4-overflow.
+                        cast(WalletTransaction.amount, BigInteger)
+                        * NANO_PER_ROOT,
                     ),
                 ),
                 else_=0,
@@ -80,7 +83,10 @@ def audit_balances(
                     WalletTransaction.transaction_type == "debit",
                     func.coalesce(
                         WalletTransaction.amount_nano,
-                        WalletTransaction.amount * NANO_PER_ROOT,
+                        # CAST в BIGINT: в PG amount — INTEGER, и в fallback
+                        # amount * 10^8 возможен int4-overflow.
+                        cast(WalletTransaction.amount, BigInteger)
+                        * NANO_PER_ROOT,
                     ),
                 ),
                 else_=0,
