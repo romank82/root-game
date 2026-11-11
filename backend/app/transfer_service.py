@@ -172,12 +172,11 @@ def transfer_root(
         amount_nano = amount * NANO_PER_ROOT
     if amount_nano <= 0:
         raise MissionEngineError(422, "Сумма должна быть положительной.")
-    # Legacy целое ROOT (старые поля, ответ, CheckConstraint
-    # ck_player_transfers_amount_positive: amount > 0 — models.py:1576-1579).
-    # При сумме < 1 ROOT floor даёт 0, поэтому временно max(1, ...).
-    # TODO(A2): решение по constraint/legacy-полю — отдельной append-only
-    # миграцией; здесь constraint не меняем.
-    amount = max(1, amount_nano // NANO_PER_ROOT)
+    # Legacy целое ROOT (старые поля, ответ): floor(amount_nano / 10^8).
+    # Sprint 8.x-fractional-transfer (A2-5a/5b): CHECK допускает amount >= 0
+    # (миграция f06ca2ff1b61), поэтому для дробей < 1 ROOT legacy-поле = 0,
+    # а точная сумма живёт в amount_nano.
+    amount = amount_nano // NANO_PER_ROOT
 
     # 1. Идемпотентность ДО блокировок кошельков.
     existing = session.scalar(
@@ -448,6 +447,9 @@ def transfer_root(
                 payload={
                     "toPlayerId": to_player_id,
                     "amount": amount,
+                    # Sprint 8.x-fractional-transfer (A2-5b): точная сумма в
+                    # наноROOT (additive; legacy "amount" — floor-ROOT).
+                    "amountNano": amount_nano,
                     "transferId": transfer_id,
                 },
                 correlation_id=None,
