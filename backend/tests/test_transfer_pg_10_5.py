@@ -755,3 +755,136 @@ class TransferPg105Tests(unittest.TestCase):
         self.assertEqual(self._root_balance(p2), 100)
         self.assertEqual(self._gas_balance(p1), 99)
 
+    def test_transfer_fractional_half_root(self) -> None:
+        """0.5 ROOT: amount=0 (CHECK amount >= 0), amount_nano=50000000.
+
+        Sprint 8.x-fractional-transfer (A2-5c): legacy-поле amount — floor
+        (0.5 ROOT -> 0), точная сумма — в amount_nano. Daily-лимит считает по
+        nano: daily=1 ROOT -> два перевода по 0.5 проходят (сумма ровно 1),
+        третий -> 429. Газ и earned-порог отключены (0), чтобы не влиять.
+        """
+        from app.models import PlayerEvent, PlayerTransfer, WalletTransaction
+
+        with self.SessionLocal.begin() as session:
+            self._ensure_cms_settings(
+                session,
+                overrides={
+                    TRANSFER_MIN_KEY: 0,  # разрешить суммы < 1 ROOT
+                    DAILY_TRANSFER_LIMIT_KEY: 1,  # 1 ROOT в UTC-сутки
+                    TRANSFER_MINIMUM_EARNED_ROOT_KEY: 0,  # порог не мешает
+                    GAS_FEE_PERCENT_KEY: 0,  # газ не трогаем
+                },
+            )
+            p1 = self._make_player(session, "frac-sender")
+            w1 = self._seed_wallet(session, p1, 10)
+            p2 = self._make_player(session, "frac-recipient")
+            w2 = self._seed_wallet(session, p2, 0)
+
+            result = transfer_root(
+                session,
+                p1,
+                p2,
+                amount_nano=50_000_000,
+                request_id="req-frac-1",
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["amount"], 0)  # floor(0.5) = 0
+            self.assertEqual(result["amountNano"], 50_000_000)
+
+            pt = session.scalar(
+                select(PlayerTransfer).where(
+                    PlayerTransfer.from_player_id == p1,
+                    PlayerTransfer.reference_id == "req-frac-1",
+                )
+            )
+            self.assertIsNotNone(pt, "PlayerTransfer не создан")
+            self.assertEqual(pt.status, "completed")
+            self.assertEqual(pt.amount, 0)  # A2-5a: CHECK amount >= 0
+            self.assertEqual(pt.amount_nano, 50_000_000)
+
+            # Ledger: точные nano-суммы; legacy amount = 0 (floor).
+            debit = session.scalar(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == w1,
+                    WalletTransaction.transaction_type == "debit",
+                    WalletTransaction.reference_type == "player_transfer_debit",
+                    WalletTransaction.reference_id == "req-frac-1",
+                )
+            )
+            self.assertIsNotNone(debit, "debit-проводка не создана")
+            self.assertEqual(debit.amount, 0)
+            self.assertEqual(debit.amount_nano, 50_000_000)
+            self.assertEqual(debit.balance_after_nano, 950_000_000)
+
+            credit = session.scalar(
+                select(WalletTransaction).where(
+                    WalletTransaction.wallet_id == w2,
+                    WalletTransaction.transaction_type == "credit",
+                    WalletTransaction.reference_type == "player_transfer_credit",
+                    WalletTransaction.reference_id == "req-frac-1",
+                )
+            )
+            self.assertIsNotNone(credit, "credit-проводка не создана")
+            self.assertEqual(credit.amount, 0)
+            self.assertEqual(credit.amount_nano, 50_000_000)
+            self.assertEqual(credit.balance_after_nano, 50_000_000)
+
+        # Балансы после коммита: 10 - 0.5 = 9.5 ROOT (legacy floor = 9).
+        self.assertEqual(self._root_balance(p1), 9)
+        self.assertEqual(self._root_balance(p2), 0)
+
+        # Второй 0.5 за сутки: 0.5 + 0.5 == daily (1 ROOT) — проходит.
+        with self.SessionLocal.begin() as session:
+            second = transfer_root(
+                session,
+                p1,
+                p2,
+                amount_nano=50_000_000,
+                request_id="req-frac-2",
+            )
+        self.assertEqual(second["amountNano"], 50_000_000)
+        self.assertEqual(second["amount"], 0)
+
+        # Третий 0.5: 1 + 0.5 > 1 ROOT -> 429 (daily считает по nano,
+        # а не по legacy amount=0 — иначе лимит никогда бы не срабатывал).
+        with self.SessionLocal.begin() as session:
+            with self.assertRaises(MissionEngineError) as ctx:
+                transfer_root(
+                    session,
+                    p1,
+                    p2,
+                    amount_nano=50_000_000,
+                    request_id="req-frac-3",
+                )
+            self.assertEqual(ctx.exception.status_code, 429)
+
+        # Откат: закоммичено ровно 2 перевода, nano-балансы точные.
+        with self.SessionLocal() as session:
+            transfer_count = session.scalar(
+                select(func.count(PlayerTransfer.id)).where(
+                    PlayerTransfer.from_player_id == p1,
+                    PlayerTransfer.status == "completed",
+                )
+            )
+            sender_balance_nano = session.scalar(
+                select(WalletTransaction.balance_after_nano).where(
+                    WalletTransaction.wallet_id == w1,
+                    WalletTransaction.reference_type == "player_transfer_debit",
+                    WalletTransaction.reference_id == "req-frac-2",
+                )
+            )
+            events = session.scalars(
+                select(PlayerEvent).where(
+                    PlayerEvent.player_id == p1,
+                    PlayerEvent.event_type == "transfer.completed",
+                )
+            ).all()
+        self.assertEqual(transfer_count, 2)
+        self.assertEqual(sender_balance_nano, 900_000_000)  # 10 - 0.5 - 0.5
+        # Событие transfer.completed: точная сумма в payload (A2-5b).
+        self.assertEqual(len(events), 2)
+        for event in events:
+            self.assertEqual(event.payload_json["amount"], 0)
+            self.assertEqual(event.payload_json["amountNano"], 50_000_000)
+
