@@ -286,6 +286,53 @@ protected QR data, challenge validation material, other players private data,
 or settlement internals. Exact behavior is defined in
 `docs/geo-team-mission-contract.md`.
 
+## POST /api/v1/players/transfer
+
+P2P-перевод ROOT между игроками. Идемпотентность по `(from_player_id, request_id)`.
+Финансовая операция: row-lock кошельков (PG), списание газа, дневной лимит.
+
+**Request** (ровно одно из `amount` / `amount_nano`):
+```json
+{
+  "to_player_id": "player-...",
+  "amount": 10,              // целые ROOT (legacy, additive)
+  "amount_nano": 1050000000, // наноROOT (1 ROOT = 10^8), приоритетнее amount
+  "request_id": "req-..."
+}
+```
+
+amount: int > 0 (целые ROOT, обратная совместимость);
+
+amount_nano: int > 0 (наноROOT; дробный ввод 0.5 = 50000000);
+
+ровно одно из двух обязательно (model_validator);
+
+request_id: 1..64, идемпотентность.
+
+Response (additive; *Nano — точные значения):
+
+```json
+{
+  "transferId": "player-transfer-...",
+  "fromPlayerId": "player-...",
+  "toPlayerId": "player-...",
+  "amount": 10,              // floor(amount_nano / 10^8), для 0.5 = 0
+  "amountNano": 1050000000,
+  "status": "completed",
+  "fromBalance": 990,        // floor(available_balance_nano / 10^8)
+  "toBalance": 610,
+  "fromBalanceNano": 99050000000,
+  "toBalanceNano": 61000000000
+}
+```
+Ошибки: 422 (сумма/min/max), 403 (earned-порог, blocked, transfer_restricted),
+404 (получатель), 409 (недостаточно ROOT), 429 (daily), 402 (недостаточно газа).
+
+Лимиты (CMS, целые ROOT): economy.transfer_min_amount (default 1; для дробей
+< 1 ROOT — 0), economy.transfer_max_amount (10000), economy.daily_transfer_limit
+(50000, UTC-сутки, считается по amount_nano), economy.transfer_minimum_earned_root
+(50, только mission_reward), economy.gas_fee_percent (1).
+
 ## Admin API
 - `POST /api/v1/admin/auth/login`
 - `GET /api/v1/admin/auth/me` — текущий admin без credentials/session token.
@@ -365,7 +412,7 @@ Approval states: `pending`, `approved`, `rejected`, `expired`, `cancelled`,
 - `/api/v1/admin/system-settings` — catalog/list/get/update non-sensitive
   settings; sensitive changes use a dedicated approval workflow.
 - `/api/v1/admin/players` — list (search/status/authProvider filters, limit/offset).
-- `/api/v1/admin/players/{id}` — player card (wallet, inventory, missions, restrictions, recent transactions, stats).
+- `/api/v1/admin/players/{id}` — player card (wallet, inventory, missions, restrictions, recent transactions, stats: totalMissionsCompleted, totalRootEarned (floor ROOT), totalRootSpent, totalRootEarnedNano, totalRootSpentNano).
 - `POST /api/v1/admin/players/{id}/wallet-adjustment` — ручное начисление/списание ROOT
   (`direction=credit|debit`, `amount>0`, `reason`, `request_id`). При direct-grant и сумме
   ниже `economy.manual_adjustment_approval_threshold` — прямое исполнение (200), иначе 201 (approval-заявка).
@@ -704,13 +751,13 @@ Legacy `POST /api/v1/engine/missions/{mission_id}/submit` остаётся от�
 Статусы заявки: `pending` → `approved`/`rejected` → `processing` →
 `confirmed`/`failed`.
 
-### NanoROOT (Sprint 11.8, этап 1 — dual-write)
+### NanoROOT (Sprint 11.8 этапы 1–2 + Sprint 8.x-fractional-transfer)
 
-С Sprint 11.8 все ROOT-поля дублируются: `*_root` (Integer, целый ROOT —
-текущий контракт для игрока/фронта) и `*_nano` (BigInteger, × 10^8 — для
-будущего перехода на дробный ROOT). **Сейчас API отдаёт `*_root`** (целые
-ROOT), игра работает как раньше. Этап 2 (передача `*_nano` и форматирование
-дробных ROOT на фронте) — не начат.
+С Sprint 11.8 все ROOT-поля дублируются: `*_root` (Integer) и `*_nano` (BigInteger,
+1 ROOT = 10^8 наноROOT). Sprint 8.x-fractional-transfer (2026-11-11) закрыл:
+API принимает `amount_nano` и отдаёт `*Nano`-поля; фронт вводит дроби (0.5, 10.5);
+daily/audit/earned/stats считаются по `amount_nano`. Legacy `amount`/`available_balance`
+— floor(`*_nano` / 10^8), для дробей < 1 ROOT могут быть 0 (миграция `f06ca2ff1b61`).
 
 ## Админ-экономика — журнал Stars-платежей (Sprint 12.2)
 

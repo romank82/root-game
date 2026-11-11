@@ -19,8 +19,11 @@ Wallet balance является кэшем; ledger — источником ис
 
 ## Mission-run and fallback economic operations
 
-ROOT is persisted in integer atomic units. Floating-point arithmetic is
-forbidden for balances, prices, rewards, multipliers, or ledger calculations.
+ROOT is persisted in integer atomic units, which since Sprint 11.8 are
+nanoROOT (1 ROOT = 10^8 nanoROOT). All balances, prices, rewards, multipliers
+and ledger calculations use integer nanoROOT (`*_nano` BigInteger). Floating-point
+arithmetic is forbidden. Legacy `*_root` (Integer) fields are derived:
+`*_root = *_nano // 10^8` (floor), may be 0 for fractions < 1 ROOT.
 
 At paid solo run start, one dedicated executor atomically locks the wallet,
 checks sufficient non-negative available balance, writes one immutable entry
@@ -65,3 +68,23 @@ ROOT пригласившему начисляется отдельной immuta
 - начисление выполняется в транзакции награды миссии, но в отдельном
   SAVEPOINT: провал реферального бонуса откатывает только бонус и не ломает
   выданную награду миссии (никаких «полу-начисленных» состояний).
+
+## Переводы и пороги в наноROOT (Sprint 8.x-fractional-transfer)
+
+`earned` (`transfer_service.transfer_root` шаг 4 + `referral_service._earned_nano`):
+`SUM(coalesce(amount_nano, CAST(amount AS BIGINT) * 10^8))` по credit-проводкам
+`reference_type = "mission_reward"`; сравнение с
+`economy.transfer_minimum_earned_root * 10^8`.
+
+`daily`-лимит: `SUM(PlayerTransfer.amount_nano)` за UTC-сутки (fallback на
+`CAST(amount AS BIGINT) * 10^8`), сравнение с `economy.daily_transfer_limit * 10^8`.
+
+`audit` балансов (`/admin/economy/audit`): credit/debit `SUM` по
+`coalesce(amount_nano, CAST(amount AS BIGINT) * 10^8)`; сравнение с
+`available_balance_nano`; mismatch-поля `expectedNano`/`actualNano`/`differenceNano`.
+
+`stats` профиля (`admin_players`): `totalRootEarned`/`totalRootSpent` (floor) +
+`totalRootEarnedNano`/`totalRootSpentNano` (точные).
+
+legacy `player_transfers.amount`: `floor(amount_nano / 10^8)`, для дробей < 1 ROOT = 0
+(`CHECK amount >= 0`, миграция `f06ca2ff1b61`).

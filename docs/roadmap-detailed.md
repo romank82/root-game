@@ -33,6 +33,7 @@
 | Referral R-1…R-8 | ✅ закрыт (2026-11-06) | — | — |
 | Hotfix 8.x-hotfix-ref-link | ✅ закрыт (2026-11-08) | — | — |
 | 8.x-attempt-deadline (серверный дедлайн попытки) | ✅ закрыт (2026-11-08) | 3A-1…3A-5 + fix (модель + миграция dcc8fb912a89, engine, фронт, 9 тестов) | — |
+| 8.x-fractional-transfer | ✅ закрыт (2026-11-11) | 3c5c5df | — |
 
 ---
 
@@ -1247,7 +1248,7 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 ### Шаг 10.5 ✅ Атомарная проводка перевода в ledger — закрыт (2026-10-23)
 - **Что**: две проводки (debit/credit) при переводе ROOT; запись комиссии — в 10.4 (Stars, не начат).
 - **Файлы**: backend/app/transfer_service.py (transfer_root + transfer_root_entrypoint), ledger.
-- **Проверка**: идемпотентность по (from_player_id, request_id); лимиты из CMS (economy.transfer_min/max/daily/minimum_earned_root); daily — UTC-сутки; блокировка двух кошельков детерминированно (sorted по player_id, без deadlock); debit/credit с reference_type player_transfer_debit/player_transfer_credit; ошибка — полный откат. PG-тесты 5/5 (успех, идемпотентность, ошибки 422/404/403/409/429, daily, параллелизм без overspend) — backend/tests/test_transfer_pg_10_5.py. Коммит 8563cb1.
+- **Проверка**: идемпотентность по (from_player_id, request_id); лимиты из CMS (economy.transfer_min/max/daily/minimum_earned_root); daily — UTC-сутки; блокировка двух кошельков детерминированно (sorted по player_id, без deadlock); debit/credit с reference_type player_transfer_debit/player_transfer_credit; ошибка — полный откат. PG-тесты 8/8 (вкл. дробный transfer_fractional_half_root) — успех, идемпотентность, ошибки 422/404/403/409/429, daily, параллелизм без overspend — backend/tests/test_transfer_pg_10_5.py. Коммит 8563cb1.
 - **Зависит от**: 10.4 — в исходном плане; фактически ROOT-перевод реализован и закрыт без Stars (10.4 не требуется для перевода ROOT)
 - **Риск**: высокий
 
@@ -1459,11 +1460,11 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 - ✅ **2C-5** (bbe369d): admin PlayersSection + WithdrawalsSection.
 - ✅ **2C-6** (этот коммит): docs.
 
-**Не входит в этап 2 (отдельный спринт):**
-- **Ввод дробных ROOT** (0.5, 10.5): требует бэкенда (принимать `amount_nano`),
-  фронта (дробный ввод, валидация, `parseFloat` + `rootToNano`), тестов. Не начат.
+**Ввод дробных ROOT** — ✅ закрыт в Sprint 8.x-fractional-transfer (2026-11-11):
+backend `amount_nano` + фронт + daily/audit/earned/stats + миграция. См. раздел
+«Sprint 8.x-fractional-transfer — ✅ закрыт» в конце.
 - **Зависит от**: 11.7
-- **Статус**: ✅ этапы 1–2 закрыты; ввод дробных — ❌ долг (отдельный спринт)
+- **Статус**: ✅ этапы 1–2 закрыты; ввод дробных — ✅ закрыт (Sprint 8.x, 2026-11-11).
 - **Риск**: низкий (схема готова, старые `*_root` сохранены)
 
 > ⚠️ **Известный технический долг (2026-10-26):** требуется тестирование
@@ -1844,3 +1845,33 @@ telegram, тип string, не sensitive, default ""). CMS-first с fallback на
 - ✅ **Шаг D** (`545e127`): 4 теста CMS-first + docs
   (`api-contracts.md`, `system-settings.md`). 907 OK.
 - ✅ **Шаг E** (этот коммит): долг закрыт в audit + roadmap.
+
+## Sprint 8.x-fractional-transfer — ✅ закрыт (2026-11-11)
+
+Цель: дробный ввод ROOT (0.5, 10.5) в P2P-переводе, точные расчёты в наноROOT.
+
+Шаги:
+
+- ✅ **A1** (`d07a737`): backend принимает `amount_nano` (additive),
+  `PlayerTransfer.amount_nano` заполняется.
+- ✅ **B** (`87ed0a5`): фронт TransferScreen — дробный ввод (`,` и `.`),
+  `rootToNano`, `amount_nano`, показ `*Nano`.
+- ✅ **A2-1** (`ee05898`): daily-лимит по `PlayerTransfer.amount_nano`.
+- ✅ **A2-2b** (`3559e83`): audit балансов по `amount_nano` (ложные mismatch исчезли).
+- ✅ **A2-3a/3b** (`b21aab3`/`3487500`): stats профиля —
+  `totalRootEarnedNano`/`totalRootSpentNano`.
+- ✅ **A2-4** (`31a488f`): earned-порог по `amount_nano` (transfer + referral, зеркало).
+- ✅ **A2-4b** (`165fd76`): `CAST(amount AS BIGINT)` в fallback-SUM (латентный
+  int4-overflow PG).
+- ✅ **A2-5a** (`99e5778`): миграция `f06ca2ff1b61` — `amount >= 0` (было `> 0`).
+- ✅ **A2-5b** (`a29f1dd`): честный floor `amount = amount_nano // 10^8`,
+  `amountNano` в payload события.
+- ✅ **A2-5c** (`3c5c5df`): PG-тест дробного перевода 0.5 ROOT.
+
+Тесты: 933/933 OK (полный suite). PG: локальный PostgreSQL в Ubuntu (5433,
+`chimera_test`), Docker `root-pg` не используется.
+
+Операционное: для дробей < 1 ROOT в проде выставить
+`economy.transfer_min_amount = 0` в админке (default 1 блокирует).
+
+Остаток: цены входа миссий (Sprint C) — отдельное архитектурное решение.

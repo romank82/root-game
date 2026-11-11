@@ -89,6 +89,8 @@ Detailed contracts: `docs/mission-run-contract.md`,
 3. Earned ROOT считается только по подтверждённым наградам миссий
    (`reference_type = "mission_reward"`): переводы, покупки в магазине,
    админ-корректировки и сам реферальный бонус в зачёт не идут.
+   Earned ROOT считается в наноROOT по точной сумме; сравнение с порогом —
+   в наноROOT.
 4. Один приглашённый B даёт ровно одну награду — `UniqueConstraint` на
    `ReferralReward.referred_player_id` плюс доменный статус
    `pending → credited`; повторное начисление невозможно. Статус
@@ -108,3 +110,25 @@ Detailed contracts: `docs/mission-run-contract.md`,
 Расчёт и состояние: `app/referral_service.py`; начисление инициируется из
 награды миссии (`mission_engine._award_mission_rewards`, SAVEPOINT), то есть
 реферальный бонус не имеет отдельного «ручного» пути выдачи.
+
+## Переводы ROOT между игроками
+
+**Идемпотентность**: `request_id` уникален в паре `(from_player_id, request_id)`;
+повторный запрос возвращает сохранённый результат без второго списания.
+
+**Лимиты** (CMS, целые ROOT): `economy.transfer_min_amount` (default 1; для дробей
+< 1 ROOT — 0), `economy.transfer_max_amount` (10000), `economy.daily_transfer_limit`
+(50000 ROOT за UTC-сутки; считается по точной nano-сумме).
+
+**Порог earned**: переводить может игрок, заработавший
+`>= economy.transfer_minimum_earned_root` (50 ROOT) только наградами миссий
+(`mission_reward`); реферальный бонус, покупки, админ-корректировки не в зачёт.
+
+**Дробные суммы**: шаг 1 наноROOT (0.00000001 ROOT); legacy-поле `amount` — floor,
+для сумм < 1 ROOT = 0 (точная сумма в `amount_nano`). Для дробей < 1 ROOT
+администратор выставляет `economy.transfer_min_amount = 0`.
+
+**Комиссия**: газ (`GasWallet`) — `economy.gas_fee_percent` % от суммы; при
+недостатке газа — 402, откат.
+
+**Ограничения**: `blocked` / `suspended` / `transfer_restricted` — 403.
