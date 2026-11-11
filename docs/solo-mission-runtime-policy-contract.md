@@ -9,11 +9,38 @@ system-settings и API contracts.
 Включено: прямой атомарный start solo run, выдача cipher attempt,
 server-side submit/resolve, settlement успеха/неуспеха/таймаута,
 награды ROOT и предметами.
-Не включено: team sessions, geo/location proof, AR/QR, reservations,
+Не включено: team sessions, AR/QR, reservations,
 fallback offers/purchases, entitlement creation, TON, Stars, transfers,
 withdrawals и story_node reward через runtime settlement.
 Legacy POST /api/v1/engine/missions/{mission_id}/submit остаётся отдельным
 совместимым API и не использует новый executor для ledger-операций.
+
+### Geo / location proof (вторая версия, Sprint 8.5)
+
+**Статус:** включено с Sprint 8.5, но **только по CMS-политике** (по умолчанию
+ВЫКЛЮЧЕНО: старые миссии и старые клиенты работают как раньше).
+
+**Что разрешено:**
+- Отдельный роут `POST /api/v1/engine/missions/{id}/location-proof` (принимает
+  `latitude`, `longitude`, `accuracy_meters`; возвращает `{missionId, zoneId,
+  verified, expiresAt}`).
+- Сервер создаёт `LocationProof` (проекция: `provider`, `status`, `zone_id`,
+  `issued_at`, `expires_at`) — **без** сырых координат.
+- Проверка: `is_inside_zone` (по `GeoZone`), `accuracy <= GeoZone.max_location_accuracy_meters`
+  (если поле задано), срок годности — `geo.solo.proof_freshness_seconds` (CMS,
+  default 60).
+- Гейт: если для миссии включена CMS-политика `geo.solo_proof_mode = enforce`
+  (или аналог) — без свежего verified proof награда не выдаётся; если `off` —
+  миссия работает как раньше.
+
+**Что запрещено (как и раньше):**
+- Сырые координаты (`latitude`/`longitude`) в `PlayerMission.progress`, snapshot,
+  `PlayerEvent.payload_json`, `admin_audit_log`, логах.
+- Влияние geo-проверки на `submit_mission` / `process_qr_scan` **напрямую**
+  (только через отдельный роут + CMS-политику).
+- Блокировка старого клиента (без proof) при `geo.solo_proof_mode = off`.
+
+**Snapshot:** по-прежнему **не содержит** raw coordinates (см. раздел Snapshot).
 
 ## Lifecycle MissionRuntimePolicy
 Policy разрешена только для Mission с mission_type=solo.
@@ -76,6 +103,8 @@ Snapshot включает policy ID/version, entry requirements, attempt/deadlin
 repeatability, challenge, reward policy и разрешившее start feature decision.
 Snapshot не содержит initData, tokens, cookies, client answers, audit metadata,
 raw coordinates или другие private данные.
+Geo-проекция (`LocationProof`) в snapshot не попадает — только `status`/`zone_id`
+в ответе роута, не в snapshot.
 Изменения CMS или System Settings после старта не меняют уже созданный run.
 
 ## Runtime lifecycle
