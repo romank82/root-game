@@ -28,6 +28,7 @@ from app.admin_players import (
     AGE_MAX,
     AGE_MIN,
     MISSION_HISTORY_LIMIT,
+    NANO_PER_ROOT,
     PROFILE_FIELDS,
     VALID_GENDERS,
     _get_player_or_404,
@@ -174,7 +175,8 @@ class FakeSession:
 
     def __init__(self, *, player=None, wallet=None, inventory=(), active=(),
                  history=(), restrictions=(), transactions=(),
-                 completed_count=0, earned=0, spent=0):
+                 completed_count=0, earned=0, spent=0,
+                 earned_nano=None, spent_nano=None):
         self._player = player
         self._wallet = wallet
         self._inventory = list(inventory)
@@ -185,6 +187,15 @@ class FakeSession:
         self._completed_count = completed_count
         self._earned = earned
         self._spent = spent
+        # Sprint 8.x-fractional-transfer: nano-значения для nano-SUM — отдельные
+        # от legacy (различаются, чтобы тест ловил путаницу). По умолчанию —
+        # legacy * 10^8, как fallback в проде.
+        self._earned_nano = (
+            earned_nano if earned_nano is not None else earned * NANO_PER_ROOT
+        )
+        self._spent_nano = (
+            spent_nano if spent_nano is not None else spent * NANO_PER_ROOT
+        )
         self.executed = []
 
     def get(self, model, player_id):  # noqa: ARG002
@@ -216,6 +227,10 @@ class FakeSession:
         text = _literal_sql(statement)
         if "wallets" in text:
             return self._wallet
+        # Sprint 8.x-fractional-transfer: nano-SUM содержит amount_nano
+        # (legacy — только amount), поэтому различаем по подстроке.
+        if "amount_nano" in text:
+            return self._earned_nano if "credit" in text else self._spent_nano
         if "coalesce" in text:
             return self._earned if "credit" in text else self._spent
         return self._completed_count
@@ -283,6 +298,9 @@ class AdminPlayerCardTests(unittest.TestCase):
         self.assertEqual(card["recentTransactions"], [])
         self.assertEqual(card["stats"]["totalRootEarned"], 0)
         self.assertEqual(card["stats"]["totalRootSpent"], 0)
+        # Sprint 8.x-fractional-transfer: nano-поля в else-ветке = 0.
+        self.assertEqual(card["stats"]["totalRootEarnedNano"], 0)
+        self.assertEqual(card["stats"]["totalRootSpentNano"], 0)
         self.assertEqual(card["stats"]["totalMissionsCompleted"], 2)
 
     def test_card_inventory_joins_item_details(self):
@@ -349,6 +367,10 @@ class AdminPlayerCardTests(unittest.TestCase):
             completed_count=7,
             earned=5050,
             spent=1234,
+            # Sprint 8.x-fractional-transfer: nano-значения отдельно от legacy —
+            # это ловит путаницу legacy/nano в fake-session.
+            earned_nano=5050 * NANO_PER_ROOT,
+            spent_nano=1234 * NANO_PER_ROOT,
         )
         card = _serialize_player_card(fake, fake._player)
         self.assertEqual(
@@ -357,6 +379,8 @@ class AdminPlayerCardTests(unittest.TestCase):
                 "totalMissionsCompleted": 7,
                 "totalRootEarned": 5050,
                 "totalRootSpent": 1234,
+                "totalRootEarnedNano": 5050 * NANO_PER_ROOT,
+                "totalRootSpentNano": 1234 * NANO_PER_ROOT,
             },
         )
 
