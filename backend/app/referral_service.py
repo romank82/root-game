@@ -35,7 +35,7 @@ CMS-first: включённость программы (``referral.enabled``), �
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import BigInteger, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.mission_engine import (
@@ -157,12 +157,14 @@ def _read_string_setting(session: Session, key: str, fallback: str = "") -> str:
     return fallback
 
 
-def _earned_root(session: Session, player_id: str) -> int:
-    """Заработанный ROOT: сумма credit-проводок типа mission_reward.
+def _earned_nano(session: Session, player_id: str) -> int:
+    """Заработанный ROOT в наноROOT: сумма credit-проводок типа mission_reward.
 
     Полное зеркало условия ``transfer_service.transfer_root`` (шаг 4), поэтому
     «порог для переводов» и «порог для реферальной награды» — одно и то же
-    событие для игрока.
+    событие для игрока. Sprint 8.x-fractional-transfer (A2-4): точная сумма —
+    по ``amount_nano``; для старых строк (``amount_nano IS NULL``) — fallback
+    ``amount * 10^8`` внутри coalesce.
     """
     wallet_id = session.scalar(
         select(Wallet.id).where(
@@ -174,7 +176,21 @@ def _earned_root(session: Session, player_id: str) -> int:
         return 0
 
     return session.scalar(
-        select(func.coalesce(func.sum(WalletTransaction.amount), 0)).where(
+        select(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(
+                        WalletTransaction.amount_nano,
+                        # CAST в BIGINT: в PG amount — INTEGER, и
+                        # amount * 10^8 переполняет int4 (legacy-строки
+                        # с amount_nano IS NULL реально считают fallback).
+                        cast(WalletTransaction.amount, BigInteger)
+                        * NANO_PER_ROOT,
+                    )
+                ),
+                0,
+            )
+        ).where(
             WalletTransaction.wallet_id == wallet_id,
             WalletTransaction.transaction_type == "credit",
             WalletTransaction.reference_type == MISSION_REWARD_REFERENCE_TYPE,
@@ -289,7 +305,8 @@ def check_and_reward(
     threshold = _read_int_setting(
         session, EARNED_THRESHOLD_KEY, DEFAULT_EARNED_THRESHOLD
     )
-    if _earned_root(session, player_id) < threshold:
+    # Порог из CMS — целые ROOT; сравнение — в наноROOT (Sprint 8.x, A2-4).
+    if _earned_nano(session, player_id) < threshold * NANO_PER_ROOT:
         return None
 
     wallet = _get_root_wallet_for_update(session, reward.referrer_player_id)

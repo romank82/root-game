@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import BigInteger, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.admin_player_wallet import ACTIVE_SETTING_STATUS
@@ -239,17 +239,35 @@ def transfer_root(
         raise MissionEngineError(422, f"Сумма больше максимальной ({limits['max']}).")
 
     # 4. Порог заработанного ROOT: только подтверждённые mission_reward-кредиты.
+    # Sprint 8.x-fractional-transfer (A2-4): сумма считается в наноROOT по
+    # точной amount_nano; для старых строк (amount_nano IS NULL) — legacy
+    # amount * 10^8 внутри coalesce, чтобы NULL-строки не выпадали из суммы.
     from_wallet_id = _wallet_id_or_none(session, from_player_id)
-    earned = 0
+    earned_nano = 0
     if from_wallet_id is not None:
-        earned = session.scalar(
-            select(func.coalesce(func.sum(WalletTransaction.amount), 0)).where(
+        earned_nano = session.scalar(
+            select(
+                func.coalesce(
+                    func.sum(
+                        func.coalesce(
+                            WalletTransaction.amount_nano,
+                            # CAST в BIGINT: в PG amount — INTEGER, и
+                            # amount * 10^8 переполняет int4 (legacy-строки
+                            # с amount_nano IS NULL реально считают fallback).
+                            cast(WalletTransaction.amount, BigInteger)
+                            * NANO_PER_ROOT,
+                        )
+                    ),
+                    0,
+                )
+            ).where(
                 WalletTransaction.wallet_id == from_wallet_id,
                 WalletTransaction.transaction_type == "credit",
                 WalletTransaction.reference_type == MISSION_REWARD_REFERENCE_TYPE,
             )
         ) or 0
-    if earned < limits["earned"]:
+    # Порог из CMS — целые ROOT; сравнение — в наноROOT.
+    if earned_nano < limits["earned"] * NANO_PER_ROOT:
         raise MissionEngineError(
             403,
             f"Нужно заработать минимум {limits['earned']} ROOT в игре для переводов.",
