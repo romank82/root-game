@@ -466,6 +466,93 @@ class SoloLocationProofTests(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, progress)
 
+    def _set_valid_answer(self, mission_id: str) -> None:
+        from app.models import Mission
+
+        with self.SessionLocal.begin() as session:
+            mission = session.get(Mission, mission_id)
+            mission.validation_config = {
+                "validator": "normalized_text_match",
+                "acceptedAnswers": ["answer"],
+            }
+
+    # ---- 8.5-2b: гейт geo.solo_proof_mode в submit_mission ----------------
+    def test_enforce_mode_requires_fresh_proof(self) -> None:
+        from app.models import SystemSetting
+
+        def write_mode(value: str, status: str = "active") -> None:
+            with self.SessionLocal.begin() as session:
+                row = session.get(SystemSetting, "geo.solo_proof_mode")
+                if row is None:
+                    session.add(
+                        SystemSetting(
+                            key="geo.solo_proof_mode",
+                            value_json=value,
+                            value_type="string",
+                            category="geo",
+                            title="Гейт solo location-proof",
+                            description=(
+                                "Sprint 8.5: solo location-proof gate (off|enforce)."
+                            ),
+                            is_sensitive=False,
+                            status=status,
+                        )
+                    )
+                else:
+                    row.value_json = value
+                    row.status = status
+
+        # (1) нет записи -> default off -> гейт не мешает (accepted=True).
+        ids = self._fixture()
+        self._set_valid_answer(ids["mission"])
+        result = self.mission_engine.submit_mission(
+            ids["player"], ids["mission"], "answer", None,
+        )
+        self.assertTrue(result["accepted"])
+        self.assertEqual(self._proof_count(ids["player"]), 0)
+
+        # (2) enforce + нет свежего proof -> 409, proof не создаётся.
+        write_mode("enforce")
+        ids = self._fixture()
+        self._set_valid_answer(ids["mission"])
+        with self.assertRaises(MissionEngineError) as captured:
+            self.mission_engine.submit_mission(
+                ids["player"], ids["mission"], "answer", None,
+            )
+        self.assertEqual(captured.exception.status_code, 409)
+        self.assertEqual(
+            captured.exception.detail,
+            "Подтвердите присутствие в локации (location proof).",
+        )
+        self.assertEqual(self._proof_count(ids["player"]), 0)
+
+        # (3) enforce + свежий verified proof (по slug) -> гейт проходит.
+        self._call(ids)
+        result = self.mission_engine.submit_mission(
+            ids["player"], ids["mission"], "answer", None,
+        )
+        self.assertTrue(result["accepted"])
+
+        # (4) off явно -> гейт не включается.
+        write_mode("off")
+        ids = self._fixture()
+        self._set_valid_answer(ids["mission"])
+        result = self.mission_engine.submit_mission(
+            ids["player"], ids["mission"], "answer", None,
+        )
+        self.assertTrue(result["accepted"])
+
+        # (5) статус не active -> гейт не включается (хелпер).
+        write_mode("enforce", status="archived")
+        with self.SessionLocal() as session:
+            self.assertFalse(self.mission_engine._solo_proof_mode_enforced(session))
+
+        # cleanup: удалить строку, чтобы не влиять на следующие тесты класса.
+        with self.SessionLocal.begin() as session:
+            row = session.get(SystemSetting, "geo.solo_proof_mode")
+            if row is not None:
+                session.delete(row)
+
 
 if __name__ == "__main__":
     unittest.main()

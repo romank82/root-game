@@ -39,6 +39,7 @@ from app.models import (
     PlayerMission,
     Segment,
     StoryNode,
+    SystemSetting,
     TeamSession,
     TeamSessionMember,
     Wallet,
@@ -48,6 +49,11 @@ from app.models import (
 from app.minigame_handlers import CIPHER_ALPHABET, get_handler
 
 ROOT_CURRENCY = "ROOT"
+
+# Sprint 8.5-2b: статус активной SystemSetting. Зеркало
+# referral_service.ACTIVE_SETTING_STATUS — админ-модуль в игровой путь не
+# импортируем (тянет FastAPI-роутеры и approvals).
+ACTIVE_SETTING_STATUS = "active"
 
 logger = logging.getLogger(__name__)
 
@@ -1727,6 +1733,18 @@ def _resolve_minigame_settings(session: Session, mission: Mission) -> dict:
     return dict((mission.content or {}).get("ui", {}))
 
 
+def _solo_proof_mode_enforced(session: Session) -> bool:
+    """Sprint 8.5-2b: включён ли гейт CMS ``geo.solo_proof_mode=enforce``.
+
+    Нет записи / статус не active / значение не ``enforce`` -> False
+    (default off: старые клиенты и тесты без ключа не затрагиваются).
+    """
+    setting = session.get(SystemSetting, "geo.solo_proof_mode")
+    if setting is None or setting.status != ACTIVE_SETTING_STATUS:
+        return False
+    return setting.value_json == "enforce"
+
+
 def _submit_mission_once(
     player_id: str,
     mission_id: str,
@@ -1752,6 +1770,26 @@ def _submit_mission_once(
                 409,
                 "Team Mission требует отдельного geo/team runtime API.",
             )
+
+        # Sprint 8.5-2b: solo location-proof gate (CMS geo.solo_proof_mode).
+        # Default off — старые клиенты и тесты без ключа не затрагиваются.
+        # getattr: unit-тесты движка используют SimpleNamespace-фейки миссий.
+        if _solo_proof_mode_enforced(session) and getattr(
+            mission, "geo_zone_id", None
+        ) is not None:
+            from app.geo_location_proof import has_fresh_verified_proof
+
+            gate_zone = session.get(GeoZone, mission.geo_zone_id)
+            if gate_zone is not None and gate_zone.slug:
+                if not has_fresh_verified_proof(
+                    session,
+                    player_id=player_id,
+                    zone_id=gate_zone.slug,
+                ):
+                    raise MissionEngineError(
+                        409,
+                        "Подтвердите присутствие в локации (location proof).",
+                    )
 
         # Sprint 8.x-attempt-deadline-fix: снимок ДО sync. Sync авто-истекает
         # просроченную попытку (строки 326-365) и мутирует этот же объект

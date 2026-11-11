@@ -362,6 +362,18 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         ),
         is_sensitive=False,
     ),
+    # Sprint 8.5-2b: гейт solo location-proof в submit_mission.
+    # default "off" — старые клиенты и тесты без ключа не затрагиваются.
+    # "enforce" + нет свежего verified LocationProof по zone.slug -> 409.
+    "geo.solo_proof_mode": SystemSettingDefinition(
+        key="geo.solo_proof_mode",
+        value_type="string",
+        default_value="off",
+        category="geo",
+        title="Гейт solo location-proof",
+        description="Sprint 8.5: solo location-proof gate (off|enforce).",
+        is_sensitive=False,
+    ),
 }
 
 
@@ -388,6 +400,8 @@ def validate_value(definition: SystemSettingDefinition, value: Any) -> None:
     if definition.value_type == "string":
         if not isinstance(value, str):
             raise ValueError("Значение должно быть строкой.")
+        if definition.key == "geo.solo_proof_mode" and value not in ("off", "enforce"):
+            raise ValueError("geo.solo_proof_mode должен быть 'off' или 'enforce'.")
         return
 
     if definition.key == "missions.default_attempt_reward_multipliers":
@@ -437,13 +451,22 @@ def validate_catalog_values(values_by_key: dict[str, Any]) -> None:
     The caller must supply the effective values of the whole active catalog,
     with a proposed value substituted before calling this function.
     """
-    for key, definition in SYSTEM_SETTING_CATALOG.items():
-        if key not in values_by_key:
-            raise ValueError(f"Отсутствует системная настройка: {key}.")
-        validate_value(definition, values_by_key[key])
+    # Sprint 8.5-2b: новый ключ может ещё не быть засиден в БД (seed-миграция
+    # приходит отдельным шагом 8.5-5). Для отсутствующих ключей подставляем
+    # default каталога, чтобы PUT уже существующих настроек не падал с
+    # «Отсутствует системная настройка: geo.solo_proof_mode.». Строгий
+    # инвариант «все ключи каталога есть в БД» восстанавливает seed-миграция.
+    effective = {
+        key: definition.default_value
+        for key, definition in SYSTEM_SETTING_CATALOG.items()
+    }
+    effective.update(values_by_key)
 
-    attempts = values_by_key["missions.default_max_attempts"]
-    multipliers = values_by_key["missions.default_attempt_reward_multipliers"]
+    for key, definition in SYSTEM_SETTING_CATALOG.items():
+        validate_value(definition, effective[key])
+
+    attempts = effective["missions.default_max_attempts"]
+    multipliers = effective["missions.default_attempt_reward_multipliers"]
     if len(multipliers) != attempts:
         raise ValueError(
             "Число множителей должно совпадать с missions.default_max_attempts."
