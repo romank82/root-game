@@ -192,7 +192,7 @@ export function CascadeSection({
         </div>
 
         <div style={columnStyle}>
-          <h3>Сегменты</h3>
+          <h3>Части</h3>
           {selectedChapterId === null ? (
             <p className="admin-muted">Выберите главу</p>
           ) : (
@@ -224,7 +224,7 @@ export function CascadeSection({
                 {!loadingSegments &&
                   segments.length === 0 &&
                   !segmentsError && (
-                    <p className="admin-muted">В этой главе сегментов нет.</p>
+                    <p className="admin-muted">В этой главе частей нет.</p>
                   )}
               </div>
             </>
@@ -232,11 +232,11 @@ export function CascadeSection({
         </div>
 
         <div style={columnStyle}>
-          <h3>Миссии сегмента</h3>
+          <h3>Миссии части</h3>
           {selectedSegment === null ? (
-            <p className="admin-muted">Выберите сегмент</p>
+            <p className="admin-muted">Выберите часть</p>
           ) : selectedSegment.linkedMissions.length === 0 ? (
-            <p className="admin-muted">В сегменте нет миссий</p>
+            <p className="admin-muted">В части нет миссий</p>
           ) : (
             <div className="admin-mission-list">
               {selectedSegment.linkedMissions.map((link) => {

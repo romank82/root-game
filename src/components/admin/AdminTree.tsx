@@ -307,7 +307,7 @@ export function AdminTree({
     season: 'Сезон',
     chapter: 'Глава',
     storyNode: 'Story Node',
-    segment: 'Сегмент',
+    segment: 'Часть',
     mission: 'Миссия',
   }
 
@@ -643,7 +643,7 @@ export function AdminTree({
                       <button
                         type="button"
                         className="admin-secondary"
-                        title="Создать миссию на уровне сезона (без сегмента, главу выбрать в форме)"
+                        title="Создать миссию на уровне сезона (без части, главу выбрать в форме)"
                         onClick={() =>
                           startCreate('mission', season.id, 'season')
                         }
@@ -707,12 +707,12 @@ export function AdminTree({
                               <button
                                 type="button"
                                 className="admin-secondary"
-                                title="Создать сегмент в главе"
+                                title="Создать часть в главе"
                                 onClick={() =>
                                   startCreate('segment', chapter.id)
                                 }
                               >
-                                + Сегм
+                                + Часть
                               </button>
                               <button
                                 type="button"
@@ -727,7 +727,7 @@ export function AdminTree({
                               <button
                                 type="button"
                                 className="admin-secondary"
-                                title="Создать миссию на уровне главы (без сегмента)"
+                                title="Создать миссию на уровне главы (без части)"
                                 onClick={() =>
                                   startCreate('mission', chapter.id, 'chapter')
                                 }
@@ -779,12 +779,12 @@ export function AdminTree({
                               ))}
 
                               <li>
-                                <p className="admin-muted">Сегменты</p>
+                                <p className="admin-muted">Части</p>
                               </li>
                               {chapterSegments.length === 0 && (
                                 <li>
                                   <p className="admin-muted">
-                                    Сегментов в главе нет.
+                                    Частей в главе нет.
                                   </p>
                                 </li>
                               )}
@@ -827,7 +827,7 @@ export function AdminTree({
                                         type="button"
                                         className="admin-secondary"
                                         style={{ flexShrink: 0 }}
-                                        title="Создать миссию в сегменте"
+                                        title="Создать миссию в части"
                                         onClick={() =>
                                           startCreate('mission', segment.id)
                                         }
@@ -842,7 +842,7 @@ export function AdminTree({
                                         {segmentMissions.length === 0 && (
                                           <li>
                                             <p className="admin-muted">
-                                              В сегменте нет миссий.
+                                              В части нет миссий.
                                             </p>
                                           </li>
                                         )}
