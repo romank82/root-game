@@ -49,7 +49,7 @@
     "blocked": "AR SEARCH BLOCKED",
     "sessionInitialized": "AR SCANNING STARTED",
     "faceLocked": "FACE LOCKED",
-    "aimTitle": "Aim at the Segment face",
+    "aimTitle": "Aim at the Part face",
     "aimBody": "Lock the face of the virtual cube.",
     "lockFace": "LOCK FACE",
     "syncedTitle": "Face synchronized",
@@ -59,15 +59,15 @@
     "qrRevealedBody": "Open the code structure check. Result and rewards are confirmed by the server.",
     "extractData": "EXTRACT DATA →",
     "successLabel": "PACKAGE RESTORED",
-    "successTitle": "SEGMENT STABILIZED",
+    "successTitle": "PART STABILIZED",
     "successBody": "Progress and rewards confirmed by the server.",
     "receivedLabel": "RECEIVED",
     "noAwards": "Progress confirmed by the server."
   },
   "errors": {
-    "cmsUnavailableEyebrow": "SCANNER / CMS SEGMENT UNAVAILABLE",
+    "cmsUnavailableEyebrow": "SCANNER / CMS PART UNAVAILABLE",
     "noScanPointTitle": "NO AVAILABLE SCAN POINT",
-    "noScanPointBody": "Published Segment was not received from the game bootstrap or contains invalid public content."
+    "noScanPointBody": "Published Part was not received from the game bootstrap or contains invalid public content."
   },
   "echo": {
     "title": "ECHOLOCATION · COURSE UP",

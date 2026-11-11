@@ -49,7 +49,7 @@
     "blocked": "AR 搜索被阻止",
     "sessionInitialized": "AR 扫描已启动",
     "faceLocked": "面已锁定",
-    "aimTitle": "瞄准 Segment 面",
+    "aimTitle": "瞄准 Part 面",
     "aimBody": "锁定虚拟立方体的面。",
     "lockFace": "锁定面",
     "syncedTitle": "面已同步",
@@ -67,7 +67,7 @@
   "errors": {
     "cmsUnavailableEyebrow": "扫描器 / CMS 段不可用",
     "noScanPointTitle": "没有可用的扫描点",
-    "noScanPointBody": "已发布的 Segment 尚未从游戏引导中接收，或者包含无效的公共内容。"
+    "noScanPointBody": "已发布的 Part 尚未从游戏引导中接收，或者包含无效的公共内容。"
   },
   "echo": {
     "title": "回声定位 · 航向向上",
