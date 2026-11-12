@@ -140,3 +140,26 @@ Solo-миссии могут требовать подтверждение пр�
 Гейт включается CMS-ключом `geo.solo_proof_mode=enforce` (по умолчанию off).
 Без свежего verified proof при enforce — сдача миссии отклоняется (409).
 
+## Античит (Sprint 8.9)
+
+Серверные сигналы подозрительного поведения при подтверждении присутствия:
+
+* **Velocity (телепорт)**: скорость между точкой spawn (сгенерированной при
+  accept) и текущим proof-положением. Если скорость выше порога
+  `geo.anticheat_max_speed_kmh` (default 120 км/ч) при интервале не менее
+  `geo.anticheat_min_elapsed_seconds` (default 5 с) — velocity-сигнал.
+* **Accuracy (идеальный GPS)**: если точность геолокации не выше
+  `geo.anticheat_accuracy_min_meters` (default 3 м) — accuracy-сигнал.
+
+Режим задаётся CMS-ключом `geo.anticheat_mode`:
+* `off` — сигналы не записываются.
+* `flag` (по умолчанию) — сигналы пишутся в PlayerEvent + immutable
+  AdminAuditLog + progress["anticheat"]["status"]="review", без блокировки
+  игрока.
+* `enforce` — mark-only (review-статус, без изменения verified/submit);
+  отдельный шаг.
+
+Все пороги управляются через CMS (каталог `geo.anticheat_*` в system settings);
+границы значений гарантирует каталог. Сырые координаты в сигналы не попадают —
+только производные числа (speedKmh, distanceKm, elapsedSeconds, thresholdKmh,
+accuracyMeters, thresholdMeters) и идентификаторы.

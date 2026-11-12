@@ -8,7 +8,11 @@ Super-admin имеет все permissions напрямую. Обычный admin
 `admins.read`, `admins.manage`, `admin_permissions.manage`,
 `admin_approvals.read`, `admin_approvals.review`, `audit.read`,
 `missions.read`, `missions.manage`, `segments.read`, `segments.manage`,
-`players.read`, `players.manage`, `players.restrict`, `players.block`.
+`players.read`, `players.manage`, `players.restrict`, `players.block`,
+`geo_zones.read`, `geo_zones.manage`, `geo_audit.read`, `geo_audit.manage`.
+
+`geo_audit.read` — просмотр флагов античита и истории review.
+`geo_audit.manage` — снятие или подтверждение флагов античита (anticheat.review).
 
 `players.manage` — игрок-ориентированные ручные операции, требующие админ-вмешательства:
 кошелёк (5.4, `player.wallet_credit/debit`), инвентарь (5.5,

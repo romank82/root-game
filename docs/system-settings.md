@@ -54,6 +54,10 @@ TON credentials и иные секретные значения в system settin
 | `features.demo_seed_enabled` | boolean | false | yes |
 | `features.demo_reset_enabled` | boolean | false | yes |
 | `geo.solo_proof_mode` | string | "off" | no |
+| `geo.anticheat_mode` | string | `"flag"` | no |
+| `geo.anticheat_max_speed_kmh` | integer | 120 | no |
+| `geo.anticheat_min_elapsed_seconds` | integer | 5 | no |
+| `geo.anticheat_accuracy_min_meters` | integer | 3 | no |
 
 Значения limits и economy не могут быть отрицательными. `default_max_attempts`
 должен быть от 1 до 10. Массив multipliers должен содержать ровно
@@ -89,6 +93,18 @@ approval workflow. Значение попадает в `ReferralReward.amount_r
 Ключ не sensitive (username публичен — он виден в самой ссылке), менять
 может любой админ с правом `system_settings.manage`. Пустое значение =
 fallback на env (текущее поведение до CMS).
+
+### Античит (Sprint 8.9)
+
+`geo.anticheat_mode` — режим античита: `off` (не писать сигналы), `flag`
+(писать PlayerEvent + AdminAuditLog + review-статус, без блокировки),
+`enforce` (mark-only, отдельный шаг). По умолчанию `flag`.
+
+Три целочисленных порога: `geo.anticheat_max_speed_kmh` (скорость
+spawn→proof выше порога даёт velocity-сигнал), `geo.anticheat_min_elapsed_seconds`
+(меньший интервал не проверяется), `geo.anticheat_accuracy_min_meters`
+(accuracy не выше порога считается подозрительно идеальной). Границы значений
+гарантирует каталог.
 
 ## Permissions и API
 - `system_settings.read`: чтение каталога и значений;

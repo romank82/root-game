@@ -20,7 +20,7 @@
 | 5. Карточка игрока, ручные операции | ✅ готов | 5.1–5.7; 5.6.d осознанно не делаем | — |
 | 6. Команды, приглашения, состав, чат | ⚠️ в работе | 6.1–6.6, 6.7.a | 6.6-c, 6.7.b (не начаты) |
 | 7. Командные задания и совместная геоактивация | ⚠️ в работе | 7.1 ✅ (API), 7.2 ✅ (запрет выхода) | проверка на 2 реальных телефонах — главный долг 8.x |
-| 8. Гео-AR пайплайн | ⚠️ в работе | 8.6, 8.13–8.20, 8.21–8.24, 8.26, 8.25.1, 8.23.1, 8.23.3–8.23.5 | 8.23.2 (кастомный dropdown), 8.25 (связь 1:1), 8.9/8.10 (⏳); 8.5 ✅ (2026-11-12) |
+| 8. Гео-AR пайплайн | ⚠️ в работе | 8.6, 8.13–8.20, 8.21–8.24, 8.26, 8.25.1, 8.23.1, 8.23.3–8.23.5 | 8.23.2 (кастомный dropdown), 8.25 (связь 1:1), 8.9 ✅ (2026-11-12); 8.10 (⏳) |
 | 9. Экономика ROOT и ledger | ✅ закрыт (2026-10-23) | 9.1–9.3 | — |
 | 10. Переводы ROOT и комиссия Stars | ✅ код закрыт | 10.0.x–10.6 (10.3/10.6 частично) | долг 10.4-fix (ждёт постоянного сервера) |
 | 11. Вывод ROOT в TON | ✅ код закрыт | 11.1–11.7-b, 11.8-этапы 1–2 ✅ | ждёт testnet + постоянный сервер; 11.8: этап 1 ✅, этап 2 ✅ (ввод дробных — отдельно) |
@@ -647,8 +647,8 @@
 - **Client UI:** QR-scanner через камеру (getUserMedia или встроенный API).
 - **Проверка:** после скана запускается мини-игра (text_answer / code_repair / cipher / team).
 
-### Спринт 8.9. Античит — вертикальный срез ⏳
-- **Статус**: ⏳ не начат.
+### Спринт 8.9. Античит — вертикальный срез ✅
+- **Статус**: ✅ закрыт (2026-11-12). См. раздел «Sprint 8.9 — ✅ закрыт» в конце файла.
 - **Backend:** проверка velocity между spawn и scan; anomalies detection (телепорт, идеальная accuracy); флаги в admin_audit_log; при подозрении — миссия помечается в review.
 - **Admin UI:** раздел «Гео-аудит» с флагами.
 - **Проверка:** имитация подмены GPS даёт флаг.
@@ -1908,3 +1908,50 @@ telegram, тип string, не sensitive, default ""). CMS-first с fallback на
 **Остаток:** античит по velocity/teleport (Sprint 8.9), Segment→Part (8.10 — ✅
 закрыт ранее), AR (вне Telegram Web).
 
+## Sprint 8.9 — ✅ закрыт (2026-11-12)
+
+**Цель:** Серверный античит solo location-proof: velocity (спаун → proof
+быстрее порога), accuracy (аномально «идеальный» GPS), CMS-пороги, админ-раздел
+«Гео-аудит», permissions `geo_audit.*`.
+
+**Шаги:**
+- ✅ **8.9.a** (`235dbda`): чистые функции `geo_anticheat` (evaluate_velocity,
+  evaluate_accuracy, build_signal_payload), константы-пороги, unit-тесты (8 шт.).
+- ✅ **8.9.b** (`eee27c7`): wiring velocity/accuracy в
+  `_submit_solo_location_proof` — PlayerEvent + AdminAuditLog + progress-review.
+- ✅ **8.9.c-1** (`43770ed`): admin geo-audit: GET флагов / GET детали /
+  POST review (PlayerEvent + AdminAuditLog + progress["anticheat"]).
+- ✅ **8.9.c-2** (`32a77d8`): тесты admin geo-audit (23 шт., включая
+  permission-гейты).
+- ✅ **8.9.c-3** (`bde0c80`): админ-UI «Гео-аудит» (GeoAuditSection).
+- ✅ **8.9.d**: integration-тест «accept → spawn → proof → anticheat flag»
+  (`test_anticheat_integration.py`, 3 теста).
+- ✅ **8.9.e-1** (`d4e7a1c93b52`): seed-миграция 4 ключей
+  `geo.anticheat_mode`/`max_speed_kmh`/`min_elapsed_seconds`/`accuracy_min_meters`
+  (append-only, select-then-insert).
+- ✅ **8.9.e-2**: каталог `system_settings_catalog.py` (4 ключа,
+  `validate_value` enum+bounds).
+- ✅ **8.9.e-3**: keyword-only пороги в `evaluate_velocity`/`evaluate_accuracy`
+  (дефолты = константы, CMS-переопределение через параметры).
+- ✅ **8.9.e-4**: CMS-чтение в `_submit_solo_location_proof` (хелпер
+  `_anticheat_settings`, один SELECT IN, fallback active → default каталога →
+  константа); переписан `test_mode_off_writes_nothing` (DB-запись вместо патча
+  константы).
+- ✅ **8.9.e-5** (`e6b4a7c9d2f1`): permissions-миграция `geo_audit.read` /
+  `geo_audit.manage` (category="geo", select-then-insert).
+- ✅ **8.9.e-6**: замена констант `GEO_AUDIT_READ_PERMISSION`/`MANAGE_PERMISSION`
+  с `players.*` на `geo_audit.*` в `admin_geo_audit.py`.
+- ✅ **8.9.e-7**: прогон тестов (982 OK).
+- ✅ **8.9.e-8**: документация (system-settings, admin-permissions, roadmap,
+  audit, game-rules).
+
+**Тесты:** 982/982 OK (полный suite). **PG:** локальный PostgreSQL в Ubuntu
+(5433, chimera_test).
+
+**Операционное:** CMS-пороги управляются через
+`PUT /api/v1/admin/system-settings/geo.anticheat_*` (строки уже в БД благодаря
+seed-миграции `d4e7a1c93b52`). Права гео-аудита — `geo_audit.read` / `geo_audit.manage`
+(строки засеяны миграцией `e6b4a7c9d2f1`). По умолчанию mode="flag" (запись без
+блокировки); enforce — mark-only (review в progress), отдельный шаг.
+
+**Остаток:** 8.10 Segment→Part (⏳), AR (вне Telegram Web).
