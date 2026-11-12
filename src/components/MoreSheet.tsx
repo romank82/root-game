@@ -11,11 +11,10 @@ interface MoreItem {
   screen: Screen
   labelKey: string
   icon: string
-  devOnly?: boolean
 }
 
 const MORE_ITEMS: MoreItem[] = [
-  { screen: 'camera-test', labelKey: 'common:tabs.camera', icon: '◐', devOnly: true },
+  { screen: 'camera-test', labelKey: 'common:tabs.camera', icon: '◐' },
   { screen: 'archive', labelKey: 'common:tabs.archive', icon: '▤' },
   { screen: 'inventory', labelKey: 'common:tabs.inventory', icon: '◈' },
   { screen: 'shop', labelKey: 'common:tabs.shop', icon: '⊕' },
@@ -27,7 +26,7 @@ export function MoreSheet({ open, onClose, onScreenChange }: MoreSheetProps) {
 
   if (!open) return null
 
-  const items = MORE_ITEMS.filter((item) => !item.devOnly || import.meta.env.DEV)
+  const items = MORE_ITEMS
 
   return (
     <div className="scrim" onClick={onClose}>

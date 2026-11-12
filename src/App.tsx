@@ -17,7 +17,7 @@ import { ShopScreen } from './components/screens/ShopScreen'
 import { ProfileScreen } from './components/screens/ProfileScreen'
 import { TransferScreen } from './components/screens/TransferScreen'
 import { MapScreen } from './components/screens/MapScreen'
-// TEMP: dev-only camera test screen — удалить в Sprint 8.6.g.
+// AR camera screen (8.11+).
 import { CameraTestScreen } from './components/screens/CameraTestScreen'
 import { CipherScreen } from './components/screens/CipherScreen'
 import { MemoryScreen } from './components/screens/MemoryScreen'
@@ -184,8 +184,8 @@ function App() {
         />
       )}
 
-      {/* TEMP: dev-only camera test screen — удалить в Sprint 8.6.g. */}
-      {import.meta.env.DEV && screen === 'camera-test' && (
+      {/* AR camera screen (8.11+): камера + куб, доступен в build (не dev-only). */}
+      {screen === 'camera-test' && (
         <CameraTestScreen
           missions={missions}
           geoPosition={geoPosition}
