@@ -2234,3 +2234,88 @@ export async function rejectWithdrawal(
   }>
 }
 
+
+
+// ---- Гео-аудит (Sprint 8.9.c) -------------------------------------------
+// Список флагов античита + review-действие. Контракт —
+// backend/app/admin_geo_audit.py. Сырых координат в ответе нет: только
+// производные числа (speedKmh/accuracyMeters/...) и ids.
+
+export type GeoAuditSignal = {
+  signal: 'velocity' | 'accuracy'
+  speedKmh?: number
+  distanceKm?: number
+  elapsedSeconds?: number
+  thresholdKmh?: number
+  accuracyMeters?: number
+  thresholdMeters?: number
+}
+
+export type GeoAuditReviewDecision = 'reviewed' | 'dismissed'
+
+export type GeoAuditReviewStatus = 'review' | 'reviewed' | 'dismissed'
+
+export type GeoAuditFlag = {
+  id: string
+  playerId: string
+  missionId: string | null
+  zoneId: string | null
+  mode: string | null
+  signals: GeoAuditSignal[]
+  reviewStatus: GeoAuditReviewStatus | null
+  correlationId: string | null
+  createdAt: string | null
+}
+
+export type GeoAuditFlagsResponse = {
+  flags: GeoAuditFlag[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type GeoAuditFlagsFilters = {
+  playerId?: string
+  period?: string
+  signal?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getGeoAuditFlags(
+  filters: GeoAuditFlagsFilters = {},
+): Promise<GeoAuditFlagsResponse> {
+  const params = new URLSearchParams()
+  if (filters.playerId) params.set('player_id', filters.playerId)
+  if (filters.period) params.set('period', filters.period)
+  if (filters.signal) params.set('signal', filters.signal)
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) params.set('offset', String(filters.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(`/api/v1/admin/geo-audit/flags${query}`)
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<GeoAuditFlagsResponse>
+}
+
+export async function reviewGeoAuditFlag(
+  playerId: string,
+  missionId: string,
+  decision: GeoAuditReviewDecision,
+  reason?: string,
+): Promise<{ playerId: string; missionId: string; status: string }> {
+  const response = await adminFetch(
+    `/api/v1/admin/geo-audit/flags/${encodeURIComponent(playerId)}/${encodeURIComponent(missionId)}/review`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, reason: reason ?? null }),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<{
+    playerId: string
+    missionId: string
+    status: string
+  }>
+}
+

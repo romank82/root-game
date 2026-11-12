@@ -29,6 +29,7 @@ import { AdminTree } from './components/admin/AdminTree'
 import { MonitoringSection } from './components/admin/MonitoringSection'
 import { WithdrawalsSection } from './components/admin/WithdrawalsSection'
 import { StarsPaymentsSection } from './components/admin/StarsPaymentsSection'
+import { GeoAuditSection } from './components/admin/GeoAuditSection'
 
 // 13.7-j: валидные вкладки админки. 'economy' удалена — реестр операций
 // перенесён в карточку игрока (PlayersSection), настройки — в CMS.
@@ -47,6 +48,7 @@ const ADMIN_SECTIONS = [
   'monitoring',
   'withdrawals',
   'stars-payments',
+  'geo-audit',
 ] as const
 
 type AdminSection = (typeof ADMIN_SECTIONS)[number]
@@ -494,6 +496,7 @@ function AdminApp() {
             {section === 'monitoring' && 'Мониторинг'}
             {section === 'withdrawals' && 'Заявки на вывод'}
             {section === 'stars-payments' && 'Журнал Stars-платежей'}
+            {section === 'geo-audit' && 'Гео-аудит'}
           </h1>
 
           <nav className="admin-nav">
@@ -542,6 +545,13 @@ function AdminApp() {
               onClick={() => setSection('monitoring')}
             >
               Мониторинг
+            </button>
+
+            <button
+              className={section === 'geo-audit' ? 'is-active' : ''}
+              onClick={() => setSection('geo-audit')}
+            >
+              Гео-аудит
             </button>
 
             <button
@@ -633,6 +643,14 @@ function AdminApp() {
 
       {section === 'monitoring' && (
         <MonitoringSection onError={setError} onNotice={setNotice} />
+      )}
+
+      {section === 'geo-audit' && (
+        <GeoAuditSection
+          canWrite={canWrite}
+          onError={setError}
+          onNotice={setNotice}
+        />
       )}
 
       {section === 'withdrawals' && <WithdrawalsSection />}
