@@ -4,8 +4,7 @@
 индексирован); review-состояние — PlayerMission.progress["anticheat"];
 история — AdminAuditLog (immutable). См. roadmap 8.9.
 
-Права v1: players.read (чтение) / players.manage (review). Отдельная
-permission geo_audit.* появится в 8.9.e вместе с миграцией каталога.
+Права: geo_audit.read (чтение) / geo_audit.manage (review).
 
 Безопасность: сырые координаты не отдаются и не пишутся — только
 производные числа (speedKmh/accuracyMeters/...) и ids. Review меняет только
@@ -35,8 +34,8 @@ router = APIRouter(
     tags=["admin-geo-audit"],
 )
 
-GEO_AUDIT_READ_PERMISSION = "players.read"  # v1; 8.9.e: geo_audit.read
-GEO_AUDIT_MANAGE_PERMISSION = "players.manage"  # v1; 8.9.e: geo_audit.manage
+GEO_AUDIT_READ_PERMISSION = "geo_audit.read"
+GEO_AUDIT_MANAGE_PERMISSION = "geo_audit.manage"
 
 EVENT_TYPE_ANTICHEAT_FLAG = "anticheat.flag"
 EVENT_TYPE_ANTICHEAT_REVIEW = "anticheat.review"
