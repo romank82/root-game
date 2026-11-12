@@ -994,6 +994,7 @@ def submit_solo_location_proof_route(
             latitude=payload.latitude,
             longitude=payload.longitude,
             accuracy_meters=payload.accuracy_meters,
+            request=request,
         )
     except MissionEngineError as error:
         raise HTTPException(

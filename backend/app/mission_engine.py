@@ -2385,6 +2385,7 @@ def _submit_solo_location_proof(
     latitude: float,
     longitude: float,
     accuracy_meters: float,
+    request: Any = None,
 ) -> dict:
     """Sprint 8.5-2: solo location proof (без гейта на награду — это 8.5-2b).
 
@@ -2392,6 +2393,11 @@ def _submit_solo_location_proof(
     GeoZone.max_location_accuracy_meters); создаёт LocationProof
     (zone_id = zone.slug, единое пространство с team). Сырые координаты НЕ
     сохраняются. Возвращает {missionId, zoneId, verified, expiresAt}.
+
+    Sprint 8.9.b: дополнительно пишет античит-сигналы (velocity/accuracy) в
+    PlayerEvent + immutable admin_audit_log и review в progress. Блокировки нет
+    (enforce — отдельный шаг 8.9.e), verified/proof/return не меняются.
+    `request` опционален: нужен только для correlation_id/ip/UA в аудите.
     """
     from app.geo_location_proof import create_location_proof, is_inside_zone
 
@@ -2434,6 +2440,112 @@ def _submit_solo_location_proof(
         if accuracy_meters > float(zone.max_location_accuracy_meters):
             verified = False
 
+    # Sprint 8.9.b: server-side anti-cheat signals (velocity + accuracy).
+    # Только запись: verified/proof/return не меняются (enforce — 8.9.e).
+    # Сигналы — в PlayerEvent + immutable admin_audit_log + review в progress;
+    # сырые координаты не сохраняются (только производные числа).
+    from app.geo_anticheat import (
+        ANTICHEAT_MODE,
+        build_signal_payload,
+        evaluate_accuracy,
+        evaluate_velocity,
+    )
+
+    progress = dict(player_mission.progress or {})
+    spawn = progress.get("spawn")
+    spawn = spawn if isinstance(spawn, dict) else None
+    signals: list[dict] = []
+    if (
+        spawn
+        and spawn.get("generated_at")
+        and spawn.get("latitude") is not None
+        and spawn.get("longitude") is not None
+    ):
+        try:
+            generated_at = datetime.fromisoformat(str(spawn["generated_at"]))
+        except (TypeError, ValueError):
+            generated_at = None
+        if generated_at is not None:
+            # scan_at: фактический lastScanAt (QR, legacy) либо момент proof —
+            # solo-flow не сканирует QR (8.13), поэтому «наблюдение» = сейчас.
+            scan_at = None
+            last_scan_raw = progress.get("lastScanAt")
+            if last_scan_raw:
+                try:
+                    scan_at = datetime.fromisoformat(str(last_scan_raw))
+                except (TypeError, ValueError):
+                    scan_at = None
+            if scan_at is None:
+                scan_at = _utcnow()
+            velocity_signal = evaluate_velocity(
+                spawn_latitude=float(spawn["latitude"]),
+                spawn_longitude=float(spawn["longitude"]),
+                generated_at=generated_at,
+                scan_at=scan_at,
+                current_latitude=latitude,
+                current_longitude=longitude,
+            )
+            if velocity_signal is not None:
+                signals.append(velocity_signal)
+
+    accuracy_signal = evaluate_accuracy(accuracy_meters=accuracy_meters)
+    if accuracy_signal is not None:
+        signals.append(accuracy_signal)
+
+    if signals and ANTICHEAT_MODE != "off":
+        payload = build_signal_payload(
+            mission_id=mission.id,
+            zone_id=zone.slug,
+            signals=signals,
+        )
+        flag_payload = {
+            **payload,
+            "playerId": player_id,
+            "mode": ANTICHEAT_MODE,
+        }
+        # Лог не важнее proof: SAVEPOINT, чтобы сбой записи не отравил
+        # транзакцию (паттерн player_events в _submit_mission_once).
+        try:
+            from app.player_events import record_player_event
+
+            with session.begin_nested():
+                record_player_event(
+                    session,
+                    player_id,
+                    "anticheat.flag",
+                    payload=flag_payload,
+                    correlation_id=None,
+                )
+        except Exception as error:  # noqa: BLE001 — лог не важнее proof
+            logger.warning("player_event anticheat.flag failed: %s", error)
+
+        # System-generated audit (actor=None): immutable след для «Гео-аудита».
+        try:
+            from app.admin_audit import write_admin_audit
+
+            with session.begin_nested():
+                write_admin_audit(
+                    session,
+                    actor=None,
+                    action="anticheat.flag",
+                    entity_type="player_mission",
+                    entity_id=player_mission.id,
+                    request=request,
+                    metadata=flag_payload,
+                    outcome="success",
+                )
+        except Exception as error:  # noqa: BLE001 — аудит не важнее proof
+            logger.warning("admin_audit anticheat.flag failed: %s", error)
+
+        # Review-состояние в progress (мутируемое; sync сбрасывает progress,
+        # долговременная история — в PlayerEvent/admin_audit_log).
+        progress["anticheat"] = {
+            "status": "review",
+            "signals": signals,
+            "at": _utcnow().isoformat(),
+        }
+        player_mission.progress = progress
+
     proof = create_location_proof(
         session,
         player_id=player_id,
@@ -2455,8 +2567,13 @@ def submit_solo_location_proof_entrypoint(
     latitude: float,
     longitude: float,
     accuracy_meters: float,
+    request: Any = None,
 ) -> dict:
-    """HTTP entrypoint (Sprint 8.5-2): solo location proof в одной транзакции."""
+    """HTTP entrypoint (Sprint 8.5-2): solo location proof в одной транзакции.
+
+    `request` опционален (Sprint 8.9.b): прокидывается в admin-аудит для
+    correlation_id/ip/user-agent; при None аудит использует cli-correlation.
+    """
     with SessionLocal.begin() as session:
         return _submit_solo_location_proof(
             session,
@@ -2465,6 +2582,7 @@ def submit_solo_location_proof_entrypoint(
             latitude=latitude,
             longitude=longitude,
             accuracy_meters=accuracy_meters,
+            request=request,
         )
 
 

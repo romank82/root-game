@@ -14,12 +14,14 @@ Alembic-SQLite БД в tempdir, БЕЗ accept_mission — PlayerMission сеет
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -307,6 +309,80 @@ class SoloLocationProofTests(unittest.TestCase):
                 "expires_at": proof.expires_at,
             }
 
+    # ---- 8.9.b: anticheat helpers ---------------------------------------
+    def _seed_spawn(
+        self,
+        ids: dict[str, str],
+        *,
+        latitude: float = 55.75,
+        longitude: float = 37.61,
+        seconds_ago: int = 10,
+    ) -> None:
+        """Записать progress["spawn"] так же, как это делает accept (8.2)."""
+        from app.models import PlayerMission
+
+        generated_at = (
+            datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+        ).isoformat()
+        with self.SessionLocal.begin() as session:
+            player_mission = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            )
+            self.assertIsNotNone(player_mission)
+            progress = dict(player_mission.progress or {})
+            progress["spawn"] = {
+                "latitude": latitude,
+                "longitude": longitude,
+                "search_radius_m": 3000,
+                "zone_radius_m": 500,
+                "ar_object_id": None,
+                "generated_at": generated_at,
+                "generated_from_lat": latitude,
+                "generated_from_lng": longitude,
+            }
+            player_mission.progress = progress
+
+    def _player_mission(self, ids: dict[str, str]):
+        from app.models import PlayerMission
+
+        with self.SessionLocal() as session:
+            return session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            )
+
+    def _anticheat_events(self, player_id: str) -> list:
+        from app.models import PlayerEvent
+
+        with self.SessionLocal() as session:
+            return list(
+                session.scalars(
+                    select(PlayerEvent).where(
+                        PlayerEvent.player_id == player_id,
+                        PlayerEvent.event_type == "anticheat.flag",
+                    )
+                ).all()
+            )
+
+    def _anticheat_audits(self, player_mission_id: str) -> list:
+        from app.models import AdminAuditLog
+
+        with self.SessionLocal() as session:
+            return list(
+                session.scalars(
+                    select(AdminAuditLog).where(
+                        AdminAuditLog.action == "anticheat.flag",
+                        AdminAuditLog.entity_type == "player_mission",
+                        AdminAuditLog.entity_id == player_mission_id,
+                    )
+                ).all()
+            )
+
     # ---- T1-T6: основные сценарии ---------------------------------------
     def test_verified_inside_zone_creates_verified_proof(self) -> None:
         ids = self._fixture()
@@ -457,7 +533,9 @@ class SoloLocationProofTests(unittest.TestCase):
             )
             self.assertIsNotNone(player_mission)
             progress = (player_mission.progress if player_mission else {}) or {}
-            self.assertEqual(progress, {})
+            # Sprint 8.9.b: в progress разрешён только безопасный раздел
+            # anticheat (review-состояние). Сырых координат быть не должно.
+            self.assertLessEqual(set(progress), {"anticheat"})
             for forbidden in (
                 "latitude",
                 "longitude",
@@ -465,6 +543,117 @@ class SoloLocationProofTests(unittest.TestCase):
                 "generated_from_lng",
             ):
                 self.assertNotIn(forbidden, progress)
+            serialized = json.dumps(progress)
+            for forbidden in (
+                '"latitude"',
+                '"longitude"',
+                '"generated_from_lat"',
+                '"generated_from_lng"',
+            ):
+                self.assertNotIn(forbidden, serialized)
+
+    # ---- 8.9.b: anti-cheat flags (velocity/accuracy) ---------------------
+    def test_velocity_teleport_creates_flag(self) -> None:
+        ids = self._fixture()
+        self._seed_spawn(ids)
+        # spawn 55.75/37.61 -> current 55.76/37.62 за ~10 с = телепорт.
+        self._call(ids, lat=55.76, lon=37.62, accuracy=10.0)
+
+        events = self._anticheat_events(ids["player"])
+        self.assertEqual(len(events), 1)
+        signals = events[0].payload_json["signals"]
+        self.assertEqual(signals[0]["signal"], "velocity")
+        self.assertGreater(signals[0]["speedKmh"], 120)
+
+        player_mission = self._player_mission(ids)
+        self.assertIsNotNone(player_mission)
+        anticheat = (player_mission.progress or {})["anticheat"]
+        self.assertEqual(anticheat["status"], "review")
+        self.assertEqual(anticheat["signals"][0]["signal"], "velocity")
+
+        audits = self._anticheat_audits(player_mission.id)
+        self.assertEqual(len(audits), 1)
+        self.assertEqual(audits[0].action, "anticheat.flag")
+        self.assertIsNone(audits[0].admin_user_id)
+
+    def test_no_spawn_no_velocity_flag(self) -> None:
+        ids = self._fixture()  # progress={}, spawn отсутствует
+        self._call(ids, accuracy=10.0)  # accuracy 10 > порога 3
+
+        self.assertEqual(self._anticheat_events(ids["player"]), [])
+        player_mission = self._player_mission(ids)
+        self.assertNotIn("anticheat", player_mission.progress or {})
+        self.assertEqual(self._anticheat_audits(player_mission.id), [])
+
+    def test_accuracy_anomaly_creates_flag(self) -> None:
+        ids = self._fixture()
+        self._call(ids, accuracy=1.0)  # <= ANTICHEAT_ACCURACY_MIN_METERS
+
+        events = self._anticheat_events(ids["player"])
+        self.assertEqual(len(events), 1)
+        self.assertEqual(
+            [s["signal"] for s in events[0].payload_json["signals"]],
+            ["accuracy"],
+        )
+        player_mission = self._player_mission(ids)
+        self.assertEqual(
+            (player_mission.progress or {})["anticheat"]["status"], "review"
+        )
+        self.assertEqual(len(self._anticheat_audits(player_mission.id)), 1)
+
+    def test_mode_off_writes_nothing(self) -> None:
+        from app import geo_anticheat
+
+        ids = self._fixture()
+        self._seed_spawn(ids)
+        # Импорт ANTICHEAT_MODE в mission_engine ленивый -> патчим модуль.
+        with patch.object(geo_anticheat, "ANTICHEAT_MODE", "off"):
+            self._call(ids, lat=55.76, lon=37.62, accuracy=10.0)
+
+        self.assertEqual(self._anticheat_events(ids["player"]), [])
+        player_mission = self._player_mission(ids)
+        self.assertNotIn("anticheat", player_mission.progress or {})
+        self.assertEqual(self._anticheat_audits(player_mission.id), [])
+
+    def test_payload_no_raw_coordinates(self) -> None:
+        ids = self._fixture()
+        self._seed_spawn(ids)
+        self._call(ids, lat=55.76, lon=37.62, accuracy=10.0)
+
+        events = self._anticheat_events(ids["player"])
+        player_mission = self._player_mission(ids)
+        audits = self._anticheat_audits(player_mission.id)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(len(audits), 1)
+
+        serialized_event = json.dumps(events[0].payload_json)
+        serialized_audit = json.dumps(audits[0].metadata_json)
+        for forbidden in (
+            '"latitude"',
+            '"longitude"',
+            '"generated_from_lat"',
+            '"generated_from_lng"',
+        ):
+            self.assertNotIn(forbidden, serialized_event)
+            self.assertNotIn(forbidden, serialized_audit)
+        self.assertIn('"speedKmh"', serialized_event)
+
+    def test_audit_actor_none_and_correlation(self) -> None:
+        ids = self._fixture()
+        self._seed_spawn(ids)
+        # request не передаётся -> request=None -> cli-correlation.
+        self._call(ids, lat=55.76, lon=37.62, accuracy=10.0)
+
+        player_mission = self._player_mission(ids)
+        audits = self._anticheat_audits(player_mission.id)
+        self.assertEqual(len(audits), 1)
+        audit = audits[0]
+        self.assertIsNone(audit.admin_user_id)
+        self.assertIsNone(audit.admin_username_snapshot)
+        self.assertTrue(audit.correlation_id)
+        self.assertTrue(audit.correlation_id.startswith("cli:"))
+        self.assertEqual(audit.outcome, "success")
+        self.assertIsNone(audit.reason)
 
     def _set_valid_answer(self, mission_id: str) -> None:
         from app.models import Mission

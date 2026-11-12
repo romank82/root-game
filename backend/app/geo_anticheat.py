@@ -23,6 +23,9 @@ from geo_intel_offline import calculate_distance_km
 ANTICHEAT_MAX_SPEED_KMH = 120  # TODO(8.9.e): CMS geo.anticheat_max_speed_kmh
 ANTICHEAT_MIN_ELAPSED_SECONDS = 5  # TODO(8.9.e): CMS geo.anticheat_min_elapsed_seconds
 ANTICHEAT_ACCURACY_MIN_METERS = 3  # TODO(8.9.e): CMS geo.anticheat_accuracy_min_meters
+# Sprint 8.9.b: режим записи сигналов. off — не писать, flag — писать
+# PlayerEvent/audit/progress без блокировки, enforce — отдельный шаг (8.9.e).
+ANTICHEAT_MODE = "flag"  # TODO(8.9.e): CMS geo.anticheat_mode (off|flag|enforce)
 
 
 def _elapsed_seconds(generated_at: datetime, scan_at: datetime) -> float:
