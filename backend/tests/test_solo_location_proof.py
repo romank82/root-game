@@ -602,18 +602,28 @@ class SoloLocationProofTests(unittest.TestCase):
         self.assertEqual(len(self._anticheat_audits(player_mission.id)), 1)
 
     def test_mode_off_writes_nothing(self) -> None:
-        from app import geo_anticheat
+        from app.models import SystemSetting
 
         ids = self._fixture()
         self._seed_spawn(ids)
-        # Импорт ANTICHEAT_MODE в mission_engine ленивый -> патчим модуль.
-        with patch.object(geo_anticheat, "ANTICHEAT_MODE", "off"):
-            self._call(ids, lat=55.76, lon=37.62, accuracy=10.0)
+        # Sprint 8.9.e-4: режим читается из CMS (geo.anticheat_mode), а не из
+        # константы модуля — временно пишем "off", затем возвращаем "flag".
+        with self.SessionLocal.begin() as session:
+            setting = session.get(SystemSetting, "geo.anticheat_mode")
+            self.assertIsNotNone(setting)
+            setting.value_json = "off"
 
-        self.assertEqual(self._anticheat_events(ids["player"]), [])
-        player_mission = self._player_mission(ids)
-        self.assertNotIn("anticheat", player_mission.progress or {})
-        self.assertEqual(self._anticheat_audits(player_mission.id), [])
+        try:
+            self._call(ids, lat=55.76, lon=37.62, accuracy=10.0)
+            self.assertEqual(self._anticheat_events(ids["player"]), [])
+            player_mission = self._player_mission(ids)
+            self.assertNotIn("anticheat", player_mission.progress or {})
+            self.assertEqual(self._anticheat_audits(player_mission.id), [])
+        finally:
+            with self.SessionLocal.begin() as session:
+                setting = session.get(SystemSetting, "geo.anticheat_mode")
+                if setting is not None:
+                    setting.value_json = "flag"
 
     def test_payload_no_raw_coordinates(self) -> None:
         ids = self._fixture()

@@ -1745,6 +1745,75 @@ def _solo_proof_mode_enforced(session: Session) -> bool:
     return setting.value_json == "enforce"
 
 
+def _anticheat_settings(session: Session) -> dict[str, Any]:
+    """Sprint 8.9.e-4: CMS geo.anticheat_* -> активная запись -> default
+    каталога -> константа. Один SELECT IN (4 ключа); границы гарантирует
+    каталог (system_settings_catalog), здесь они не валидируются.
+    """
+    from app.geo_anticheat import (
+        ANTICHEAT_ACCURACY_MIN_METERS,
+        ANTICHEAT_MAX_SPEED_KMH,
+        ANTICHEAT_MIN_ELAPSED_SECONDS,
+        ANTICHEAT_MODE,
+    )
+    from app.system_settings_catalog import get_definition
+
+    keys = (
+        "geo.anticheat_mode",
+        "geo.anticheat_max_speed_kmh",
+        "geo.anticheat_min_elapsed_seconds",
+        "geo.anticheat_accuracy_min_meters",
+    )
+    rows = {
+        row.key: row
+        for row in session.scalars(
+            select(SystemSetting).where(SystemSetting.key.in_(keys))
+        ).all()
+    }
+
+    def _int(key: str, fallback: int) -> int:
+        row = rows.get(key)
+        if row is not None and row.status == ACTIVE_SETTING_STATUS:
+            value = row.value_json
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+        definition = get_definition(key)
+        if (
+            definition is not None
+            and isinstance(definition.default_value, int)
+            and not isinstance(definition.default_value, bool)
+        ):
+            return definition.default_value
+        return fallback
+
+    def _mode() -> str:
+        row = rows.get("geo.anticheat_mode")
+        if row is not None and row.status == ACTIVE_SETTING_STATUS:
+            value = row.value_json
+            if value in ("off", "flag", "enforce"):
+                return value
+        definition = get_definition("geo.anticheat_mode")
+        if (
+            definition is not None
+            and definition.default_value in ("off", "flag", "enforce")
+        ):
+            return definition.default_value
+        return ANTICHEAT_MODE
+
+    return {
+        "mode": _mode(),
+        "max_speed_kmh": _int(
+            "geo.anticheat_max_speed_kmh", ANTICHEAT_MAX_SPEED_KMH
+        ),
+        "min_elapsed_seconds": _int(
+            "geo.anticheat_min_elapsed_seconds", ANTICHEAT_MIN_ELAPSED_SECONDS
+        ),
+        "accuracy_min_meters": _int(
+            "geo.anticheat_accuracy_min_meters", ANTICHEAT_ACCURACY_MIN_METERS
+        ),
+    }
+
+
 def _submit_mission_once(
     player_id: str,
     mission_id: str,
@@ -2445,11 +2514,12 @@ def _submit_solo_location_proof(
     # Сигналы — в PlayerEvent + immutable admin_audit_log + review в progress;
     # сырые координаты не сохраняются (только производные числа).
     from app.geo_anticheat import (
-        ANTICHEAT_MODE,
         build_signal_payload,
         evaluate_accuracy,
         evaluate_velocity,
     )
+
+    anticheat_settings = _anticheat_settings(session)
 
     progress = dict(player_mission.progress or {})
     spawn = progress.get("spawn")
@@ -2484,15 +2554,20 @@ def _submit_solo_location_proof(
                 scan_at=scan_at,
                 current_latitude=latitude,
                 current_longitude=longitude,
+                max_speed_kmh=anticheat_settings["max_speed_kmh"],
+                min_elapsed_seconds=anticheat_settings["min_elapsed_seconds"],
             )
             if velocity_signal is not None:
                 signals.append(velocity_signal)
 
-    accuracy_signal = evaluate_accuracy(accuracy_meters=accuracy_meters)
+    accuracy_signal = evaluate_accuracy(
+        accuracy_meters=accuracy_meters,
+        min_accuracy_meters=anticheat_settings["accuracy_min_meters"],
+    )
     if accuracy_signal is not None:
         signals.append(accuracy_signal)
 
-    if signals and ANTICHEAT_MODE != "off":
+    if signals and anticheat_settings["mode"] != "off":
         payload = build_signal_payload(
             mission_id=mission.id,
             zone_id=zone.slug,
@@ -2501,7 +2576,7 @@ def _submit_solo_location_proof(
         flag_payload = {
             **payload,
             "playerId": player_id,
-            "mode": ANTICHEAT_MODE,
+            "mode": anticheat_settings["mode"],
         }
         # Лог не важнее proof: SAVEPOINT, чтобы сбой записи не отравил
         # транзакцию (паттерн player_events в _submit_mission_once).
