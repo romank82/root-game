@@ -374,6 +374,45 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         description="Sprint 8.5: solo location-proof gate (off|enforce).",
         is_sensitive=False,
     ),
+    # Sprint 8.9.e: античит solo location-proof (CMS-пороги вместо констант).
+    # Значения-дефолты идентичны константам geo_anticheat и seed-миграции
+    # d4e7a1c93b52 — поведение системы до/после перехода не меняется.
+    "geo.anticheat_mode": SystemSettingDefinition(
+        key="geo.anticheat_mode",
+        value_type="string",
+        default_value="flag",
+        category="geo",
+        title="Режим античита",
+        description="Sprint 8.9: античит solo location-proof (off|flag|enforce).",
+        is_sensitive=False,
+    ),
+    "geo.anticheat_max_speed_kmh": SystemSettingDefinition(
+        key="geo.anticheat_max_speed_kmh",
+        value_type="integer",
+        default_value=120,
+        category="geo",
+        title="Порог скорости античита (км/ч)",
+        description="Скорость spawn->proof выше порога даёт velocity-сигнал.",
+        is_sensitive=False,
+    ),
+    "geo.anticheat_min_elapsed_seconds": SystemSettingDefinition(
+        key="geo.anticheat_min_elapsed_seconds",
+        value_type="integer",
+        default_value=5,
+        category="geo",
+        title="Минимальный интервал античита (с)",
+        description="Меньший интервал spawn->proof не проверяется на velocity.",
+        is_sensitive=False,
+    ),
+    "geo.anticheat_accuracy_min_meters": SystemSettingDefinition(
+        key="geo.anticheat_accuracy_min_meters",
+        value_type="integer",
+        default_value=3,
+        category="geo",
+        title="Порог «идеальной» accuracy (м)",
+        description="Accuracy не выше порога считается подозрительно идеальной.",
+        is_sensitive=False,
+    ),
 }
 
 
@@ -390,6 +429,12 @@ def validate_value(definition: SystemSettingDefinition, value: Any) -> None:
             raise ValueError("Значение не может быть отрицательным.")
         if definition.key == "missions.default_max_attempts" and not 1 <= value <= 10:
             raise ValueError("missions.default_max_attempts должен быть от 1 до 10.")
+        if definition.key == "geo.anticheat_max_speed_kmh" and not 1 <= value <= 1000:
+            raise ValueError("geo.anticheat_max_speed_kmh должен быть от 1 до 1000.")
+        if definition.key == "geo.anticheat_min_elapsed_seconds" and not 1 <= value <= 300:
+            raise ValueError("geo.anticheat_min_elapsed_seconds должен быть от 1 до 300.")
+        if definition.key == "geo.anticheat_accuracy_min_meters" and not 0 <= value <= 100:
+            raise ValueError("geo.anticheat_accuracy_min_meters должен быть от 0 до 100.")
         return
 
     if definition.value_type == "boolean":
@@ -402,6 +447,8 @@ def validate_value(definition: SystemSettingDefinition, value: Any) -> None:
             raise ValueError("Значение должно быть строкой.")
         if definition.key == "geo.solo_proof_mode" and value not in ("off", "enforce"):
             raise ValueError("geo.solo_proof_mode должен быть 'off' или 'enforce'.")
+        if definition.key == "geo.anticheat_mode" and value not in ("off", "flag", "enforce"):
+            raise ValueError("geo.anticheat_mode должен быть 'off', 'flag' или 'enforce'.")
         return
 
     if definition.key == "missions.default_attempt_reward_multipliers":
