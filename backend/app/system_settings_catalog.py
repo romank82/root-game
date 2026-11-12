@@ -451,22 +451,18 @@ def validate_catalog_values(values_by_key: dict[str, Any]) -> None:
     The caller must supply the effective values of the whole active catalog,
     with a proposed value substituted before calling this function.
     """
-    # Sprint 8.5-2b: новый ключ может ещё не быть засиден в БД (seed-миграция
-    # приходит отдельным шагом 8.5-5). Для отсутствующих ключей подставляем
-    # default каталога, чтобы PUT уже существующих настроек не падал с
-    # «Отсутствует системная настройка: geo.solo_proof_mode.». Строгий
-    # инвариант «все ключи каталога есть в БД» восстанавливает seed-миграция.
-    effective = {
-        key: definition.default_value
-        for key, definition in SYSTEM_SETTING_CATALOG.items()
-    }
-    effective.update(values_by_key)
-
+    # Sprint 8.5-5: строгий инвариант восстановлен после seed-миграции
+    # geo.solo_proof_mode (b8f2c4d6e9a1). Все ключи каталога обязаны быть в
+    # БД: иначе PUT /api/v1/admin/system-settings/{key} отдавал бы 422
+    # «Отсутствует системная настройка: <key>.». Downgrade seed-миграций
+    # запрещён (append-only), поэтому ключи из БД не исчезают.
     for key, definition in SYSTEM_SETTING_CATALOG.items():
-        validate_value(definition, effective[key])
+        if key not in values_by_key:
+            raise ValueError(f"Отсутствует системная настройка: {key}.")
+        validate_value(definition, values_by_key[key])
 
-    attempts = effective["missions.default_max_attempts"]
-    multipliers = effective["missions.default_attempt_reward_multipliers"]
+    attempts = values_by_key["missions.default_max_attempts"]
+    multipliers = values_by_key["missions.default_attempt_reward_multipliers"]
     if len(multipliers) != attempts:
         raise ValueError(
             "Число множителей должно совпадать с missions.default_max_attempts."
