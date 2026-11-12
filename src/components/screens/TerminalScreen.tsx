@@ -11,12 +11,14 @@ import {
   getActiveTeamSessions,
   joinTeamSession,
   leaveTeamSession,
+  submitSoloLocationProof,
 } from '../../api/engineApi'
 import type { ApiStatus, Screen } from '../../types/game'
 import { Sidebar } from '../Sidebar'
 import { CooldownCountdown } from '../CooldownCountdown'
 import { MissionTimer } from '../MissionTimer'
 import { MissionModal } from '../MissionModal'
+import { ErrorWithCode } from '../ErrorWithCode'
 import { missionText } from '../../utils/missionHelpers'
 import { formatRootFromNano } from '../../utils/formatRoot'
 import { MISSION_LAYER_ORDER as LAYER_ORDER } from '../../constants/missionLayerColors'
@@ -92,6 +94,10 @@ export function TerminalScreen({
   const [leftTeamSessionIds, setLeftTeamSessionIds] = useState<string[]>([])
   // Уведомление о результате отказа от командной сессии.
   const [teamLeaveNote, setTeamLeaveNote] = useState<string | null>(null)
+  // Sprint 8.5-3: solo location-proof (кнопка «Подтвердить присутствие»).
+  const [presenceNotice, setPresenceNotice] = useState<string | null>(null)
+  const [presenceError, setPresenceError] = useState<string | null>(null)
+  const [presenceSending, setPresenceSending] = useState(false)
   const [selectedMission, setSelectedMission] =
     useState<EngineMission | null>(null)
   const [showArchive, setShowArchive] = useState(false)
@@ -270,6 +276,37 @@ export function TerminalScreen({
     }
     geoCacheRef.current = coords
     return coords
+  }
+
+  // Sprint 8.5-3: отправка solo location-proof по кнопке. Свежий
+  // getCurrentPosition (как в TeamSessionScreen.handleSubmitLocation), а не
+  // кэш getCoords: proof ценится по свежести (expires_at). Гейт включается
+  // CMS-ключом geo.solo_proof_mode на бэкенде; при off запрос не блокирует.
+  async function handleConfirmPresence(missionId: string) {
+    if (presenceSending) return
+    setPresenceSending(true)
+    setPresenceError(null)
+    setPresenceNotice(null)
+    try {
+      const position = await getCurrentPosition()
+      const { latitude, longitude, accuracy } = position.coords
+      const result = await submitSoloLocationProof(
+        missionId,
+        latitude,
+        longitude,
+        // Контракт бэкенда: accuracy > 0 или 0 (NaN в JSON стал бы null).
+        Number.isFinite(accuracy) && accuracy > 0 ? accuracy : 0,
+      )
+      if (result.verified) {
+        setPresenceNotice(t('terminal:presence.ok'))
+      } else {
+        setPresenceError(t('terminal:presence.out'))
+      }
+    } catch (err) {
+      setPresenceError((err as Error).message)
+    } finally {
+      setPresenceSending(false)
+    }
   }
 
   async function loadActiveSessions() {
@@ -543,6 +580,31 @@ export function TerminalScreen({
             <button onClick={() => onScreenChange('map')}>
               {t('terminal:buttons.openMap')}
             </button>
+
+            {/* Sprint 8.5-3: solo location-proof. Только для solo-миссий:
+                team-путь отправляет proof в TeamSessionScreen (не дублируем). */}
+            {mission.missionType !== 'team' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmPresence(mission.id)}
+                  disabled={presenceSending}
+                >
+                  {presenceSending
+                    ? t('terminal:presence.sending')
+                    : t('terminal:presence.button')}
+                </button>
+                {presenceNotice && (
+                  <p className="mission-success-card">{presenceNotice}</p>
+                )}
+                {presenceError && (
+                  <ErrorWithCode
+                    message={presenceError}
+                    className="repair-error"
+                  />
+                )}
+              </>
+            )}
 
             {cancelDeadlineAt && (
               <div className="terminal-action-row">

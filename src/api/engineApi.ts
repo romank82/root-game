@@ -1300,6 +1300,47 @@ export async function submitTeamLocation(
   return response.json() as Promise<EngineTeamLocationSubmitResult>
 }
 
+// Sprint 8.5-3: solo location-proof. Контракт бэкенда:
+// POST /api/v1/engine/missions/{missionId}/location-proof,
+// body { latitude, longitude, accuracy_meters } -> { missionId, zoneId,
+// verified, expiresAt }. Сырые координаты на сервере не сохраняются, только
+// проекция результата (LocationProof). Гейт включается CMS-ключом
+// geo.solo_proof_mode=enforce; при off запрос просто пишет proof.
+export type EngineSoloLocationProofResult = {
+  missionId: string
+  zoneId: string
+  verified: boolean
+  expiresAt: string
+}
+
+export async function submitSoloLocationProof(
+  missionId: string,
+  latitude: number,
+  longitude: number,
+  accuracyMeters: number,
+): Promise<EngineSoloLocationProofResult> {
+  const response = await apiFetch(
+    `/api/v1/engine/missions/${missionId}/location-proof`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        latitude,
+        longitude,
+        accuracy_meters: accuracyMeters,
+      }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+
+  return response.json() as Promise<EngineSoloLocationProofResult>
+}
+
 // Sprint 6.6-a/6.6-b: чат КОМАНДНОЙ СЕССИИ (только внутри TeamSession — не в
 // Team). Контракт бэкенда (app/team_session_chat_service.py):
 //   GET  .../sessions/{sessionId}/messages?limit=50&before=<ISO>  →

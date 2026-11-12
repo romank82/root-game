@@ -101,5 +101,11 @@
     "expired": "时间已到",
     "refuseAction": "拒绝",
     "removeAction": "移除"
+  },
+  "presence": {
+    "button": "确认在场",
+    "sending": "发送中…",
+    "ok": "已确认在场。",
+    "out": "GPS 不准确或您不在区域内。请重试。"
   }
 }

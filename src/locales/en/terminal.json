@@ -101,5 +101,11 @@
     "expired": "TIME IS UP",
     "refuseAction": "refuse",
     "removeAction": "remove"
+  },
+  "presence": {
+    "button": "Confirm presence",
+    "sending": "Sending…",
+    "ok": "Presence confirmed.",
+    "out": "GPS is inaccurate or you are outside the zone. Try again."
   }
 }
