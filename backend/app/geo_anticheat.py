@@ -19,13 +19,16 @@ from datetime import datetime, timezone
 
 from geo_intel_offline import calculate_distance_km
 
-# Пороги — пока константы; перенос в CMS в отдельном шаге.
-ANTICHEAT_MAX_SPEED_KMH = 120  # TODO(8.9.e): CMS geo.anticheat_max_speed_kmh
-ANTICHEAT_MIN_ELAPSED_SECONDS = 5  # TODO(8.9.e): CMS geo.anticheat_min_elapsed_seconds
-ANTICHEAT_ACCURACY_MIN_METERS = 3  # TODO(8.9.e): CMS geo.anticheat_accuracy_min_meters
-# Sprint 8.9.b: режим записи сигналов. off — не писать, flag — писать
-# PlayerEvent/audit/progress без блокировки, enforce — отдельный шаг (8.9.e).
-ANTICHEAT_MODE = "flag"  # TODO(8.9.e): CMS geo.anticheat_mode (off|flag|enforce)
+# Пороги по умолчанию — константы (зеркало каталога geo.anticheat_*).
+# CMS-чтение подключается в 8.9.e-4: вызывающий код передаёт значения из
+# настроек, эти константы остаются дефолтами/fallback. Границы значений
+# гарантирует каталог (system_settings_catalog), здесь они не валидируются.
+ANTICHEAT_MAX_SPEED_KMH = 120
+ANTICHEAT_MIN_ELAPSED_SECONDS = 5
+ANTICHEAT_ACCURACY_MIN_METERS = 3
+# Sprint 8.9.e: режим записи сигналов (default "flag"; off|flag|enforce).
+# CMS geo.anticheat_mode читается в 8.9.e-4; здесь только дефолт/fallback.
+ANTICHEAT_MODE = "flag"
 
 
 def _elapsed_seconds(generated_at: datetime, scan_at: datetime) -> float:
@@ -47,17 +50,24 @@ def evaluate_velocity(
     scan_at: datetime | None,
     current_latitude: float,
     current_longitude: float,
+    max_speed_kmh: float = ANTICHEAT_MAX_SPEED_KMH,
+    min_elapsed_seconds: float = ANTICHEAT_MIN_ELAPSED_SECONDS,
 ) -> dict | None:
     """Вернуть velocity-сигнал, если скорость выше порога; иначе None.
 
-    Tolerant: нет scan_at или elapsed < ANTICHEAT_MIN_ELAPSED_SECONDS
+    Пороги keyword-only с дефолтами из констант. CMS-переопределение
+    (geo.anticheat_max_speed_kmh / geo.anticheat_min_elapsed_seconds)
+    передаёт вызывающий код (8.9.e-4); границы здесь не валидируются —
+    их гарантирует каталог system_settings_catalog.
+
+    Tolerant: нет scan_at или elapsed < min_elapsed_seconds
     (включая отрицательный elapsed при рассинхроне часов) -> None.
     """
     if scan_at is None:
         return None
 
     elapsed = _elapsed_seconds(generated_at, scan_at)
-    if elapsed < ANTICHEAT_MIN_ELAPSED_SECONDS:
+    if elapsed < min_elapsed_seconds:
         return None
 
     distance_km = calculate_distance_km(
@@ -67,7 +77,7 @@ def evaluate_velocity(
         current_longitude,
     )
     speed_kmh = distance_km / (elapsed / 3600.0)
-    if speed_kmh <= ANTICHEAT_MAX_SPEED_KMH:
+    if speed_kmh <= max_speed_kmh:
         return None
 
     return {
@@ -75,25 +85,33 @@ def evaluate_velocity(
         "speedKmh": round(speed_kmh, 1),
         "distanceKm": round(distance_km, 3),
         "elapsedSeconds": int(elapsed),
-        "thresholdKmh": ANTICHEAT_MAX_SPEED_KMH,
+        "thresholdKmh": max_speed_kmh,
     }
 
 
-def evaluate_accuracy(*, accuracy_meters: float | None) -> dict | None:
+def evaluate_accuracy(
+    *,
+    accuracy_meters: float | None,
+    min_accuracy_meters: float = ANTICHEAT_ACCURACY_MIN_METERS,
+) -> dict | None:
     """Вернуть accuracy-сигнал при аномально «идеальной» точности GPS.
 
+    Порог min_accuracy_meters keyword-only с дефолтом из константы;
+    CMS-переопределение (geo.anticheat_accuracy_min_meters) передаёт
+    вызывающий код (8.9.e-4). Границы гарантирует каталог.
+
     accuracy_meters is None (не передан) -> None. Точность не выше
-    ANTICHEAT_ACCURACY_MIN_METERS считается подозрительно идеальной.
+    min_accuracy_meters считается подозрительно идеальной.
     """
     if accuracy_meters is None:
         return None
-    if accuracy_meters > ANTICHEAT_ACCURACY_MIN_METERS:
+    if accuracy_meters > min_accuracy_meters:
         return None
 
     return {
         "signal": "accuracy",
         "accuracyMeters": float(accuracy_meters),
-        "thresholdMeters": ANTICHEAT_ACCURACY_MIN_METERS,
+        "thresholdMeters": min_accuracy_meters,
     }
 
 
