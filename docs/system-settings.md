@@ -53,6 +53,7 @@ TON credentials и иные секретные значения в system settin
 | `telegram.bot_username` | string | "" | no |
 | `features.demo_seed_enabled` | boolean | false | yes |
 | `features.demo_reset_enabled` | boolean | false | yes |
+| `geo.solo_proof_mode` | string | "off" | no |
 
 Значения limits и economy не могут быть отрицательными. `default_max_attempts`
 должен быть от 1 до 10. Массив multipliers должен содержать ровно

@@ -273,7 +273,6 @@ Player-facing endpoints; admin-модерация команд — этап 6.7.
 The following target routes require authenticated player identity and an
 idempotency key for every mutation:
 
-- `POST /api/v1/engine/missions/{mission_id}/location-proofs`
 - `POST /api/v1/engine/missions/{mission_id}/team-sessions/join`
 - `POST /api/v1/engine/team-sessions/{session_id}/ready`
 - `POST /api/v1/engine/team-sessions/{session_id}/leave`
@@ -285,6 +284,37 @@ Responses expose only caller-permitted state and never raw location proofs,
 protected QR data, challenge validation material, other players private data,
 or settlement internals. Exact behavior is defined in
 `docs/geo-team-mission-contract.md`.
+
+## POST /api/v1/engine/missions/{mission_id}/location-proof
+
+Solo location proof (Sprint 8.5). Сервер проверяет присутствие
+(`GeoZone`, `is_inside_zone`), accuracy (`GeoZone.max_location_accuracy_meters`,
+если задан) и создаёт `LocationProof` (без сырых координат; `zone_id = zone.slug`).
+Гейт на завершение миссии — `geo.solo_proof_mode=enforce` (default off).
+
+**Request:**
+```json
+{
+  "latitude": 55.7558,
+  "longitude": 37.6173,
+  "accuracy_meters": 10.0
+}
+```
+latitude [-90, 90]; longitude [-180, 180]; accuracy_meters (0;100000].
+
+Response (200; verified=false — точка вне зоны или accuracy хуже лимита,
+это НЕ ошибка):
+
+```json
+{
+  "missionId": "mission-...",
+  "zoneId": "zone-slug",
+  "verified": true,
+  "expiresAt": "2026-11-12T12:00:00+00:00"
+}
+```
+Ошибки: 403 (страна/неактивен), 404 (игрок/миссия/прогресс),
+409 (team / не in_progress / зона недоступна), 422 (payload / нет geo_zone_id).
 
 ## POST /api/v1/players/transfer
 

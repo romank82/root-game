@@ -20,7 +20,7 @@
 | 5. Карточка игрока, ручные операции | ✅ готов | 5.1–5.7; 5.6.d осознанно не делаем | — |
 | 6. Команды, приглашения, состав, чат | ⚠️ в работе | 6.1–6.6, 6.7.a | 6.6-c, 6.7.b (не начаты) |
 | 7. Командные задания и совместная геоактивация | ⚠️ в работе | 7.1 ✅ (API), 7.2 ✅ (запрет выхода) | проверка на 2 реальных телефонах — главный долг 8.x |
-| 8. Гео-AR пайплайн | ⚠️ в работе | 8.6, 8.13–8.20, 8.21–8.24, 8.26, 8.25.1, 8.23.1, 8.23.3–8.23.5 | 8.23.2 (кастомный dropdown), 8.25 (связь 1:1), 8.5/8.9/8.10 (⏳) |
+| 8. Гео-AR пайплайн | ⚠️ в работе | 8.6, 8.13–8.20, 8.21–8.24, 8.26, 8.25.1, 8.23.1, 8.23.3–8.23.5 | 8.23.2 (кастомный dropdown), 8.25 (связь 1:1), 8.9/8.10 (⏳); 8.5 ✅ (2026-11-12) |
 | 9. Экономика ROOT и ledger | ✅ закрыт (2026-10-23) | 9.1–9.3 | — |
 | 10. Переводы ROOT и комиссия Stars | ✅ код закрыт | 10.0.x–10.6 (10.3/10.6 частично) | долг 10.4-fix (ждёт постоянного сервера) |
 | 11. Вывод ROOT в TON | ✅ код закрыт | 11.1–11.7-b, 11.8-этапы 1–2 ✅ | ждёт testnet + постоянный сервер; 11.8: этап 1 ✅, этап 2 ✅ (ввод дробных — отдельно) |
@@ -614,8 +614,8 @@
 - **Client UI:** экран сканера с компасом и расстоянием.
 - **Проверка:** сканер показывает направление до точки.
 
-### Спринт 8.5. LocationProof в solo-flow — вертикальный срез ⏳
-- **Статус**: ⏳ не начат — LocationProof работает только в team-flow; в solo-flow не перенесён.
+### Спринт 8.5. LocationProof в solo-flow — вертикальный срез ✅
+- **Статус**: ✅ закрыт (2026-11-12). См. раздел «Sprint 8.5 — ✅ закрыт» в конце файла.
 - **БД:** переиспользовать LocationProof (уже есть в geo_team_runtime_models.py).
 - **Backend:** перенести логику проверки присутствия из team_missions_service в mission_engine; POST /api/v1/engine/missions/{id}/location-proof; проверка accuracy, freshness, расстояния.
 - **Admin UI:** настройки точности (max_location_accuracy_meters, minimum_presence_seconds) в GeoZone.
@@ -1875,3 +1875,36 @@ telegram, тип string, не sensitive, default ""). CMS-first с fallback на
 `economy.transfer_min_amount = 0` в админке (default 1 блокирует).
 
 Остаток: цены входа миссий (Sprint C) — отдельное архитектурное решение.
+
+## Sprint 8.5 — ✅ закрыт (2026-11-12)
+
+**Цель:** LocationProof в solo-флоу — сервер требует свежее подтверждение
+присутствия при выполнении solo-миссии (по CMS-политике, по умолчанию off).
+
+**Шаги:**
+- ✅ **8.5-контракт** (`29be9aa`): solo-контракт v2 — geo/location proof
+  разрешён через CMS, отдельным роутом, без сырых координат.
+- ✅ **8.5-1** (`cc99c71`): общие гео-примитивы вынесены в `app/geo_location_proof.py`
+  (`is_inside_zone`, `create_location_proof`, `has_fresh_verified_proof`,
+  константы); team переведён на них без изменения поведения.
+- ✅ **8.5-2** (`64cea8e`): роут `POST /api/v1/engine/missions/{id}/location-proof`
+  + `_submit_solo_location_proof` (accuracy по `GeoZone.max_location_accuracy_meters`,
+  zone_id = `zone.slug`).
+- ✅ **8.5-2b** (`554297e`): CMS-гейт `geo.solo_proof_mode=enforce` в
+  `_submit_mission_once` (без свежего verified proof → 409); default off.
+- ✅ **8.5-3** (`cc718fe`): фронт — кнопка «Подтвердить присутствие» в
+  TerminalScreen (solo only), `submitSoloLocationProof`.
+- ✅ **8.5-4** (`7b2ab22`): тесты `test_solo_location_proof.py` (8 шт.: T1-T6 +
+  B1 slug/id + B2 no raw coords).
+- ✅ **8.5-5a** (`1812443`): seed-миграция `b8f2c4d6e9a1` (`geo.solo_proof_mode=off`,
+  string, active) + строгий `validate_catalog_values`.
+
+**Тесты:** 942/942 OK (полный suite). **PG:** локальный PostgreSQL в Ubuntu
+(5433, chimera_test).
+
+**Операционное:** включение гейта — `PUT /api/v1/admin/system-settings/geo.solo_proof_mode`
+значение `"enforce"` (строка уже в БД благодаря seed-миграции). По умолчанию off.
+
+**Остаток:** античит по velocity/teleport (Sprint 8.9), Segment→Part (8.10 — ✅
+закрыт ранее), AR (вне Telegram Web).
+

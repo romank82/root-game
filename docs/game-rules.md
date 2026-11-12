@@ -132,3 +132,11 @@ Detailed contracts: `docs/mission-run-contract.md`,
 недостатке газа — 402, откат.
 
 **Ограничения**: `blocked` / `suspended` / `transfer_restricted` — 403.
+
+## Подтверждение присутствия (location proof)
+
+Solo-миссии могут требовать подтверждение присутствия: игрок нажимает
+«Подтвердить присутствие» в терминале, сервер проверяет зону и accuracy.
+Гейт включается CMS-ключом `geo.solo_proof_mode=enforce` (по умолчанию off).
+Без свежего verified proof при enforce — сдача миссии отклоняется (409).
+
