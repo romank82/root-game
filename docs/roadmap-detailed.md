@@ -39,7 +39,11 @@
 
 ## Этап 3. CMS игровых заданий — ✅ готов
 
-Уже реализовано: Season, Chapter, StoryNode, Mission, MissionRequirement, MissionReward, Item + админ-роутеры + жизненный цикл draft → published → archived.
+Уже реализовано: Season, Mission, MissionRequirement, MissionReward, Item + админ-роутеры + жизненный цикл draft → published → archived.
+
+> Structure-Simplify (2026-11-13): иерархия упрощена до Season → Mission.
+> Chapter, Segment, SegmentMission, StoryNode удалены (миграция `a7f3c2d9e1b0`);
+> миссии привязаны к `season_id`, `story_node` убран из наград/валидации.
 
 ### ✅ Шаг 3.1: Модель Key
 - **Что**: создать отдельную сущность ключа доступа.
@@ -392,9 +396,8 @@
   (порога-магнитуды нет: super-admin в direct исполняет сразу); терминальные статусы — 409,
   replay через immutable admin_audit_log — 200 idempotent; `new == old` — `changed: false`
   (аудит пишется); fallback-семантика `0` описана в api-contracts.
-- **5.6.d — manual reward endpoint** ❌ не делаем: покрывается 5.4/5.5. Известное
-  ограничение: `MissionReward.story_node_id` не покрывается 5.4/5.5 — фиксируется
-  документально, отдельная работа не планируется.
+- **5.6.d — manual reward endpoint** ❌ не делаем: покрывается 5.4/5.5. (Устарело:
+  `MissionReward.story_node_id` удалён в Structure-Simplify, 2026-11-13.)
 
 ### Шаг 5.7: Управление ограничениями игрока через админку — ✅ сделано
 
@@ -908,7 +911,7 @@ Handler НЕ трогает (остаётся в mission_engine.py без изм
 
 ### Спринт 8.21–8.26. Иерархия контента — ⏳ в работе (8.21/8.22/8.23/8.23.1/8.23.3/8.23.4/8.23.5/8.24/8.25.1/8.26 закрыты, 8.25 открыт; 8.23.2 — в очереди)
 
-**Зачем:** админ управляет иерархией через каскадный выбор (Сезон → Глава → Сегмент → Миссия), а не вбивает ID вручную. Модель уже готова (Season → Chapter → {Mission, Segment, StoryNode}, FK есть). Миграции не нужны.
+**Зачем:** админ управляет иерархией через каскадный выбор (Сезон → Миссия), а не вбивает ID вручную. Модель упрощена до Season → Mission (Structure-Simplify, 2026-11-13): Chapter/Segment/SegmentMission/StoryNode удалены, миссии привязаны к `season_id`. Миграции не нужны.
 
 **Этапы:**
 - 8.21 ✅ Season CRUD — закрыт (2026-10-21).
