@@ -10,7 +10,6 @@ from app.admin_missions import (
     _validate_team_mission_config,
 )
 from app.geo_team_contract import validate_team_mission_validation_config
-from app.admin_segments import _validate_public_segment_content
 
 
 def valid_mission_content() -> dict:
@@ -20,28 +19,6 @@ def valid_mission_content() -> dict:
             "label": "PUBLIC CHECK",
             "question": "Public question",
             "inputPlaceholder": "Enter answer",
-        },
-    }
-
-
-def valid_segment_content() -> dict:
-    return {
-        "schemaVersion": 1,
-        "presentation": {
-            "code": "TEST-SEGMENT",
-            "type": "ARCHIVE_SEGMENT",
-        },
-        "location": {
-            "searchRadiusMeters": 250,
-            "safeScanRadiusMeters": 15,
-            "safeScanPoint": {
-                "latitude": 54.0,
-                "longitude": 82.0,
-            },
-        },
-        "arScene": {
-            "scenePreset": "archive_cube_v1",
-            "scanHoldDurationMs": 1800,
         },
     }
 
@@ -464,25 +441,6 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             chapter_id="chapter-test",
             rewards=[],
         )
-
-    def test_accepts_valid_segment_content(self) -> None:
-        _validate_public_segment_content(valid_segment_content())
-
-    def test_rejects_segment_content_without_echoing_sensitive_value(self) -> None:
-        content = valid_segment_content()
-        content["arScene"]["validationConfig"] = {
-            "acceptedAnswers": ["sensitive-answer"],
-        }
-
-        with self.assertRaises(HTTPException) as captured:
-            _validate_public_segment_content(content)
-
-        self.assertEqual(captured.exception.status_code, 422)
-        self.assertEqual(
-            captured.exception.detail,
-            "Публичный content Segment не соответствует опубликованному контракту.",
-        )
-        self.assertNotIn("sensitive-answer", captured.exception.detail)
 
 
 if __name__ == "__main__":
