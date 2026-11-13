@@ -478,9 +478,6 @@ export function TerminalScreen({
             name: reward.itemCode ?? reward.itemId,
           })
         }
-        if (reward.type === 'story_node' && reward.storyNodeId) {
-          return t('terminal:rewards.storyNode', { name: reward.storyNodeId })
-        }
         return null
       })
       .filter((label): label is string => label !== null)

@@ -107,7 +107,7 @@ i18n
       caches: ['localStorage'],
     },
     defaultNS: 'common',
-    ns: ['common', 'errors', 'terminal', 'profile', 'shop', 'team', 'scanner', 'cipher', 'memory', 'archive', 'map', 'inventory', 'transfer', 'briefing'],
+    ns: ['common', 'errors', 'terminal', 'profile', 'shop', 'team', 'scanner', 'cipher', 'memory', 'map', 'inventory', 'transfer', 'briefing'],
     interpolation: { escapeValue: false },
   })
 

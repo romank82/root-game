@@ -689,13 +689,6 @@ export function TeamSessionScreen({
                     .join(', ')}
                 </p>
               )}
-              {lastAwarded.storyNodeIds.length > 0 && (
-                <p>
-                  {t('team:final.storyNodes', {
-                    count: lastAwarded.storyNodeIds.length,
-                  })}
-                </p>
-              )}
             </>
           )}
           {/* Sprint 6.6-b: после финала чат закрыт (бэкенд отдаёт 409). */}
@@ -728,13 +721,6 @@ export function TeamSessionScreen({
                   {lastAwarded.items
                     .map((item) => `${item.title} ×${item.quantity}`)
                     .join(', ')}
-                </p>
-              )}
-              {lastAwarded.storyNodeIds.length > 0 && (
-                <p>
-                  {t('team:final.storyNodes', {
-                    count: lastAwarded.storyNodeIds.length,
-                  })}
                 </p>
               )}
             </>

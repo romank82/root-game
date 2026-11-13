@@ -14,18 +14,16 @@ export type AdminUser = {
 
 export type AdminReward = {
   id?: string
-  rewardType: 'currency' | 'item' | 'story_node' | string
+  rewardType: 'currency' | 'item' | string
   amount: number | null
   itemId: string | null
-  storyNodeId: string | null
   rewardValue: Record<string, unknown>
   sortOrder: number
 }
 
 export type AdminMission = {
   id: string
-  chapterId: string
-  storyNodeId: string | null
+  seasonId: string
   geoZoneId: string | null
   arObjectId: string | null
   // Backend admin API пока не отдаёт это поле (шаг 8.17.5), поэтому поле optional.
@@ -52,8 +50,7 @@ export type AdminMission = {
 }
 
 export type AdminMissionPayload = {
-  chapter_id: string
-  story_node_id?: string | null
+  season_id: string
   geo_zone_id?: string | null
   ar_object_id?: string | null
   minigame_profile_id?: string | null
@@ -73,7 +70,6 @@ export type AdminMissionPayload = {
     reward_type: string
     amount?: number | null
     item_id?: string | null
-    story_node_id?: string | null
     reward_value?: Record<string, unknown>
     sort_order?: number
   }>
@@ -165,10 +161,10 @@ export async function logoutAdmin(): Promise<void> {
 }
 
 export async function listAdminMissions(
-  chapterId?: string,
+  seasonId?: string,
 ): Promise<AdminMission[]> {
   const params = new URLSearchParams()
-  if (chapterId) params.set('chapter_id', chapterId)
+  if (seasonId) params.set('season_id', seasonId)
   const query = params.toString() ? `?${params.toString()}` : ''
   const response = await adminFetch(`/api/v1/admin/missions${query}`)
 
@@ -377,14 +373,8 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   { code: 'ar_objects.read', title: 'Просмотр AR-объектов', category: 'content' },
   { code: 'missions.manage', title: 'Управление миссиями', category: 'content' },
   { code: 'missions.read', title: 'Просмотр миссий', category: 'content' },
-  { code: 'segments.manage', title: 'Управление частями', category: 'content' },
-  { code: 'segments.read', title: 'Просмотр частей', category: 'content' },
   { code: 'seasons.read', title: 'Просмотр сезонов', category: 'content' },
   { code: 'seasons.manage', title: 'Управление сезонами', category: 'content' },
-  { code: 'chapters.read', title: 'Просмотр глав', category: 'content' },
-  { code: 'chapters.manage', title: 'Управление главами', category: 'content' },
-  { code: 'story_nodes.read', title: 'Просмотр сюжетных узлов', category: 'content' },
-  { code: 'story_nodes.manage', title: 'Управление сюжетными узлами', category: 'content' },
   { code: 'key_rules.manage', title: 'Управление правилами ключей', category: 'economy' },
   { code: 'key_rules.read', title: 'Просмотр правил ключей', category: 'economy' },
   { code: 'reward_pools.manage', title: 'Управление пулами наград', category: 'economy' },
@@ -779,124 +769,6 @@ export async function publishMissionRuntimePolicy(
   return body.missionRuntimePolicy
 }
 
-export type AdminSegmentLink = {
-  id: string
-  missionId: string
-  sortOrder: number
-}
-
-export type AdminSegment = {
-  id: string
-  chapterId: string
-  slug: string
-  title: string
-  description: string | null
-  content: Record<string, unknown>
-  status: string
-  sortOrder: number
-  linkedMissions: AdminSegmentLink[]
-  createdAt: string | null
-  updatedAt: string | null
-}
-
-export type CreateSegmentPayload = {
-  chapter_id: string
-  slug?: string
-  title: string
-  description?: string | null
-  content?: Record<string, unknown>
-  sort_order?: number
-  linked_missions?: Array<{ mission_id: string; sort_order: number }>
-}
-
-export type UpdateSegmentPayload = {
-  chapter_id?: string
-  slug?: string
-  title?: string
-  description?: string | null
-  content?: Record<string, unknown>
-  sort_order?: number
-  linked_missions?: Array<{ mission_id: string; sort_order: number }>
-}
-
-export async function listSegments(chapterId?: string): Promise<AdminSegment[]> {
-  const params = new URLSearchParams()
-  if (chapterId) params.set('chapter_id', chapterId)
-  const query = params.toString() ? `?${params.toString()}` : ''
-  const response = await adminFetch(`/api/v1/admin/segments${query}`)
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { segments: AdminSegment[] }
-  return body.segments
-}
-
-export async function getSegment(segmentId: string): Promise<AdminSegment> {
-  const response = await adminFetch(
-    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}`,
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { segment: AdminSegment }
-  return body.segment
-}
-
-export async function createSegment(
-  payload: CreateSegmentPayload,
-): Promise<AdminSegment> {
-  const response = await adminFetch('/api/v1/admin/segments', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { segment: AdminSegment }
-  return body.segment
-}
-
-export async function updateSegment(
-  segmentId: string,
-  payload: UpdateSegmentPayload,
-): Promise<AdminSegment> {
-  const response = await adminFetch(
-    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}`,
-    {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { segment: AdminSegment }
-  return body.segment
-}
-
-export async function publishSegment(segmentId: string): Promise<AdminSegment> {
-  const response = await adminFetch(
-    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}/publish`,
-    { method: 'POST' },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { segment: AdminSegment }
-  return body.segment
-}
-
-export async function unpublishSegment(segmentId: string): Promise<AdminSegment> {
-  const response = await adminFetch(
-    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}/unpublish`,
-    { method: 'POST' },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { segment: AdminSegment }
-  return body.segment
-}
-
-export async function archiveSegment(segmentId: string): Promise<AdminSegment> {
-  const response = await adminFetch(
-    `/api/v1/admin/segments/${encodeURIComponent(segmentId)}/archive`,
-    { method: 'POST' },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { segment: AdminSegment }
-  return body.segment
-}
 export type AdminGeoZone = {
   id: string
   slug: string
@@ -1318,215 +1190,6 @@ export async function archiveSeason(seasonId: string): Promise<AdminSeason> {
   if (!response.ok) throw new Error(await readError(response))
   const body = (await response.json()) as { season: AdminSeason }
   return body.season
-}
-
-export type AdminChapter = {
-  id: string
-  seasonId: string
-  slug: string
-  title: string
-  description: string | null
-  status: 'draft' | 'published' | 'archived'
-  sortOrder: number
-  createdAt: string | null
-  updatedAt: string | null
-}
-
-export type CreateChapterPayload = {
-  season_id: string
-  slug?: string | null
-  title: string
-  description?: string | null
-  sort_order?: number
-}
-
-export type UpdateChapterPayload = {
-  season_id?: string | null
-  slug?: string | null
-  title?: string | null
-  description?: string | null
-  sort_order?: number | null
-}
-
-export async function listChapters(
-  status?: string,
-  seasonId?: string,
-): Promise<AdminChapter[]> {
-  const params = new URLSearchParams()
-  if (status) params.set('status', status)
-  if (seasonId) params.set('season_id', seasonId)
-  const query = params.toString() ? `?${params.toString()}` : ''
-  const response = await adminFetch(`/api/v1/admin/chapters${query}`)
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { chapters: AdminChapter[] }
-  return body.chapters
-}
-
-export async function getChapter(chapterId: string): Promise<AdminChapter> {
-  const response = await adminFetch(
-    `/api/v1/admin/chapters/${encodeURIComponent(chapterId)}`,
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { chapter: AdminChapter }
-  return body.chapter
-}
-
-export async function createChapter(
-  payload: CreateChapterPayload,
-): Promise<AdminChapter> {
-  const response = await adminFetch('/api/v1/admin/chapters', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { chapter: AdminChapter }
-  return body.chapter
-}
-
-export async function updateChapter(
-  chapterId: string,
-  payload: UpdateChapterPayload,
-): Promise<AdminChapter> {
-  const response = await adminFetch(
-    `/api/v1/admin/chapters/${encodeURIComponent(chapterId)}`,
-    {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { chapter: AdminChapter }
-  return body.chapter
-}
-
-export async function publishChapter(chapterId: string): Promise<AdminChapter> {
-  const response = await adminFetch(
-    `/api/v1/admin/chapters/${encodeURIComponent(chapterId)}/publish`,
-    { method: 'POST' },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { chapter: AdminChapter }
-  return body.chapter
-}
-
-export async function archiveChapter(chapterId: string): Promise<AdminChapter> {
-  const response = await adminFetch(
-    `/api/v1/admin/chapters/${encodeURIComponent(chapterId)}/archive`,
-    { method: 'POST' },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { chapter: AdminChapter }
-  return body.chapter
-}
-
-export type AdminStoryNode = {
-  id: string
-  chapterId: string
-  slug: string
-  title: string
-  body: string
-  presentationType: string
-  content: Record<string, unknown>
-  status: 'draft' | 'published' | 'archived'
-  sortOrder: number
-  createdAt: string | null
-  updatedAt: string | null
-}
-
-export type CreateStoryNodePayload = {
-  chapter_id: string
-  slug?: string | null
-  title: string
-  body: string
-  presentation_type?: string
-  content?: Record<string, unknown>
-  sort_order?: number
-}
-
-export type UpdateStoryNodePayload = {
-  chapter_id?: string | null
-  slug?: string | null
-  title?: string | null
-  body?: string | null
-  presentation_type?: string | null
-  content?: Record<string, unknown> | null
-  sort_order?: number | null
-}
-
-export async function listStoryNodes(
-  status?: string,
-  chapterId?: string,
-): Promise<AdminStoryNode[]> {
-  const params = new URLSearchParams()
-  if (status) params.set('status', status)
-  if (chapterId) params.set('chapter_id', chapterId)
-  const query = params.toString() ? `?${params.toString()}` : ''
-  const response = await adminFetch(`/api/v1/admin/story-nodes${query}`)
-  if (!response.ok) throw new Error(await readError(response))
-  // Backend отдаёт {"story_nodes": [...]} (snake_case, см. list_admin_story_nodes).
-  const body = (await response.json()) as { story_nodes: AdminStoryNode[] }
-  return body.story_nodes
-}
-
-export async function getStoryNode(id: string): Promise<AdminStoryNode> {
-  const response = await adminFetch(
-    `/api/v1/admin/story-nodes/${encodeURIComponent(id)}`,
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { story_node: AdminStoryNode }
-  return body.story_node
-}
-
-export async function createStoryNode(
-  payload: CreateStoryNodePayload,
-): Promise<AdminStoryNode> {
-  const response = await adminFetch('/api/v1/admin/story-nodes', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { story_node: AdminStoryNode }
-  return body.story_node
-}
-
-export async function updateStoryNode(
-  id: string,
-  payload: UpdateStoryNodePayload,
-): Promise<AdminStoryNode> {
-  const response = await adminFetch(
-    `/api/v1/admin/story-nodes/${encodeURIComponent(id)}`,
-    {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { story_node: AdminStoryNode }
-  return body.story_node
-}
-
-export async function publishStoryNode(id: string): Promise<AdminStoryNode> {
-  const response = await adminFetch(
-    `/api/v1/admin/story-nodes/${encodeURIComponent(id)}/publish`,
-    { method: 'POST' },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { story_node: AdminStoryNode }
-  return body.story_node
-}
-
-export async function archiveStoryNode(id: string): Promise<AdminStoryNode> {
-  const response = await adminFetch(
-    `/api/v1/admin/story-nodes/${encodeURIComponent(id)}/archive`,
-    { method: 'POST' },
-  )
-  if (!response.ok) throw new Error(await readError(response))
-  const body = (await response.json()) as { story_node: AdminStoryNode }
-  return body.story_node
 }
 
 export type AdminEconomyTransaction = {

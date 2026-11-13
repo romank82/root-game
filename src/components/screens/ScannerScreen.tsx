@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import type {
   EngineMission,
-  EngineSegment,
   MissionSubmission,
 } from '../../api/engineApi'
 import type { Screen } from '../../types/game'
@@ -17,7 +16,7 @@ import { useActiveMission, type MissionLayer } from '../../hooks/useActiveMissio
 import { MISSION_LAYER_COLORS } from '../../constants/missionLayerColors'
 import Game3DScene from '../Game3DScene'
 
-type SegmentContent = {
+type MissionContent = {
   code: string
   type: string
   searchRadiusMeters: number
@@ -41,7 +40,6 @@ type CodeRepairContent = {
 
 interface ScannerScreenProps {
   missions: EngineMission[]
-  segments: EngineSegment[]
   onScreenChange: (screen: Screen) => void
   onSubmitMission: (
     missionId: string,
@@ -81,9 +79,13 @@ function asNumber(
   return value
 }
 
-function parseSegmentContent(
-  content: Record<string, unknown>,
-): SegmentContent | null {
+function parseMissionContent(
+  mission: EngineMission,
+): MissionContent | null {
+  const content = asRecord(mission.content)
+  if (!content) {
+    return null
+  }
   const presentation = asRecord(content.presentation)
   const location = asRecord(content.location)
   const point = asRecord(location?.safeScanPoint)
@@ -185,7 +187,6 @@ function formatAwarded(response: MissionSubmission, t: TFunction): string {
 
 export function ScannerScreen({
   missions,
-  segments,
   onScreenChange,
   onSubmitMission,
   geoPosition,
@@ -193,11 +194,11 @@ export function ScannerScreen({
   onExpireMission,
 }: ScannerScreenProps) {
   const { t } = useTranslation(['scanner', 'common'])
-  const [distanceToSegment, setDistanceToSegment] = useState<number | null>(null)
+  const [distanceToScanPoint, setDistanceToScanPoint] = useState<number | null>(null)
   const [isCheckingLocation, setIsCheckingLocation] = useState(false)
   const [locationError, setLocationError] = useState('')
   const [arSessionStarted, setArSessionStarted] = useState(false)
-  const [isSegmentFaceLocked, setIsSegmentFaceLocked] = useState(false)
+  const [isScanFaceLocked, setIsScanFaceLocked] = useState(false)
   const [virtualQrRevealed, setVirtualQrRevealed] = useState(false)
   const [isCodeRepairOpen, setIsCodeRepairOpen] = useState(false)
   const [repairSequence, setRepairSequence] = useState<string[]>([])
@@ -210,20 +211,11 @@ export function ScannerScreen({
   const activeMission = missions.find(
     (mission) =>
       (mission.status === 'available' || mission.status === 'in_progress') &&
-      parseCodeRepairContent(mission) !== null &&
-      segments.some((segment) =>
-        segment.linkedMissions.some((link) => link.id === mission.id),
-      ),
+      parseCodeRepairContent(mission) !== null,
   ) ?? null
 
-  const activeSegment = activeMission
-    ? segments.find((segment) =>
-      segment.linkedMissions.some((link) => link.id === activeMission.id),
-    ) ?? null
-    : null
-
-  const segmentContent = activeSegment
-    ? parseSegmentContent(activeSegment.content)
+  const missionContent = activeMission
+    ? parseMissionContent(activeMission)
     : null
 
   const codeRepairContent = activeMission
@@ -300,7 +292,7 @@ export function ScannerScreen({
     )
   }
 
-  if (!activeMission || !activeSegment || !segmentContent || !codeRepairContent) {
+  if (!activeMission || !missionContent || !codeRepairContent) {
     return (
       <section className="segment-screen">
         <p className="eyebrow">{t('scanner:errors.cmsUnavailableEyebrow')}</p>
@@ -321,12 +313,12 @@ export function ScannerScreen({
   // The safe empty-state return above guarantees these CMS values exist here.
   // Local constants preserve that narrowing inside browser/API callbacks.
   const mission = activeMission
-  const content = segmentContent
+  const content = missionContent
   const repair = codeRepairContent
 
   const canStartArSearch =
-    distanceToSegment !== null &&
-    distanceToSegment <= content.safeScanRadiusMeters
+    distanceToScanPoint !== null &&
+    distanceToScanPoint <= content.safeScanRadiusMeters
 
   function checkPlayerLocation() {
     if (!navigator.geolocation) {
@@ -345,7 +337,7 @@ export function ScannerScreen({
           content.latitude,
           content.longitude,
         )
-        setDistanceToSegment(distance)
+        setDistanceToScanPoint(distance)
         setIsCheckingLocation(false)
       },
       (error) => {
@@ -370,7 +362,7 @@ export function ScannerScreen({
 
   function startArSearch() {
     setArSessionStarted(true)
-    setIsSegmentFaceLocked(false)
+    setIsScanFaceLocked(false)
     setVirtualQrRevealed(false)
     setIsCodeRepairOpen(false)
     setRepairSequence([])
@@ -501,7 +493,7 @@ export function ScannerScreen({
               <p>{locationError}</p>
             </div>
           </>
-        ) : distanceToSegment === null ? (
+        ) : distanceToScanPoint === null ? (
           <>
             <span className="location-status-icon">⌖</span>
             <div>
@@ -514,7 +506,7 @@ export function ScannerScreen({
             <span className="location-status-icon">✓</span>
             <div>
               <strong>{t('scanner:navigation.pointAvailableTitle')}</strong>
-              <p>{t('scanner:navigation.pointAvailableBody', { distance: distanceToSegment })}</p>
+              <p>{t('scanner:navigation.pointAvailableBody', { distance: distanceToScanPoint })}</p>
             </div>
           </>
         ) : (
@@ -524,7 +516,7 @@ export function ScannerScreen({
               <strong>{t('scanner:navigation.tooFarTitle')}</strong>
               <p>
                 {t('scanner:navigation.tooFarBody', {
-                  distance: distanceToSegment,
+                  distance: distanceToScanPoint,
                   radius: content.safeScanRadiusMeters,
                 })}
               </p>
@@ -613,7 +605,7 @@ export function ScannerScreen({
           <span className="file-label">{t('scanner:ar.sessionInitialized')}</span>
           <div
             className={`ar-placeholder-frame ${
-              isSegmentFaceLocked ? 'face-locked' : ''
+              isScanFaceLocked ? 'face-locked' : ''
             }`}
           >
             <div className="ar-cube">
@@ -633,17 +625,17 @@ export function ScannerScreen({
             </div>
             <div className="ar-reticle">+</div>
             <span className="ar-scan-line" />
-            {isSegmentFaceLocked && (
+            {isScanFaceLocked && (
               <span className="face-lock-status">{t('scanner:ar.faceLocked')}</span>
             )}
           </div>
-          {!isSegmentFaceLocked ? (
+          {!isScanFaceLocked ? (
             <>
               <h3>{t('scanner:ar.aimTitle')}</h3>
               <p>{t('scanner:ar.aimBody')}</p>
               <button
                 className="ar-action-button"
-                onClick={() => setIsSegmentFaceLocked(true)}
+                onClick={() => setIsScanFaceLocked(true)}
               >
                 {t('scanner:ar.lockFace')}
               </button>

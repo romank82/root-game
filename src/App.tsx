@@ -10,7 +10,6 @@ import { MobileNavigation } from './components/MobileNavigation'
 import { MoreSheet } from './components/MoreSheet'
 import { BriefingScreen } from './components/screens/BriefingScreen'
 import { TerminalScreen } from './components/screens/TerminalScreen'
-import { ArchiveScreen } from './components/screens/ArchiveScreen'
 import { InventoryScreen } from './components/screens/InventoryScreen'
 import { ScannerScreen } from './components/screens/ScannerScreen'
 import { ShopScreen } from './components/screens/ShopScreen'
@@ -32,9 +31,7 @@ function App() {
     setAccepted,
     echo,
     inventory,
-    storyNodes,
     missions,
-    segments,
     apiStatus,
     
     applyEngineBootstrap,
@@ -153,13 +150,6 @@ function App() {
         />
       )}
 
-      {screen === 'archive' && (
-        <ArchiveScreen
-          storyNodes={storyNodes}
-          onScreenChange={setScreen}
-        />
-      )}
-
       {screen === 'inventory' && (
         <InventoryScreen inventory={inventory} onScreenChange={setScreen} />
       )}
@@ -167,7 +157,6 @@ function App() {
       {screen === 'scanner' && (
         <ScannerScreen
           missions={missions}
-          segments={segments}
           onScreenChange={setScreen}
           onSubmitMission={submitMission}
           geoPosition={geoPosition}

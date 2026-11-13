@@ -1,7 +1,6 @@
 export type Screen =
   | 'briefing'
   | 'terminal'
-  | 'archive'
   | 'inventory'
   | 'profile'
   | 'transfer'

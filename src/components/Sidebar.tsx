@@ -34,10 +34,6 @@ export function Sidebar({
         ◉ {t('common:tabs.terminal')}
       </button>
 
-      <button onClick={() => onScreenChange('archive')}>
-        ▤ {t('common:tabs.archive')}
-      </button>
-
       <button onClick={() => onScreenChange('inventory')}>
         ◈ {t('common:tabs.inventory')}
       </button>

@@ -21,14 +21,13 @@ export type EngineMissionSpawn = {
 }
 
 export type EngineReward = {
-  type: string // 'currency' | 'item' | 'story_node'
+  type: string // 'currency' | 'item'
   amount: number | null
   itemId: string | null
   // Sprint 8.x: человекочитаемый код предмета (Item.code, например
   // TEST_KEY_003) — его же показывает магазин; null у не-item наград
   // и если предмет не найден. В UI предпочтителен над itemId.
   itemCode: string | null
-  storyNodeId: string | null
 }
 
 export type EngineMission = {
@@ -90,7 +89,7 @@ export type EngineMission = {
     quantity: number
   }[]
   // Sprint 8.x: публичные награды миссии из MissionReward (currency ROOT /
-  // item / story_node) для блока «Возможные награды» в карточке.
+  // item) для блока «Возможные награды» в карточке.
   rewards?: EngineReward[]
   // Командные миссии (7.1): X/Y-счётчик состава в карточке активной
   // миссии. sessionMemberCount — активные участники командной сессии игрока
@@ -157,32 +156,6 @@ export type EngineInventoryItem = {
   quantity: number
 }
 
-export type EngineStoryNode = {
-  id: string
-  slug: string
-  title: string
-  body: string
-  presentationType: string
-  content: Record<string, unknown>
-}
-
-export type EngineSegmentLink = {
-  id: string
-  slug: string
-  title: string
-}
-
-export type EngineSegment = {
-  id: string
-  slug: string
-  title: string
-  description: string
-  content: Record<string, unknown>
-  status: string
-  sortOrder: number
-  linkedMissions: EngineSegmentLink[]
-}
-
 export type EngineBootstrap = {
   player: {
     id: string
@@ -202,9 +175,7 @@ export type EngineBootstrap = {
   // 10.4-j-0: баланс газа — строка (дробный Numeric(18,4) с бэка).
   gasBalance: string
   missions: EngineMission[]
-  segments: EngineSegment[]
   inventory: EngineInventoryItem[]
-  storyNodes: EngineStoryNode[]
 }
 
 export type MissionSubmission = {
@@ -221,7 +192,6 @@ export type MissionSubmission = {
       title: string
       quantity: number
     }>
-    storyNodeIds: string[]
   }
   bootstrap: EngineBootstrap
 }
@@ -428,53 +398,6 @@ export async function expireEngineMission(
   }
 
   return response.json() as Promise<EngineExpireMissionResponse>
-}
-
-/**
- * @deprecated Sprint 8.13: не используется в solo-flow.
- * Контент мини-игры берётся из mission.content (bootstrap).
- * Оставлено для team-flow / будущего применения.
- */
-export async function getMissionQrPayload(
-  missionId: string,
-): Promise<EngineMissionQrPayload> {
-  const response = await apiFetch(
-    `/api/v1/engine/missions/${missionId}/qr-payload`,
-    { method: 'GET' },
-  )
-
-  if (!response.ok) {
-    throw new Error(await readError(response))
-  }
-
-  return response.json() as Promise<EngineMissionQrPayload>
-}
-
-/**
- * @deprecated Sprint 8.13: не используется в solo-flow.
- * Контент мини-игры берётся из mission.content (bootstrap).
- * Оставлено для team-flow / будущего применения.
- */
-export async function scanMissionQr(
-  missionId: string,
-  payloadAndHmac: string,
-): Promise<EngineMissionScanResult> {
-  const response = await apiFetch(
-    `/api/v1/engine/missions/${missionId}/scan-qr`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ payload_and_hmac: payloadAndHmac }),
-    },
-  )
-
-  if (!response.ok) {
-    throw new Error(await readError(response))
-  }
-
-  return response.json() as Promise<EngineMissionScanResult>
 }
 
 export async function listFallbackOffers(): Promise<FallbackOffer[]> {
@@ -947,7 +870,6 @@ export type EngineTeamAwarded = {
     title: string
     quantity: number
   }>
-  storyNodeIds: string[]
 }
 
 // Sprint 8.x-2b: ответ POST submit-wave. Успех и провал волны (неверная
@@ -1120,7 +1042,7 @@ export async function getActiveTeamSessions(
 // (succeeded/failed) + его награды. Контракт бэкенда:
 // GET /api/v1/engine/team-missions/sessions/last → {"session": {...} | null}.
 // session — EngineTeamSession + awarded (награды ИГРОКА из его
-// awarded_snapshot: root/items/storyNodeIds; null, если наград не было).
+// awarded_snapshot: root/items; null, если наград не было).
 // Вызывается ОДИН раз при sessionEnded (поллинг вернул []), не каждые 3 сек.
 export type EngineTeamLastSessionResult = {
   session:

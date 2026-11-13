@@ -4,20 +4,18 @@ import {
   createAdminMission,
   getMissionRuntimePolicyByMission,
   listAdminMissions,
-  listChapters,
-  listStoryNodes,
+  listSeasons,
   publishAdminMission,
   publishMissionRuntimePolicy,
   unpublishAdminMission,
   updateAdminMission,
   upsertMissionRuntimePolicy,
   type AdminARObject,
-  type AdminChapter,
   type AdminGeoZone,
   type AdminMinigameProfile,
   type AdminMission,
   type AdminMissionPayload,
-  type AdminStoryNode,
+  type AdminSeason,
   type AdminUser,
   type KeyItem,
   type MissionRuntimePolicy,
@@ -28,13 +26,11 @@ type RewardForm = {
   rewardType: string
   amount: string
   itemId: string
-  storyNodeId: string
   sortOrder: string
 }
 
 export type MissionForm = {
-  chapterId: string
-  storyNodeId: string
+  seasonId: string
   geoZoneId: string
   arObjectId: string
   minigameProfileId: string
@@ -85,13 +81,11 @@ const emptyReward = (): RewardForm => ({
   rewardType: 'currency',
   amount: '1',
   itemId: '',
-  storyNodeId: '',
   sortOrder: '0',
 })
 
 const emptyForm = (): MissionForm => ({
-  chapterId: '',
-  storyNodeId: '',
+  seasonId: '',
   geoZoneId: '',
   arObjectId: '',
   minigameProfileId: '',
@@ -280,8 +274,7 @@ function formFromMission(mission: AdminMission): MissionForm {
   }
 
   return {
-    chapterId: mission.chapterId,
-    storyNodeId: mission.storyNodeId ?? '',
+    seasonId: mission.seasonId,
     geoZoneId: mission.geoZoneId ?? '',
     arObjectId: mission.arObjectId ?? '',
     minigameProfileId: mission.minigameProfileId ?? '',
@@ -367,7 +360,6 @@ function formFromMission(mission: AdminMission): MissionForm {
       rewardType: reward.rewardType,
       amount: reward.amount === null ? '' : String(reward.amount),
       itemId: reward.itemId ?? '',
-      storyNodeId: reward.storyNodeId ?? '',
       sortOrder: String(reward.sortOrder),
     })),
   }
@@ -392,7 +384,6 @@ function parseObject(value: string, label: string): Record<string, unknown> {
 function buildRewardPreview(
   rewards: RewardForm[],
   keyItems: KeyItem[],
-  storyNodes: AdminStoryNode[],
 ): string {
   const parts: string[] = []
   for (const reward of rewards) {
@@ -406,11 +397,6 @@ function buildRewardPreview(
       if (itemId === '') continue
       const item = keyItems.find((entry) => entry.id === itemId)
       parts.push(`предмет: ${item?.title ?? itemId}`)
-    } else if (rewardType === 'story_node') {
-      const storyNodeId = reward.storyNodeId.trim()
-      if (storyNodeId === '') continue
-      const storyNode = storyNodes.find((entry) => entry.id === storyNodeId)
-      parts.push(`сюжетный узел: ${storyNode?.title ?? storyNodeId}`)
     }
   }
   return parts.join(', ')
@@ -419,7 +405,6 @@ function buildRewardPreview(
 function formToPayload(
   form: MissionForm,
   keyItems: KeyItem[],
-  storyNodes: AdminStoryNode[],
   geoZones: AdminGeoZone[],
   // Цена входа из блока «Взятие миссии» (policyFee) — используется в
   // валидации командной миссии (validationConfig.economy.entryFeeRootAtomic).
@@ -429,7 +414,6 @@ function formToPayload(
     reward_type: reward.rewardType.trim(),
     amount: reward.amount.trim() ? Number(reward.amount) : null,
     item_id: reward.itemId.trim() || null,
-    story_node_id: reward.storyNodeId.trim() || null,
     reward_value: reward.rewardType === 'currency' ? { currency: 'ROOT' } : {},
     sort_order: Number(reward.sortOrder || 0),
   }))
@@ -523,7 +507,7 @@ function formToPayload(
 
   // Награды — единый источник истины: content.ui.rewardPreview подставляется
   // автоматически, чтобы админ не дублировал их вручную.
-  const rewardPreview = buildRewardPreview(form.rewards, keyItems, storyNodes)
+  const rewardPreview = buildRewardPreview(form.rewards, keyItems)
   const isStructuredContent =
     form.missionType === 'text_answer' ||
     form.missionType === 'code_repair' ||
@@ -665,8 +649,7 @@ function formToPayload(
   }
 
   return {
-    chapter_id: form.chapterId.trim(),
-    story_node_id: form.storyNodeId.trim() || null,
+    season_id: form.seasonId.trim(),
     geo_zone_id: form.geoZoneId.trim() || null,
     ar_object_id: form.arObjectId.trim() || null,
     minigame_profile_id: form.minigameProfileId.trim() || null,
@@ -743,13 +726,9 @@ type MissionsSectionProps = {
   minigameProfiles: AdminMinigameProfile[]
   // Внешний выбор миссии (например, из дерева структуры в AdminTree).
   editingId?: string | null
-  // Режим создания миссии из дерева структуры: предвыбранная глава (chapterId).
+  // Режим создания миссии из дерева структуры: предвыбранный сезон (seasonId).
   // Если задан и editingId не передан — открываем форму новой миссии с
-  // предзаполненным chapterId.
-  initialChapterId?: string | null
-  // Режим создания миссии из дерева структуры на уровне сезона: предвыбранный
-  // сезон (seasonId). Миссия не привязана к сегменту; глава остаётся пустой —
-  // её выбирает администратор (список глав фильтруется по выбранному сезону).
+  // предзаполненным seasonId.
   initialSeasonId?: string | null
   // Очистка черновика (draft_mission_<id>) после успешного сохранения
   // или публикации миссии. Дублирует внутреннюю очистку (идемпотентно).
@@ -767,20 +746,15 @@ export function MissionsSection({
   arObjects,
   minigameProfiles,
   editingId,
-  initialChapterId,
   initialSeasonId,
   onDraftClear,
 }: MissionsSectionProps) {
   const [loadingMissions, setLoadingMissions] = useState(false)
   const [missions, setMissions] = useState<AdminMission[]>([])
-  const [chapters, setChapters] = useState<AdminChapter[]>([])
-  const [storyNodes, setStoryNodes] = useState<AdminStoryNode[]>([])
+  const [seasons, setSeasons] = useState<AdminSeason[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [form, setForm] = useState<MissionForm>(emptyForm)
   const [isDirty, setIsDirty] = useState(false)
-  // Режим создания из дерева на уровне сезона: фильтрует список глав
-  // в форме (глава выбирается вручную, к сегменту миссия не привязана).
-  const [seasonFilter, setSeasonFilter] = useState<string | null>(null)
   // Показывает, что черновик уже применён для текущей миссии. Сбрасывается
   // при выборе другой миссии (selectMission/startNewMission), чтобы для новой
   // миссии черновик мог восстановиться заново.
@@ -882,14 +856,14 @@ export function MissionsSection({
 
   useEffect(() => {
     let cancelled = false
-    listChapters()
+    listSeasons()
       .then((data) => {
-        if (!cancelled) setChapters(data)
+        if (!cancelled) setSeasons(data)
       })
       .catch((requestError) => {
         if (!cancelled) {
           onError(
-            requestError instanceof Error ? requestError.message : 'Не удалось загрузить главы.',
+            requestError instanceof Error ? requestError.message : 'Не удалось загрузить сезоны.',
           )
         }
       })
@@ -898,31 +872,6 @@ export function MissionsSection({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    if (!form.chapterId) {
-      setStoryNodes([])
-      return
-    }
-    listStoryNodes(undefined, form.chapterId)
-      .then((data) => {
-        if (!cancelled) setStoryNodes(data)
-      })
-      .catch((requestError) => {
-        if (!cancelled) {
-          onError(
-            requestError instanceof Error
-              ? requestError.message
-              : 'Не удалось загрузить story-nodes.',
-          )
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.chapterId])
 
   useEffect(() => {
     if (selectedId === null) {
@@ -1090,33 +1039,15 @@ export function MissionsSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, missions])
 
-  // Режим создания из дерева структуры: editingId не задан, а initialChapterId
-  // предвыбирает главу для новой миссии. Открываем форму с чистым полем
-  // mission_type=text_answer и chapterId = initialChapterId.
-  useEffect(() => {
-    if (editingId !== null && editingId !== undefined) return
-    if (initialChapterId === null || initialChapterId === undefined) return
-    setSelectedId(null)
-    setForm({ ...emptyForm(), chapterId: initialChapterId })
-    setIsDirty(false)
-    isDraftRestoredRef.current = false
-    setSeasonFilter(null)
-    onError('')
-    onNotice('')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingId, initialChapterId])
-
   // Режим создания миссии на уровне сезона: editingId не задан, а
-  // initialSeasonId предвыбирает сезон. Миссия не привязана к сегменту;
-  // глава остаётся пустой, но список глав в форме фильтруется по сезону.
+  // initialSeasonId предвыбирает сезон для новой миссии.
   useEffect(() => {
     if (editingId !== null && editingId !== undefined) return
     if (initialSeasonId === null || initialSeasonId === undefined) return
     setSelectedId(null)
-    setForm(emptyForm())
+    setForm({ ...emptyForm(), seasonId: initialSeasonId })
     setIsDirty(false)
     isDraftRestoredRef.current = false
-    setSeasonFilter(initialSeasonId)
     onError('')
     onNotice('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1285,13 +1216,12 @@ export function MissionsSection({
       const payload = formToPayload(
         form,
         keyItems,
-        storyNodes,
         geoZones,
         Number.isFinite(fee) && fee >= 0 ? fee : 0,
       )
 
-      if (!payload.chapter_id || !payload.title) {
-        throw new Error('Заполните chapter ID и название миссии.')
+      if (!payload.season_id || !payload.title) {
+        throw new Error('Заполните сезон и название миссии.')
       }
 
       const mission = selectedMission
@@ -1463,49 +1393,20 @@ export function MissionsSection({
           )}
         <div className="admin-grid">
           <label>
-              Chapter ID *
+              Сезон *
               <select
-                value={form.chapterId}
+                value={form.seasonId}
                 disabled={!canWrite}
                 onChange={(event) =>
                   setDraftForm({
                     ...form,
-                    chapterId: event.target.value,
+                    seasonId: event.target.value,
                     unlockAfterMissionId: '',
                   })
                 }
               >
-                <option value="">— Выберите главу —</option>
-                {chapters
-                  .filter((c) => c.status !== 'archived')
-                  .filter((c) =>
-                    seasonFilter === null ? true : c.seasonId === seasonFilter,
-                  )
-                  .map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.title} ({c.slug})
-                    </option>
-                  ))}
-              </select>
-              {seasonFilter !== null && (
-                <small className="admin-muted">
-                  Создание на уровне сезона: выбрана глава из этого сезона, к
-                  сегменту миссия не привязывается.
-                </small>
-              )}
-            </label>
-
-            <label>
-              Story node ID
-              <select
-                value={form.storyNodeId}
-                disabled={!canWrite || !form.chapterId}
-                onChange={(event) =>
-                  setDraftForm({ ...form, storyNodeId: event.target.value })
-                }
-              >
-                <option value="">— Не выбрано —</option>
-                {storyNodes
+                <option value="">— Выберите сезон —</option>
+                {seasons
                   .filter((s) => s.status !== 'archived')
                   .map((s) => (
                     <option key={s.id} value={s.id}>
@@ -1765,18 +1666,18 @@ export function MissionsSection({
               Разблокируется после
               <select
                 value={form.unlockAfterMissionId}
-                disabled={!canWrite || !form.chapterId}
+                disabled={!canWrite || !form.seasonId}
                 onChange={(event) =>
                   setDraftForm({ ...form, unlockAfterMissionId: event.target.value })
                 }
               >
                 <option value="">— без зависимости (доступна сразу) —</option>
-                {!form.chapterId && (
-                  <option value="">Сначала выберите главу</option>
+                {!form.seasonId && (
+                  <option value="">Сначала выберите сезон</option>
                 )}
                 {missions
                   .filter((m) => m.id !== selectedMission?.id)
-                  .filter((m) => form.chapterId && m.chapterId === form.chapterId)
+                  .filter((m) => form.seasonId && m.seasonId === form.seasonId)
                   .map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.title} · {m.slug} [{m.status}]
@@ -2487,23 +2388,20 @@ export function MissionsSection({
                   >
                     <option value="currency">currency</option>
                     <option value="item">item</option>
-                    <option value="story_node">story_node</option>
                   </select>
                 </label>
 
-                {reward.rewardType !== 'story_node' && (
-                  <label>
-                    Amount
-                    <input
-                      type="number"
-                      value={reward.amount}
-                      disabled={!canWrite}
-                      onChange={(event) =>
-                        changeReward(index, 'amount', event.target.value)
-                      }
-                    />
-                  </label>
-                )}
+                <label>
+                  Amount
+                  <input
+                    type="number"
+                    value={reward.amount}
+                    disabled={!canWrite}
+                    onChange={(event) =>
+                      changeReward(index, 'amount', event.target.value)
+                    }
+                  />
+                </label>
 
                 {reward.rewardType === 'item' && (
                   <label>
@@ -2530,28 +2428,6 @@ export function MissionsSection({
                           {ki.title} · {ki.code}
                         </option>
                       ))}
-                    </select>
-                  </label>
-                )}
-
-                {reward.rewardType === 'story_node' && (
-                  <label>
-                    Story node ID
-                    <select
-                      value={reward.storyNodeId}
-                      disabled={!canWrite || !form.chapterId}
-                      onChange={(e) =>
-                        changeReward(index, 'storyNodeId', e.target.value)
-                      }
-                    >
-                      <option value="">— Не выбрано —</option>
-                      {storyNodes
-                        .filter((s) => s.status !== 'archived')
-                        .map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.title} ({s.slug})
-                          </option>
-                        ))}
                     </select>
                   </label>
                 )}

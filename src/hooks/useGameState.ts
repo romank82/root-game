@@ -7,8 +7,6 @@ import {
   type EngineBootstrap,
   type EngineInventoryItem,
   type EngineMission,
-  type EngineSegment,
-  type EngineStoryNode,
 } from '../api/engineApi'
 import i18n from '../i18n'
 import type { ApiStatus, Screen } from '../types/game'
@@ -29,7 +27,6 @@ export function useGameState() {
     // без жеста пользователя зависает в Android WebView.
     // Открытие камеры — только по явному действию игрока.
     if (saved === 'terminal' ||
-        saved === 'archive' ||
         saved === 'inventory' ||
         saved === 'scanner' ||
         saved === 'map') {
@@ -46,17 +43,13 @@ export function useGameState() {
   // The client displays only the latest authenticated bootstrap value.
   const [echo, setEcho] = useState(0)
   const [inventory, setInventory] = useState<EngineInventoryItem[]>([])
-  const [storyNodes, setStoryNodes] = useState<EngineStoryNode[]>([])
   const [missions, setMissions] = useState<EngineMission[]>([])
-  const [segments, setSegments] = useState<EngineSegment[]>([])
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking')
 
   const applyEngineBootstrap = useCallback((bootstrap: EngineBootstrap) => {
     setEcho(bootstrap.wallet.availableBalance)
     setInventory(bootstrap.inventory)
-    setStoryNodes(bootstrap.storyNodes)
     setMissions(bootstrap.missions)
-    setSegments(bootstrap.segments)
     setApiStatus('online')
   }, [])
 
@@ -192,9 +185,7 @@ export function useGameState() {
     setAccepted,
     echo,
     inventory,
-    storyNodes,
     missions,
-    segments,
     apiStatus,
     setApiStatus,
     applyEngineBootstrap,

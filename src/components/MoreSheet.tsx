@@ -15,7 +15,6 @@ interface MoreItem {
 
 const MORE_ITEMS: MoreItem[] = [
   { screen: 'camera-test', labelKey: 'common:tabs.camera', icon: '◐' },
-  { screen: 'archive', labelKey: 'common:tabs.archive', icon: '▤' },
   { screen: 'inventory', labelKey: 'common:tabs.inventory', icon: '◈' },
   { screen: 'shop', labelKey: 'common:tabs.shop', icon: '⊕' },
   { screen: 'transfer', labelKey: 'common:tabs.transfer', icon: '⇄' },

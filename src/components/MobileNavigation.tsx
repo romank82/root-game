@@ -7,7 +7,7 @@ interface MobileNavigationProps {
   onOpenMore: () => void
 }
 
-const MORE_SCREENS: Screen[] = ['camera-test', 'archive', 'inventory', 'shop', 'transfer']
+const MORE_SCREENS: Screen[] = ['camera-test', 'inventory', 'shop', 'transfer']
 
 export function MobileNavigation({ screen, onScreenChange, onOpenMore }: MobileNavigationProps) {
   const { t } = useTranslation(['common'])
