@@ -110,16 +110,12 @@ class FallbackShopEntitlementTests(unittest.TestCase):
         second_key_reward: bool = False,
     ) -> dict[str, str]:
         from app.models import (
-            Chapter,
             GamePlayer,
             Item,
             KeyRules,
             Mission,
             MissionReward,
             Season,
-            Segment,
-            SegmentMission,
-            StoryNode,
         )
 
         suffix = uuid.uuid4().hex
@@ -127,9 +123,6 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             "player": f"player-{suffix}",
             "player_second": f"player-second-{suffix}",
             "season": f"season-{suffix}",
-            "chapter": f"chapter-{suffix}",
-            "segment": f"segment-{suffix}",
-            "story": f"story-{suffix}",
             "item": f"item-{suffix}",
             "item_second": f"item-second-{suffix}",
             "item_extra": f"item-extra-{suffix}",
@@ -152,15 +145,6 @@ class FallbackShopEntitlementTests(unittest.TestCase):
 
             session.add_all(
                 [
-                    Chapter(
-                        id=ids["chapter"],
-                        season_id=ids["season"],
-                        slug=f"chapter-{suffix}",
-                        title="Fallback test chapter",
-                        description="Isolated fallback-shop fixture",
-                        status="published",
-                        sort_order=1,
-                    ),
                     GamePlayer(
                         id=ids["player"],
                         display_name="Fallback player",
@@ -231,31 +215,6 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                     )
                 )
 
-            session.add_all(
-                [
-                    StoryNode(
-                        id=ids["story"],
-                        chapter_id=ids["chapter"],
-                        slug=f"story-{suffix}",
-                        title="Fallback story",
-                        body="Server-confirmed story content",
-                        presentation_type="document",
-                        content={"schemaVersion": 1},
-                        status="published",
-                        sort_order=1,
-                    ),
-                    Segment(
-                        id=ids["segment"],
-                        chapter_id=ids["chapter"],
-                        slug=f"segment-{suffix}",
-                        title="Published segment",
-                        description="Visible segment",
-                        status="published",
-                        sort_order=10,
-                        content={"schemaVersion": 1},
-                    ),
-                ]
-            )
             session.add_all(items)
             session.flush()
             if include_key_rules:
@@ -291,8 +250,7 @@ class FallbackShopEntitlementTests(unittest.TestCase):
             mission_rows = [
                 Mission(
                     id=ids["target"],
-                    chapter_id=ids["chapter"],
-                    story_node_id=ids["story"],
+                    season_id=ids["season"],
                     slug=f"target-{suffix}",
                     mission_type="text_answer",
                     title="Fallback target mission",
@@ -310,7 +268,7 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                 mission_rows.append(
                     Mission(
                         id=ids["target_second"],
-                        chapter_id=ids["chapter"],
+                        season_id=ids["season"],
                         slug=f"target-second-{suffix}",
                         mission_type="text_answer",
                         title="Second fallback mission",
@@ -365,28 +323,6 @@ class FallbackShopEntitlementTests(unittest.TestCase):
                     )
             session.add_all(reward_rows)
             session.flush()
-
-            session.add_all(
-                [
-                    SegmentMission(
-                        id=f"link-target-{suffix}",
-                        segment_id=ids["segment"],
-                        mission_id=ids["target"],
-                        status="active",
-                        sort_order=10,
-                    )
-                ]
-            )
-            if second_mission:
-                session.add(
-                    SegmentMission(
-                        id=f"link-target-second-{suffix}",
-                        segment_id=ids["segment"],
-                        mission_id=ids["target_second"],
-                        status="active",
-                        sort_order=20,
-                    )
-                )
 
             # Миграция уже сидит 4 строки дефолтов shop.fallback.* — upsert,
             # а не повторный INSERT (PK key конфликтовал бы).

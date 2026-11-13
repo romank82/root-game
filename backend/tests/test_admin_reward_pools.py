@@ -17,7 +17,6 @@ def _entry(**overrides: object) -> SimpleNamespace:
         "reward_type": "currency",
         "amount": 50,
         "item_id": None,
-        "story_node_id": None,
         "reward_value": {"currency": "ROOT"},
         "weight": 1,
         "sort_order": 0,
@@ -105,35 +104,6 @@ class AdminRewardPoolsEntryValidationTests(unittest.TestCase):
         except HTTPException as exc:  # pragma: no cover
             self.fail(f"Валидация item не должна падать: {exc.detail}")
 
-    def test_validate_entries_story_node_rejects_missing_story_node_id(self) -> None:
-        session = SimpleNamespace(get=lambda *args: None)
-        entries = [_entry(reward_type="story_node", story_node_id=None)]
-
-        with self.assertRaises(HTTPException) as captured:
-            _validate_entries(session, entries)
-
-        self.assertEqual(captured.exception.status_code, 422)
-        self.assertIn("story_node_id", captured.exception.detail)
-
-    def test_validate_entries_story_node_rejects_unknown_story_node_id(self) -> None:
-        session = SimpleNamespace(get=lambda *args: None)
-        entries = [_entry(reward_type="story_node", story_node_id="story-missing")]
-
-        with self.assertRaises(HTTPException) as captured:
-            _validate_entries(session, entries)
-
-        self.assertEqual(captured.exception.status_code, 422)
-        self.assertIn("story_node_id", captured.exception.detail)
-
-    def test_validate_entries_story_node_accepts_existing_story_node_id(self) -> None:
-        session = SimpleNamespace(get=lambda *args: object())
-        entries = [_entry(reward_type="story_node", story_node_id="story-1")]
-
-        try:
-            _validate_entries(session, entries)
-        except HTTPException as exc:  # pragma: no cover
-            self.fail(f"Валидация story_node не должна падать: {exc.detail}")
-
     def test_validate_entries_rejects_zero_weight(self) -> None:
         session = SimpleNamespace(get=lambda *args: None)
         entries = [_entry(weight=0)]
@@ -215,7 +185,6 @@ class AdminRewardPoolsSerializationTests(unittest.TestCase):
             reward_type="currency",
             amount=50,
             item_id=None,
-            story_node_id=None,
             reward_value={"currency": "ROOT"},
             weight=5,
             sort_order=3,
@@ -227,7 +196,6 @@ class AdminRewardPoolsSerializationTests(unittest.TestCase):
         self.assertEqual(serialized["rewardType"], "currency")
         self.assertEqual(serialized["amount"], 50)
         self.assertIsNone(serialized["itemId"])
-        self.assertIsNone(serialized["storyNodeId"])
         self.assertEqual(serialized["rewardValue"], {"currency": "ROOT"})
         self.assertEqual(serialized["weight"], 5)
         self.assertEqual(serialized["sortOrder"], 3)
@@ -241,7 +209,6 @@ class AdminRewardPoolsSerializationTests(unittest.TestCase):
                         reward_type="currency",
                         amount=50,
                         item_id=None,
-                        story_node_id=None,
                         reward_value={"currency": "ROOT"},
                         weight=5,
                         sort_order=3,
@@ -276,7 +243,6 @@ class AdminRewardPoolsSerializationTests(unittest.TestCase):
                     "rewardType": "currency",
                     "amount": 50,
                     "itemId": None,
-                    "storyNodeId": None,
                     "rewardValue": {"currency": "ROOT"},
                     "weight": 5,
                     "sortOrder": 3,

@@ -25,7 +25,6 @@ from sqlalchemy.orm import Session
 from app.db import Base
 from app.mission_engine import _get_root_wallet_for_update, _new_id
 from app.models import (
-    Chapter,
     GamePlayer,
     Item,
     Mission,
@@ -121,7 +120,7 @@ class NanoRootDualWriteTests(unittest.TestCase):
         return wallet
 
     def _make_mission(self, slug: str) -> Mission:
-        """Published text_answer-миссия с Season+Chapter (FK NOT NULL)."""
+        """Published text_answer-миссия с Season (FK NOT NULL)."""
         suffix = uuid.uuid4().hex
         season = Season(
             id=_new_id("season"),
@@ -133,20 +132,9 @@ class NanoRootDualWriteTests(unittest.TestCase):
         )
         self.session.add(season)
         self.session.flush()
-        chapter = Chapter(
-            id=_new_id("chapter"),
-            season_id=season.id,
-            slug=f"chapter-{suffix}",
-            title="Test chapter",
-            description="Fixture",
-            status="published",
-            sort_order=1,
-        )
-        self.session.add(chapter)
-        self.session.flush()
         mission = Mission(
             id=_new_id("mission"),
-            chapter_id=chapter.id,
+            season_id=season.id,
             mission_type="text_answer",
             slug=slug,
             title="Test mission",

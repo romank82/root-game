@@ -178,8 +178,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
                 "ui": {"label": "TEAM", "instruction": "Join nearby players."},
             },
             validation_config=valid_team_validation_config(),
-            chapter_id="chapter-test",
-            story_node_id=None,
+            season_id="season-test",
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
             id="mission-test",
@@ -204,15 +203,13 @@ class AdminPublicContentValidationTests(unittest.TestCase):
 
         validate_references.assert_called_once_with(
             session,
-            chapter_id="chapter-test",
-            story_node_id=None,
+            season_id="season-test",
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
         )
         validate_team_config.assert_called_once_with(mission.validation_config)
         validate_rewards.assert_called_once_with(
             session,
-            chapter_id="chapter-test",
             rewards=[],
         )
 
@@ -225,8 +222,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
                 "ui": {"label": "TEAM", "instruction": "Join nearby players."},
             },
             validation_config=invalid_team_validation_config(),
-            chapter_id="chapter-test",
-            story_node_id=None,
+            season_id="season-test",
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
         )
@@ -249,8 +245,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             mission_layer="solo",
             content=valid_cipher_content(),
             validation_config=validation_config,
-            chapter_id="chapter-test",
-            story_node_id=None,
+            season_id="season-test",
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
             id="mission-test",
@@ -264,8 +259,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             mission_layer="solo",
             content=valid_mission_content(),
             validation_config=validation_config,
-            chapter_id="chapter-test",
-            story_node_id=None,
+            season_id="season-test",
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
             id="mission-test",
@@ -278,8 +272,7 @@ class AdminPublicContentValidationTests(unittest.TestCase):
             mission_layer="solo",
             content=valid_code_repair_content(),
             validation_config=validation_config,
-            chapter_id="chapter-test",
-            story_node_id=None,
+            season_id="season-test",
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
             id="mission-test",
@@ -297,14 +290,12 @@ class AdminPublicContentValidationTests(unittest.TestCase):
 
         validate_references.assert_called_once_with(
             session,
-            chapter_id="chapter-test",
-            story_node_id=None,
+            season_id="season-test",
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
         )
         validate_rewards.assert_called_once_with(
             session,
-            chapter_id="chapter-test",
             rewards=[],
         )
 
@@ -431,14 +422,12 @@ class AdminPublicContentValidationTests(unittest.TestCase):
 
         validate_references.assert_called_once_with(
             session,
-            chapter_id="chapter-test",
-            story_node_id=None,
+            season_id="season-test",
             geo_zone_id="zone-test",
             ar_object_id="ar-test",
         )
         validate_rewards.assert_called_once_with(
             session,
-            chapter_id="chapter-test",
             rewards=[],
         )
 

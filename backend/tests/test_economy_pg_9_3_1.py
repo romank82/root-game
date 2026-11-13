@@ -420,7 +420,6 @@ class EconomyPg931InfrastructureTests(unittest.TestCase):
             PlayerFallbackEntitlement,
         )
         from app.models import (
-            Chapter,
             GamePlayer,
             Item,
             KeyRules,
@@ -435,7 +434,7 @@ class EconomyPg931InfrastructureTests(unittest.TestCase):
         # ---- Подготовка (одна транзакция): игрок + кошелёк с seed-кредитом
         # (ledger — source of truth) + published KEY-item + KeyRules +
         # fallback-настройки (CMS-first) + минимальная цепочка
-        # Season -> Chapter -> Mission (FK entitlement.mission_id RESTRICT) +
+        # Season -> Mission (FK entitlement.mission_id RESTRICT) +
         # сам entitlement с quota_limit=1.
         player_id = f"pg-fallback-player-{uuid.uuid4().hex[:12]}"
         wallet_id = f"wallet-{uuid.uuid4().hex}"
@@ -528,7 +527,6 @@ class EconomyPg931InfrastructureTests(unittest.TestCase):
                     existing.status = "active"
 
             season_id = f"season-{uuid.uuid4().hex}"
-            chapter_id = f"chapter-{uuid.uuid4().hex}"
             session.add(
                 Season(
                     id=season_id,
@@ -536,20 +534,11 @@ class EconomyPg931InfrastructureTests(unittest.TestCase):
                     title="PG 9.3.1-c season",
                 )
             )
-            session.flush()  # FK: chapters.season_id -> seasons
-            session.add(
-                Chapter(
-                    id=chapter_id,
-                    season_id=season_id,
-                    slug=f"slug-{chapter_id}",
-                    title="PG 9.3.1-c chapter",
-                )
-            )
-            session.flush()  # FK: missions.chapter_id -> chapters
+            session.flush()  # FK: seasons
             session.add(
                 Mission(
                     id=mission_id,
-                    chapter_id=chapter_id,
+                    season_id=season_id,
                     slug=f"slug-{mission_id}",
                     mission_type="text_answer",
                     title="PG 9.3.1-c mission",

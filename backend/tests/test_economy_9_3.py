@@ -423,16 +423,13 @@ class Economy93FinanceTests(unittest.TestCase):
         """Опубликованная solo-миссия (text_answer) с опциональными наградами.
 
         Минимальная CMS-фикстура в стиле test_mission_engine_integration:
-        Season -> Chapter -> Mission(published) + Segment/SegmentMission для
-        bootstrap. Без MissionRequirement — миссия сразу available.
+        Season -> Mission(published). Без MissionRequirement — миссия сразу
+        available.
         """
         from app.models import (
-            Chapter,
             Mission,
             MissionReward,
             Season,
-            Segment,
-            SegmentMission,
         )
 
         suffix = uuid.uuid4().hex
@@ -448,21 +445,9 @@ class Economy93FinanceTests(unittest.TestCase):
             session.add(season)
             session.flush()
 
-            chapter = Chapter(
-                id=f"chapter-{suffix}",
-                season_id=season.id,
-                slug=f"chapter-{suffix}",
-                title="Economy 9.3 chapter",
-                description="Isolated economy fixture",
-                status="published",
-                sort_order=1,
-            )
-            session.add(chapter)
-            session.flush()
-
             mission = Mission(
                 id=f"mission-{suffix}",
-                chapter_id=chapter.id,
+                season_id=season.id,
                 slug=f"mission-{suffix}",
                 mission_type="text_answer",
                 title="Economy 9.3 mission",
@@ -477,29 +462,6 @@ class Economy93FinanceTests(unittest.TestCase):
             )
             session.add(mission)
             session.flush()
-
-            segment = Segment(
-                id=f"segment-{suffix}",
-                chapter_id=chapter.id,
-                slug=f"segment-{suffix}",
-                title="Economy 9.3 segment",
-                description="Segment for bootstrap",
-                status="published",
-                sort_order=1,
-                content={"schemaVersion": 1},
-            )
-            session.add(segment)
-            session.flush()
-
-            session.add(
-                SegmentMission(
-                    id=f"link-{suffix}",
-                    segment_id=segment.id,
-                    mission_id=mission.id,
-                    status="active",
-                    sort_order=1,
-                )
-            )
 
             if reward_currency > 0:
                 session.add(
@@ -591,7 +553,7 @@ class Economy93FinanceTests(unittest.TestCase):
 
     def _make_team_mission(self, validation_config: dict | None = None) -> str:
         """Командная миссия с валидным team/geo validation_config."""
-        from app.models import Chapter, Mission, Season
+        from app.models import Mission, Season
 
         suffix = uuid.uuid4().hex
         with self.SessionLocal.begin() as session:
@@ -602,17 +564,9 @@ class Economy93FinanceTests(unittest.TestCase):
             )
             session.add(season)
             session.flush()
-            chapter = Chapter(
-                id=f"chapter-{suffix}",
-                season_id=season.id,
-                slug=f"chapter-{suffix}",
-                title="Chapter",
-            )
-            session.add(chapter)
-            session.flush()
             mission = Mission(
                 id=f"mission-{suffix}",
-                chapter_id=chapter.id,
+                season_id=season.id,
                 slug=f"mission-{suffix}",
                 mission_type="team",
                 mission_category="team",
