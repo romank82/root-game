@@ -128,7 +128,7 @@ class TeamMissionsServiceTests(unittest.TestCase):
             TeamSession,
             TeamSessionMember,
         )
-        from app.models import Chapter, Mission, Season
+        from app.models import Mission, Season
 
         suffix = uuid.uuid4().hex
         with self.SessionLocal.begin() as session:
@@ -139,17 +139,9 @@ class TeamMissionsServiceTests(unittest.TestCase):
             )
             session.add(season)
             session.flush()
-            chapter = Chapter(
-                id=f"chapter-{suffix}",
-                season_id=season.id,
-                slug=f"chapter-{suffix}",
-                title="Chapter",
-            )
-            session.add(chapter)
-            session.flush()
             mission = Mission(
                 id=f"mission-{suffix}",
-                chapter_id=chapter.id,
+                season_id=season.id,
                 slug=f"mission-{suffix}",
                 mission_type="team",
                 mission_category="team",
@@ -297,7 +289,7 @@ class TeamMissionsServiceTests(unittest.TestCase):
         description: str | None = None,
     ) -> str:
         """Командная миссия с валидным team/geo validation_config."""
-        from app.models import Chapter, Mission, Season
+        from app.models import Mission, Season
         from tests.test_geo_team_contract import valid_team_config
 
         suffix = uuid.uuid4().hex
@@ -316,17 +308,9 @@ class TeamMissionsServiceTests(unittest.TestCase):
             )
             session.add(season)
             session.flush()
-            chapter = Chapter(
-                id=f"chapter-{suffix}",
-                season_id=season.id,
-                slug=f"chapter-{suffix}",
-                title="Chapter",
-            )
-            session.add(chapter)
-            session.flush()
             mission = Mission(
                 id=f"mission-{suffix}",
-                chapter_id=chapter.id,
+                season_id=season.id,
                 slug=f"mission-{suffix}",
                 mission_type=mission_type,
                 mission_category="team" if mission_type == "team" else "solo",

@@ -126,7 +126,7 @@ class TeamWaveFlowTests(unittest.TestCase):
         return player_id
 
     def _make_team_mission(self, *, validation_config: dict | None = None) -> str:
-        from app.models import Chapter, Mission, Season
+        from app.models import Mission, Season
 
         suffix = uuid.uuid4().hex
         config = valid_team_config() if validation_config is None else validation_config
@@ -138,18 +138,10 @@ class TeamWaveFlowTests(unittest.TestCase):
             )
             session.add(season)
             session.flush()
-            chapter = Chapter(
-                id=f"chapter-{suffix}",
-                season_id=season.id,
-                slug=f"chapter-{suffix}",
-                title="Chapter",
-            )
-            session.add(chapter)
-            session.flush()
             session.add(
                 Mission(
                     id=f"mission-{suffix}",
-                    chapter_id=chapter.id,
+                    season_id=season.id,
                     slug=f"mission-{suffix}",
                     mission_type="team",
                     mission_category="team",

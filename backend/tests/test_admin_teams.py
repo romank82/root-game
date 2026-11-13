@@ -333,7 +333,7 @@ class AdminTeamsTests(unittest.TestCase):
             TeamSession,
             TeamSessionMember,
         )
-        from app.models import Chapter, Mission, Season
+        from app.models import Mission, Season
 
         suffix = uuid.uuid4().hex
         with self.SessionLocal.begin() as session:
@@ -344,17 +344,9 @@ class AdminTeamsTests(unittest.TestCase):
             )
             session.add(season)
             session.flush()
-            chapter = Chapter(
-                id=f"chapter-{suffix}",
-                season_id=season.id,
-                slug=f"chapter-{suffix}",
-                title="Chapter",
-            )
-            session.add(chapter)
-            session.flush()
             mission = Mission(
                 id=f"mission-{suffix}",
-                chapter_id=chapter.id,
+                season_id=season.id,
                 slug=f"mission-{suffix}",
                 mission_type="team",
                 mission_category="team",
