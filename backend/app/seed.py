@@ -2,7 +2,7 @@
 
 WARNING: This tool is not meant to run in production or on any shared
 environment. It performs session.merge() on catalog entities (Season,
-Chapter, Item, Mission, ...) — idempotent but overwrites demo records
+Item, Mission, ...) — idempotent but overwrites demo records
 — and create-only inserts for demo-player/Wallet. Refuses to run when
 APP_ENV=production.
 
@@ -12,16 +12,12 @@ Usage (dev only):  cd backend && python -m app.seed
 from app.config import settings
 from app.db import SessionLocal
 from app.models import (
-    Chapter,
     GamePlayer,
     Item,
     Mission,
     MissionRequirement,
     MissionReward,
     Season,
-    Segment,
-    SegmentMission,
-    StoryNode,
     Wallet,
 )
 
@@ -44,25 +40,6 @@ def seed_content() -> None:
             )
         )
 
-        # Season must exist before its child chapters (required by PostgreSQL FK).
-        session.flush()
-
-        session.merge(
-            Chapter(
-                id="chapter-archive-recovery",
-                season_id="season-protocol-01",
-                slug="archive-recovery",
-                title="ВОССТАНОВЛЕНИЕ АРХИВА",
-                description=(
-                    "Оператор получает доступ к повреждённым сегментам "
-                    "и восстанавливает связь с архивным контуром."
-                ),
-                status="published",
-                sort_order=1,
-            )
-        )
-
-        # Chapter must exist before content attached to it.
         session.flush()
 
         session.merge(
@@ -107,30 +84,9 @@ def seed_content() -> None:
         session.flush()
 
         session.merge(
-            StoryNode(
-                id="story-node-a17",
-                chapter_id="chapter-archive-recovery",
-                slug="fragment-a17",
-                title="ФРАГМЕНТ A-17",
-                body=(
-                    "Архивный контур откликнулся. В извлечённых данных найдено "
-                    "упоминание Оператора и координат следующего Сегмента."
-                ),
-                presentation_type="archive",
-                content={},
-                status="published",
-                sort_order=1,
-            )
-        )
-
-        # Story nodes reference chapters and may be referenced by missions/rewards.
-        session.flush()
-
-        session.merge(
             Mission(
                 id="mission-puzzle-a-01",
-                chapter_id="chapter-archive-recovery",
-                story_node_id=None,
+                season_id="season-protocol-01",
                 slug="puzzle-a-01",
                 mission_type="text_answer",
                 title="АРХИВНЫЙ ПАКЕТ A-01",
@@ -165,8 +121,7 @@ def seed_content() -> None:
         session.merge(
             Mission(
                 id="mission-puzzle-a-02",
-                chapter_id="chapter-archive-recovery",
-                story_node_id=None,
+                season_id="season-protocol-01",
                 slug="puzzle-a-02",
                 mission_type="text_answer",
                 title="АРХИВНЫЙ ПАКЕТ A-02",
@@ -200,8 +155,7 @@ def seed_content() -> None:
         session.merge(
             Mission(
                 id="mission-archive-017",
-                chapter_id="chapter-archive-recovery",
-                story_node_id="story-node-a17",
+                season_id="season-protocol-01",
                 slug="segment-archive-017",
                 mission_type="code_repair",
                 title="ИЗВЛЕЧЕНИЕ ARCHIVE_NODE_017",
@@ -242,65 +196,6 @@ def seed_content() -> None:
         # Missions must exist before requirements and rewards can reference them.
         session.flush()
 
-        # CMS seed additions are create-only. Existing Segment and SegmentMission
-        # records, including archived link history, are never overwritten or revived.
-        segment = session.get(Segment, "segment-archive-017")
-        if segment is None:
-            segment = Segment(
-                id="segment-archive-017",
-                chapter_id="chapter-archive-recovery",
-                slug="archive-node-017",
-                title="ARCHIVE_NODE_017",
-                description=(
-                    "Повреждённый AR-сегмент архивного контура. "
-                    "Найдите безопасную точку и восстановите пакет."
-                ),
-                content={
-                    "schemaVersion": 1,
-                    "presentation": {
-                        "code": "ARCHIVE_NODE_017",
-                        "type": "ARCHIVE_SEGMENT",
-                    },
-                    "location": {
-                        "searchRadiusMeters": 250,
-                        "safeScanRadiusMeters": 15,
-                        # Illustrative contract coordinates only; not a real game point.
-                        "safeScanPoint": {
-                            "latitude": 54.0,
-                            "longitude": 82.0,
-                        },
-                    },
-                    "arScene": {
-                        "scenePreset": "archive_cube_damaged_v1",
-                        "scanHoldDurationMs": 1800,
-                    },
-                },
-                status="published",
-                sort_order=1,
-            )
-            session.add(segment)
-            session.flush()
-
-        existing_segment_link = (
-            session.query(SegmentMission)
-            .filter(
-                SegmentMission.segment_id == "segment-archive-017",
-                SegmentMission.mission_id == "mission-archive-017",
-            )
-            .first()
-        )
-        if existing_segment_link is None:
-            session.add(
-                SegmentMission(
-                    id="segment-mission-archive-017",
-                    segment_id="segment-archive-017",
-                    mission_id="mission-archive-017",
-                    status="active",
-                    sort_order=1,
-                )
-            )
-            session.flush()
-
         session.merge(
             MissionRequirement(
                 id="requirement-a02-after-a01",
@@ -321,7 +216,7 @@ def seed_content() -> None:
             )
         )
 
-        # Requirements are now persisted; rewards reference missions/items/story nodes.
+        # Requirements are now persisted; rewards reference missions/items.
         session.flush()
 
         session.merge(
@@ -331,7 +226,6 @@ def seed_content() -> None:
                 reward_type="currency",
                 amount=3,
                 item_id=None,
-                story_node_id=None,
                 reward_value={"currency": "ROOT"},
                 sort_order=1,
             )
@@ -344,7 +238,6 @@ def seed_content() -> None:
                 reward_type="item",
                 amount=1,
                 item_id="item-key-a01",
-                story_node_id=None,
                 reward_value={},
                 sort_order=2,
             )
@@ -357,7 +250,6 @@ def seed_content() -> None:
                 reward_type="currency",
                 amount=4,
                 item_id=None,
-                story_node_id=None,
                 reward_value={"currency": "ROOT"},
                 sort_order=1,
             )
@@ -370,7 +262,6 @@ def seed_content() -> None:
                 reward_type="currency",
                 amount=10,
                 item_id=None,
-                story_node_id=None,
                 reward_value={"currency": "ROOT"},
                 sort_order=1,
             )
@@ -383,22 +274,8 @@ def seed_content() -> None:
                 reward_type="item",
                 amount=1,
                 item_id="item-archive-a17",
-                story_node_id=None,
                 reward_value={},
                 sort_order=2,
-            )
-        )
-
-        session.merge(
-            MissionReward(
-                id="reward-a17-story",
-                mission_id="mission-archive-017",
-                reward_type="story_node",
-                amount=None,
-                item_id=None,
-                story_node_id="story-node-a17",
-                reward_value={},
-                sort_order=3,
             )
         )
 
@@ -441,8 +318,7 @@ def seed_content() -> None:
 
     print("✓ Seed completed successfully.")
     print("  Season: protocol-01")
-    print("  Chapter: archive-recovery")
-    print("  Missions: puzzle-a-01, puzzle-a-02, segment-archive-017")
+    print("  Missions: 3 (puzzle-a-01, puzzle-a-02, segment-archive-017)")
     print("  Items: KEY_A01, ARCHIVE_A17")
 
 

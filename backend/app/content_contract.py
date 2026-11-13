@@ -244,7 +244,7 @@ def validate_mission_content(
 ) -> None:
     _reject_hidden(content)
     root = _object(content, "mission.content")
-    _only(root, {"schemaVersion", "ui", "arScene"}, "mission.content")
+    _only(root, {"schemaVersion", "ui", "arScene", "location", "presentation"}, "mission.content")
     _schema_version_one(
         root.get("schemaVersion"),
         "mission.content.schemaVersion",
@@ -265,6 +265,53 @@ def validate_mission_content(
                 "object_type",
             },
             "mission.content.arScene",
+        )
+    if "presentation" in root:
+        presentation = _object(root["presentation"], "mission.content.presentation")
+        _only(presentation, {"code", "type"}, "mission.content.presentation")
+        _text(presentation.get("code"), "mission.content.presentation.code", 128)
+        _text(presentation.get("type"), "mission.content.presentation.type", 128)
+
+    if "location" in root:
+        location = _object(root["location"], "mission.content.location")
+        _only(
+            location,
+            {"searchRadiusMeters", "safeScanRadiusMeters", "safeScanPoint"},
+            "mission.content.location",
+        )
+        _number(
+            location.get("searchRadiusMeters"),
+            "mission.content.location.searchRadiusMeters",
+            1,
+            100_000,
+        )
+        _number(
+            location.get("safeScanRadiusMeters"),
+            "mission.content.location.safeScanRadiusMeters",
+            1,
+            100_000,
+        )
+        if location["searchRadiusMeters"] < location["safeScanRadiusMeters"]:
+            _fail(
+                "mission.content.location",
+                "searchRadiusMeters must be >= safeScanRadiusMeters",
+            )
+        point = _object(
+            location.get("safeScanPoint"),
+            "mission.content.location.safeScanPoint",
+        )
+        _only(point, {"latitude", "longitude"}, "mission.content.location.safeScanPoint")
+        _number(
+            point.get("latitude"),
+            "mission.content.location.safeScanPoint.latitude",
+            -90,
+            90,
+        )
+        _number(
+            point.get("longitude"),
+            "mission.content.location.safeScanPoint.longitude",
+            -180,
+            180,
         )
     if mission_type == "text_answer":
         allowed = {"label", "question", "inputPlaceholder", "successTitle", "successText", "rewardPreview"}
