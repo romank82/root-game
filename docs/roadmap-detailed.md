@@ -1593,6 +1593,11 @@ backend `amount_nano` + фронт + daily/audit/earned/stats + миграция
 
 ## Этап 14. Frontend и мобильный клиент — ⚠️ в работе
 
+> **Structure-Simplify (frontend) — ✅ закрыто (коммит `a2f4698`, BUILD GREEN, 0 errors):**
+> ScannerScreen переведён на `mission.content`; AdminTree/структура = Season → Mission;
+> удалены ArchiveScreen, SegmentsEditor, ChaptersSection, StoryNodesSection, CascadeSection
+> и маршрут `'archive'`; `story_node`-награды убраны из UI. Осталось: 14.6 UI-полировка.
+
 Уже: 5 игровых экранов (архив, брифинг, инвентарь, сканер, терминал), API-клиенты, каркас админки.
 
 ### Шаг 14.1: Экран «Карта и геозоны»
