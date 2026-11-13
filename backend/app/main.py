@@ -151,6 +151,28 @@ SESSION_COOKIE_NAME = "chimera_session"
 
 logger = logging.getLogger(__name__)
 
+# Sprint 13.6: Sentry/GlitchTip. DSN пустой → полный no-op (игра работает как обычно).
+# Инициализация должна быть ДО создания app, чтобы интеграции пропатчили middleware.
+if settings.sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.logging import LoggingIntegration
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment or None,
+        release=settings.sentry_release or None,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        send_default_pii=False,
+        integrations=[
+            StarletteIntegration(),
+            FastApiIntegration(),
+            # Логи не уходят в Sentry автоматически — только явный capture_exception.
+            LoggingIntegration(level=None, event_level=None),
+        ],
+    )
+
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
@@ -229,6 +251,22 @@ async def app_errors_middleware(request: Request, call_next):
                     ).get("player_id"),
                     stack=traceback.format_exc()[:4000],
                 )
+            # Sprint 13.6: явный capture_exception, т.к. кастомный handler(Exception)
+            # перехватывает 500 и не пробрасывает exc наружу (Sentry сам не увидит).
+            # В этой области видимости отдельной переменной endpoint нет —
+            # используем request.url.path; player_id берём из audit_context.
+            if settings.sentry_dsn:
+                import sentry_sdk
+
+                with sentry_sdk.push_scope() as scope:
+                    scope.set_tag("correlation_id", correlation_id)
+                    scope.set_tag("endpoint", request.url.path)
+                    player_id = getattr(
+                        getattr(request, "state", None), "audit_context", {}
+                    ).get("player_id")
+                    if player_id:
+                        scope.set_tag("player_id", str(player_id))
+                    sentry_sdk.capture_exception(exc)
         except Exception as log_error:  # noqa: BLE001 — лог не важнее ответа
             logger.warning("app_error record failed: %s", log_error)
         raise

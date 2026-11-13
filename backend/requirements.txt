@@ -22,3 +22,6 @@ pytoniq-core==0.2.1
 # Retention scheduler (Sprint DB-Audit-2): ежедневная очистка старых
 # нефинансовых runtime-записей (PlayerEvent/AppError/LocationProof/TeamSessionMessage).
 APScheduler==3.11.0
+
+# Sentry/GlitchTip (Sprint 13.6): DSN пустой → полный no-op.
+sentry-sdk[fastapi]==2.19.2

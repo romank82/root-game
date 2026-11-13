@@ -51,6 +51,11 @@ class Settings:
     ton_api_endpoint: str = ""
     # Адрес минтера ROOT (Jetton master) — для Jetton transfer.
     ton_root_jetton_master: str = ""
+    # Sentry/GlitchTip (Sprint 13.6): DSN пустой = no-op.
+    sentry_dsn: str = ""
+    sentry_environment: str = ""
+    sentry_traces_sample_rate: float = 0.0
+    sentry_release: str = ""
 
 DEFAULT_SQLITE_PATH = BACKEND_DIR / "chimera.db"
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_SQLITE_PATH}"
@@ -84,4 +89,10 @@ settings = Settings(
     ton_network=os.getenv("TON_NETWORK", "testnet"),
     ton_api_endpoint=os.getenv("TON_API_ENDPOINT", ""),
     ton_root_jetton_master=os.getenv("TON_ROOT_JETTON_MASTER", ""),
+    sentry_dsn=os.getenv("SENTRY_DSN", ""),
+    sentry_environment=os.getenv(
+        "SENTRY_ENVIRONMENT", os.getenv("APP_ENV", "development")
+    ),
+    sentry_traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0")),
+    sentry_release=os.getenv("SENTRY_RELEASE", ""),
 )
