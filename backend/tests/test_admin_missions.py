@@ -40,7 +40,7 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 
 def _create_payload(**overrides) -> AdminMissionCreatePayload:
     data = {
-        "chapter_id": "chapter-fixture",
+        "season_id": "season-fixture",
         "slug": f"mission-{uuid.uuid4().hex[:10]}",
         "mission_type": "text_answer",
         "mission_category": "solo",
@@ -121,13 +121,12 @@ class AdminMissionsApiTests(unittest.TestCase):
         cls._temporary_directory.cleanup()
 
     def _references_fixture(self) -> dict[str, str]:
-        """Seed Season, Chapter and a super-admin to satisfy the create path."""
-        from app.models import AdminUser, Chapter, Season
+        """Seed Season and a super-admin to satisfy the create path."""
+        from app.models import AdminUser, Season
 
         suffix = uuid.uuid4().hex
         ids = {
             "season": f"season-{suffix}",
-            "chapter": f"chapter-{suffix}",
             "admin": f"admin-{suffix}",
         }
 
@@ -137,18 +136,6 @@ class AdminMissionsApiTests(unittest.TestCase):
                     id=ids["season"],
                     slug=f"season-{suffix}",
                     title="Mission category season",
-                    description="Isolated integration fixture",
-                    status="published",
-                    sort_order=1,
-                )
-            )
-            session.flush()
-            session.add(
-                Chapter(
-                    id=ids["chapter"],
-                    season_id=ids["season"],
-                    slug=f"chapter-{suffix}",
-                    title="Mission category chapter",
                     description="Isolated integration fixture",
                     status="published",
                     sort_order=1,
@@ -176,7 +163,7 @@ class AdminMissionsApiTests(unittest.TestCase):
     def test_create_mission_with_category(self) -> None:
         ids = self._references_fixture()
         admin = self._admin(ids["admin"])
-        payload = _create_payload(chapter_id=ids["chapter"])
+        payload = _create_payload(season_id=ids["season"])
 
         created = create_admin_mission(payload, request=None, admin=admin)[
             "mission"
@@ -189,7 +176,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         ids = self._references_fixture()
         admin = self._admin(ids["admin"])
         payload = _create_payload(
-            chapter_id=ids["chapter"],
+            season_id=ids["season"],
             mission_category="bogus",
         )
 
@@ -209,7 +196,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         admin = self._admin(ids["admin"])
 
         mission_id = create_admin_mission(
-            _create_payload(chapter_id=ids["chapter"]),
+            _create_payload(season_id=ids["season"]),
             request=None,
             admin=admin,
         )["mission"]["id"]
@@ -253,7 +240,7 @@ class AdminMissionsApiTests(unittest.TestCase):
             )
 
         payload = _create_payload(
-            chapter_id=ids["chapter"],
+            season_id=ids["season"],
             minigame_profile_id=profile_id,
         )
 
@@ -273,7 +260,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         ids = self._references_fixture()
         admin = self._admin(ids["admin"])
         payload = _create_payload(
-            chapter_id=ids["chapter"],
+            season_id=ids["season"],
             minigame_profile_id="minigame-profile-does-not-exist",
         )
 
@@ -293,7 +280,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         admin = self._admin(ids["admin"])
 
         mission_id = create_admin_mission(
-            _create_payload(chapter_id=ids["chapter"]),
+            _create_payload(season_id=ids["season"]),
             request=None,
             admin=admin,
         )["mission"]["id"]
@@ -330,7 +317,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         admin = self._admin(ids["admin"])
 
         mission_id = create_admin_mission(
-            _create_payload(chapter_id=ids["chapter"]),
+            _create_payload(season_id=ids["season"]),
             request=None,
             admin=admin,
         )["mission"]["id"]
@@ -351,22 +338,20 @@ class AdminMissionsApiTests(unittest.TestCase):
             context.exception.detail,
         )
 
-    def test_list_missions_chapter_filter(self) -> None:
+    def test_list_missions_season_filter(self) -> None:
         ids = self._references_fixture()
         admin = self._admin(ids["admin"])
 
-        # Вторая глава в том же сезоне — напрямую через модель (этот стиль
-        # уже используется в тестах файла для MinigameProfile).
-        from app.models import Chapter
+        # Второй сезон — напрямую через модель (стиль файла для MinigameProfile).
+        from app.models import Season
 
-        second_chapter_id = f"chapter-second-{uuid.uuid4().hex[:10]}"
+        second_season_id = f"season-second-{uuid.uuid4().hex[:10]}"
         with self.SessionLocal.begin() as session:
             session.add(
-                Chapter(
-                    id=second_chapter_id,
-                    season_id=ids["season"],
-                    slug=f"chapter-second-{uuid.uuid4().hex[:10]}",
-                    title="Second chapter",
+                Season(
+                    id=second_season_id,
+                    slug=f"season-second-{uuid.uuid4().hex[:10]}",
+                    title="Second season",
                     description="Isolated integration fixture",
                     status="published",
                     sort_order=2,
@@ -374,116 +359,31 @@ class AdminMissionsApiTests(unittest.TestCase):
             )
 
         mission_one = create_admin_mission(
-            _create_payload(chapter_id=ids["chapter"], title="Mission one"),
+            _create_payload(season_id=ids["season"], title="Mission one"),
             request=None,
             admin=admin,
         )["mission"]
         mission_two = create_admin_mission(
-            _create_payload(chapter_id=second_chapter_id, title="Mission two"),
+            _create_payload(season_id=second_season_id, title="Mission two"),
             request=None,
             admin=admin,
         )["mission"]
 
-        filtered = list_admin_missions(chapter_id=ids["chapter"], _admin=admin)
+        filtered = list_admin_missions(season_id=ids["season"], _admin=admin)
         filtered_ids = [mission["id"] for mission in filtered["missions"]]
         self.assertIn(mission_one["id"], filtered_ids)
         self.assertNotIn(mission_two["id"], filtered_ids)
 
         with self.assertRaises(HTTPException) as caught:
-            list_admin_missions(chapter_id="chapter-nonexistent", _admin=admin)
+            list_admin_missions(season_id="season-nonexistent", _admin=admin)
         self.assertEqual(caught.exception.status_code, 404)
 
-        # Обратная совместимость: без chapter_id обе миссии в списке
+        # Обратная совместимость: без season_id обе миссии в списке
         # (в списке могут быть и миссии из других тестов).
         all_missions = list_admin_missions(_admin=admin)["missions"]
         all_ids = [mission["id"] for mission in all_missions]
         self.assertIn(mission_one["id"], all_ids)
         self.assertIn(mission_two["id"], all_ids)
-
-    def test_create_mission_rejects_cross_chapter_story_node(self) -> None:
-        from app.models import Chapter, StoryNode
-
-        ids = self._references_fixture()
-        admin = self._admin(ids["admin"])
-
-        # Вторая глава в том же сезоне — стиль test_list_missions_chapter_filter.
-        second_chapter_id = f"chapter-second-{uuid.uuid4().hex[:10]}"
-        with self.SessionLocal.begin() as session:
-            session.add(
-                Chapter(
-                    id=second_chapter_id,
-                    season_id=ids["season"],
-                    slug=f"chapter-second-{uuid.uuid4().hex[:10]}",
-                    title="Second chapter",
-                    description="Isolated integration fixture",
-                    status="published",
-                    sort_order=2,
-                )
-            )
-            session.flush()
-            story_node_id = f"story-node-{uuid.uuid4().hex[:10]}"
-            session.add(
-                StoryNode(
-                    id=story_node_id,
-                    chapter_id=ids["chapter"],
-                    slug=f"story-{uuid.uuid4().hex[:10]}",
-                    title="Cross-chapter story node",
-                    body="Story node of the first chapter",
-                    presentation_type="archive",
-                    content={},
-                    status="published",
-                    sort_order=1,
-                )
-            )
-
-        with self.assertRaises(HTTPException) as context:
-            create_admin_mission(
-                _create_payload(
-                    chapter_id=second_chapter_id,
-                    story_node_id=story_node_id,
-                ),
-                request=None,
-                admin=admin,
-            )
-
-        self.assertEqual(context.exception.status_code, 422)
-        self.assertIn(
-            "StoryNode должен принадлежать той же главе",
-            context.exception.detail,
-        )
-
-    def test_create_mission_accepts_same_chapter_story_node(self) -> None:
-        from app.models import StoryNode
-
-        ids = self._references_fixture()
-        admin = self._admin(ids["admin"])
-
-        story_node_id = f"story-node-{uuid.uuid4().hex[:10]}"
-        with self.SessionLocal.begin() as session:
-            session.add(
-                StoryNode(
-                    id=story_node_id,
-                    chapter_id=ids["chapter"],
-                    slug=f"story-{uuid.uuid4().hex[:10]}",
-                    title="Same-chapter story node",
-                    body="Story node of the mission chapter",
-                    presentation_type="archive",
-                    content={},
-                    status="published",
-                    sort_order=1,
-                )
-            )
-
-        created = create_admin_mission(
-            _create_payload(
-                chapter_id=ids["chapter"],
-                story_node_id=story_node_id,
-            ),
-            request=None,
-            admin=admin,
-        )["mission"]
-
-        self.assertEqual(created["storyNodeId"], story_node_id)
 
     def test_create_mission_without_slug_generates_from_title(self) -> None:
         ids = self._references_fixture()
@@ -491,7 +391,7 @@ class AdminMissionsApiTests(unittest.TestCase):
 
         created = create_admin_mission(
             _create_payload(
-                chapter_id=ids["chapter"],
+                season_id=ids["season"],
                 slug=None,
                 title="Тестовая миссия",
             ),
@@ -509,7 +409,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         def _create_with_title(title: str) -> dict:
             return create_admin_mission(
                 _create_payload(
-                    chapter_id=ids["chapter"],
+                    season_id=ids["season"],
                     slug=None,
                     title=title,
                 ),
@@ -564,7 +464,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         targets = self._publication_targets()
         return create_admin_mission(
             _create_payload(
-                chapter_id=ids["chapter"],
+                season_id=ids["season"],
                 geo_zone_id=targets["geo_zone"],
                 ar_object_id=targets["ar_object"],
                 content={
@@ -585,7 +485,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         admin = self._admin(ids["admin"])
         mission_id = create_admin_mission(
             _create_payload(
-                chapter_id=ids["chapter"],
+                season_id=ids["season"],
                 content={"schemaVersion": 1, "ui": {"label": "Метка"}},
             ),
             request=None,
@@ -607,7 +507,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         admin = self._admin(ids["admin"])
         mission_id = create_admin_mission(
             _create_payload(
-                chapter_id=ids["chapter"],
+                season_id=ids["season"],
                 content={"schemaVersion": 1, "ui": {"label": "Метка"}},
             ),
             request=None,
@@ -654,7 +554,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         admin = self._admin(ids["admin"])
         mission_id = create_admin_mission(
             _create_payload(
-                chapter_id=ids["chapter"],
+                season_id=ids["season"],
                 content={"schemaVersion": 1, "ui": {"label": "Метка"}},
             ),
             request=None,
@@ -683,7 +583,7 @@ class AdminMissionsApiTests(unittest.TestCase):
         ids = self._references_fixture()
         admin = self._admin(ids["admin"])
         mission_id = create_admin_mission(
-            _create_payload(chapter_id=ids["chapter"]),
+            _create_payload(season_id=ids["season"]),
             request=None,
             admin=admin,
         )["mission"]["id"]

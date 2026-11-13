@@ -202,7 +202,7 @@ class AttemptDeadlineTests(unittest.TestCase):
             session.add(
                 Mission(
                     id=mission_id,
-                    chapter_id=ids["chapter"],
+                    season_id=ids["season"],
                     slug=f"text-answer-{suffix}",
                     mission_type="text_answer",
                     title="Text answer mission",

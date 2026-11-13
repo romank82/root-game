@@ -109,7 +109,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
         unlock_after_mission_id: str | None = None,
         player_id: str | None = None,
     ) -> dict[str, str]:
-        from app.models import ARObject, Chapter, GamePlayer, GeoZone, Mission, Season
+        from app.models import ARObject, GamePlayer, GeoZone, Mission, Season
 
         suffix = uuid.uuid4().hex
         ids = {
@@ -133,18 +133,6 @@ class MissionEngineAcceptTests(unittest.TestCase):
                 )
             )
             session.flush()
-
-            session.add(
-                Chapter(
-                    id=ids["chapter"],
-                    season_id=ids["season"],
-                    slug=f"chapter-{suffix}",
-                    title="Accept test chapter",
-                    description="Isolated accept fixture",
-                    status="published",
-                    sort_order=1,
-                )
-            )
 
             if player_id is None:
                 session.add(
@@ -206,7 +194,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
             session.add(
                 Mission(
                     id=ids["mission"],
-                    chapter_id=ids["chapter"],
+                    season_id=ids["season"],
                     slug=f"mission-{suffix}",
                     mission_type=mission_type,
                     mission_category="solo",

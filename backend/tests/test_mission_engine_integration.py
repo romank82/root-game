@@ -86,29 +86,21 @@ class MissionEngineIntegrationTests(unittest.TestCase):
 
     def _fixture(self) -> dict[str, str]:
         from app.models import (
-            Chapter,
             GamePlayer,
             Item,
             Mission,
             MissionRequirement,
             MissionReward,
             Season,
-            Segment,
-            SegmentMission,
-            StoryNode,
         )
 
         suffix = uuid.uuid4().hex
         ids = {
             "player": f"player-{suffix}",
             "season": f"season-{suffix}",
-            "chapter": f"chapter-{suffix}",
-            "segment": f"segment-{suffix}",
-            "hidden_segment": f"hidden-segment-{suffix}",
             "unlock": f"unlock-{suffix}",
             "target": f"target-{suffix}",
             "draft": f"draft-{suffix}",
-            "story": f"story-{suffix}",
             "item": f"item-{suffix}",
         }
 
@@ -129,15 +121,6 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             # Phase 2: direct dependants of Season.
             session.add_all(
                 [
-                    Chapter(
-                        id=ids["chapter"],
-                        season_id=ids["season"],
-                        slug=f"chapter-{suffix}",
-                        title="Test chapter",
-                        description="Isolated integration fixture",
-                        status="published",
-                        sort_order=1,
-                    ),
                     GamePlayer(
                         id=ids["player"],
                         display_name="Integration player",
@@ -149,40 +132,9 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             )
             session.flush()
 
-            # Phase 3: CMS entities depending on Chapter.
+            # Phase 3: CMS entities (items) used by missions/rewards.
             session.add_all(
                 [
-                    StoryNode(
-                        id=ids["story"],
-                        chapter_id=ids["chapter"],
-                        slug=f"story-{suffix}",
-                        title="Unlocked story",
-                        body="Server-confirmed story content",
-                        presentation_type="document",
-                        content={"schemaVersion": 1},
-                        status="published",
-                        sort_order=1,
-                    ),
-                    Segment(
-                        id=ids["segment"],
-                        chapter_id=ids["chapter"],
-                        slug=f"segment-{suffix}",
-                        title="Published segment",
-                        description="Visible segment",
-                        status="published",
-                        sort_order=10,
-                        content={"schemaVersion": 1},
-                    ),
-                    Segment(
-                        id=ids["hidden_segment"],
-                        chapter_id=ids["chapter"],
-                        slug=f"hidden-segment-{suffix}",
-                        title="Draft segment",
-                        description="Hidden segment",
-                        status="draft",
-                        sort_order=20,
-                        content={"schemaVersion": 1},
-                    ),
                     Item(
                         id=ids["item"],
                         slug=f"item-{suffix}",
@@ -205,7 +157,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 [
                     Mission(
                         id=ids["unlock"],
-                        chapter_id=ids["chapter"],
+                        season_id=ids["season"],
                         slug=f"unlock-{suffix}",
                         mission_type="text_answer",
                         title="Unlock mission",
@@ -220,8 +172,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                     ),
                     Mission(
                         id=ids["target"],
-                        chapter_id=ids["chapter"],
-                        story_node_id=ids["story"],
+                        season_id=ids["season"],
                         slug=f"target-{suffix}",
                         mission_type="text_answer",
                         title="Reward mission",
@@ -236,7 +187,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                     ),
                     Mission(
                         id=ids["draft"],
-                        chapter_id=ids["chapter"],
+                        season_id=ids["season"],
                         slug=f"draft-{suffix}",
                         mission_type="text_answer",
                         title="Draft mission",
@@ -280,36 +231,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                         reward_value={},
                         sort_order=2,
                     ),
-                    MissionReward(
-                        id=f"story-reward-{suffix}",
-                        mission_id=ids["target"],
-                        reward_type="story_node",
-                        story_node_id=ids["story"],
-                        amount=1,
-                        reward_value={},
-                        sort_order=3,
-                    ),
-                    SegmentMission(
-                        id=f"link-target-{suffix}",
-                        segment_id=ids["segment"],
-                        mission_id=ids["target"],
-                        status="active",
-                        sort_order=10,
-                    ),
-                    SegmentMission(
-                        id=f"link-unlock-{suffix}",
-                        segment_id=ids["segment"],
-                        mission_id=ids["unlock"],
-                        status="active",
-                        sort_order=20,
-                    ),
-                    SegmentMission(
-                        id=f"link-draft-{suffix}",
-                        segment_id=ids["segment"],
-                        mission_id=ids["draft"],
-                        status="active",
-                        sort_order=30,
-                    ),
+                    
                 ]
             )
             session.flush()
@@ -523,14 +445,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         self.assertIn(ids["target"], mission_ids)
         self.assertNotIn(ids["draft"], mission_ids)
 
-        segment_ids = {segment["id"] for segment in bootstrap["segments"]}
-        self.assertEqual(segment_ids, {ids["segment"]})
-
-        segment = bootstrap["segments"][0]
-        self.assertEqual(
-            [mission["id"] for mission in segment["linkedMissions"]],
-            [ids["target"], ids["unlock"]],
-        )
+        
 
         for mission in bootstrap["missions"]:
             self.assertNotIn("validationConfig", mission)
@@ -546,29 +461,23 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             self._mission_by_id(bootstrap, ids["target"])["status"],
             "locked",
         )
-        self.assertEqual(bootstrap["storyNodes"], [])
 
     def test_bootstrap_exposes_max_attempts(self) -> None:
         """Sprint 8.14 (ui): maxAttempts из published policy; для legacy без policy — null.
 
-        Изолированная мини-фикстура БЕЗ новых Segment: этот тест (по алфавиту)
-        выполняется раньше test_bootstrap_exposes_only_public_... и обязан
-        оставить ровно один published-сегмент в общей SQLite-БД.
+        Изолированная мини-фикстура: только Season и Mission.
         """
         from app.geo_team_runtime_models import MissionRuntimePolicy
-        from app.models import Chapter, GamePlayer, Mission, Season
+        from app.models import GamePlayer, Mission, Season
 
         suffix = uuid.uuid4().hex
         player_id = f"player-{suffix}"
         season_id = f"season-{suffix}"
-        chapter_id = f"chapter-{suffix}"
         with_policy_id = f"mission-with-policy-{suffix}"
         no_policy_id = f"mission-no-policy-{suffix}"
 
         with self.SessionLocal.begin() as session:
-            # Фазовый flush как в _fixture: без ORM-relationship между
-            # Season/Chapter/Mission SQLAlchemy не упорядочивает INSERT-ы
-            # по FK-зависимостям (chapters лёг бы раньше seasons).
+            # Фазовый flush как в _fixture: Season/Mission.
             session.add(
                 Season(
                     id=season_id,
@@ -583,15 +492,6 @@ class MissionEngineIntegrationTests(unittest.TestCase):
 
             session.add_all(
                 [
-                    Chapter(
-                        id=chapter_id,
-                        season_id=season_id,
-                        slug=f"chapter-{suffix}",
-                        title="Bootstrap maxAttempts chapter",
-                        description=None,
-                        status="published",
-                        sort_order=1,
-                    ),
                     GamePlayer(
                         id=player_id,
                         display_name="Bootstrap maxAttempts player",
@@ -607,7 +507,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                 [
                     Mission(
                         id=with_policy_id,
-                        chapter_id=chapter_id,
+                        season_id=season_id,
                         slug=f"with-policy-{suffix}",
                         mission_type="text_answer",
                         title="With policy",
@@ -622,7 +522,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
                     ),
                     Mission(
                         id=no_policy_id,
-                        chapter_id=chapter_id,
+                        season_id=season_id,
                         slug=f"no-policy-{suffix}",
                         mission_type="text_answer",
                         title="No policy",
@@ -760,7 +660,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         self.assertEqual(awarded_items[0]["quantity"], 2)
         self.assertTrue(awarded_items[0]["code"])
         self.assertTrue(awarded_items[0]["title"])
-        self.assertEqual(accepted["awarded"]["storyNodeIds"], [ids["story"]])
+        
 
         duplicate = self.mission_engine.submit_mission(
             ids["player"],
@@ -772,7 +672,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         self.assertTrue(duplicate["alreadyCompleted"])
         self.assertEqual(
             duplicate["awarded"],
-            {"root": 0, "items": [], "storyNodeIds": []},
+            {"root": 0, "items": []},
         )
 
         with self.SessionLocal() as session:
@@ -813,10 +713,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
 
         final_bootstrap = self.mission_engine.get_bootstrap(ids["player"])
         self.assertEqual(final_bootstrap["wallet"]["availableBalance"], 15)
-        self.assertEqual(
-            {story["id"] for story in final_bootstrap["storyNodes"]},
-            {ids["story"]},
-        )
+        
 
 
     def test_item_key_not_awarded_after_failure(self) -> None:
@@ -3300,7 +3197,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
         self.assertTrue(retry["alreadyCompleted"])
         self.assertEqual(
             retry["awarded"],
-            {"root": 0, "items": [], "storyNodeIds": []},
+            {"root": 0, "items": []},
         )
 
         with self.SessionLocal() as session:
@@ -3783,7 +3680,7 @@ class MissionEngineIntegrationTests(unittest.TestCase):
             session.add(
                 Mission(
                     id=mission_id,
-                    chapter_id=ids["chapter"],
+                    season_id=ids["season"],
                     slug=f"cipher-{suffix}",
                     mission_type="cipher",
                     title="Cipher mission",

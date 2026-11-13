@@ -32,7 +32,7 @@ def _memory_mission(**overrides):
 
     data = {
         "id": "mission-memory",
-        "chapter_id": "chapter-memory",
+        "season_id": "season-memory",
         "slug": "mission-memory",
         "mission_type": "text_answer",
         "title": "Русское название",
@@ -191,7 +191,7 @@ class MissionBootstrapLangTests(unittest.TestCase):
         cls._temporary_directory.cleanup()
 
     def _fixture(self) -> dict[str, str]:
-        from app.models import Chapter, GamePlayer, Mission, Season
+        from app.models import GamePlayer, Mission, Season
 
         suffix = uuid.uuid4().hex
         ids = {
@@ -213,16 +213,6 @@ class MissionBootstrapLangTests(unittest.TestCase):
             )
             session.flush()
             session.add(
-                Chapter(
-                    id=ids["chapter"],
-                    season_id=ids["season"],
-                    slug=f"chapter-{suffix}",
-                    title="Translation bootstrap chapter",
-                    status="published",
-                    sort_order=1,
-                )
-            )
-            session.add(
                 GamePlayer(
                     id=ids["player"],
                     display_name=f"Bootstrap Player-{suffix[:6]}",
@@ -235,7 +225,7 @@ class MissionBootstrapLangTests(unittest.TestCase):
             session.add(
                 Mission(
                     id=ids["mission"],
-                    chapter_id=ids["chapter"],
+                    season_id=ids["season"],
                     slug=f"mission-{suffix}",
                     mission_type="text_answer",
                     mission_category="solo",
