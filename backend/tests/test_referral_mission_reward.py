@@ -12,7 +12,7 @@
    только бонус, транзакция остаётся пригодной для commit.
 
 Изолированная SQLite in-memory (``Base.metadata.create_all``), без alembic и
-сети. CMS-цепочка минимальная: Season -> Chapter -> Mission -> MissionReward.
+сети. CMS-цепочка минимальная: Season -> Mission -> MissionReward.
 referral.reward_root и порог earned не задаются строками system_settings —
 берутся defaults каталога (25 и 50), что тоже является проверкой фолбэка.
 """
@@ -28,7 +28,6 @@ from sqlalchemy.orm import Session
 from app.db import Base
 from app.mission_engine import _award_mission_rewards
 from app.models import (
-    Chapter,
     GamePlayer,
     Mission,
     MissionReward,
@@ -65,7 +64,7 @@ class ReferralMissionRewardTestCase(unittest.TestCase):
         self.engine.dispose()
 
     def _seed_content(self) -> None:
-        """Season -> Chapter -> Mission -> MissionReward (50 ROOT)."""
+        """Season -> Mission -> MissionReward (50 ROOT)."""
         self.session.add(
             Season(
                 id="season-referral",
@@ -76,19 +75,9 @@ class ReferralMissionRewardTestCase(unittest.TestCase):
         )
         self.session.flush()
         self.session.add(
-            Chapter(
-                id="chapter-referral",
-                season_id="season-referral",
-                slug="chapter-referral",
-                title="Chapter",
-                status="published",
-            )
-        )
-        self.session.flush()
-        self.session.add(
             Mission(
                 id=MISSION_ID,
-                chapter_id="chapter-referral",
+                season_id="season-referral",
                 slug="referral-mission",
                 mission_type="text_answer",
                 title="Referral mission",

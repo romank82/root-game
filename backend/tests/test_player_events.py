@@ -164,9 +164,9 @@ class PlayerEventsTests(unittest.TestCase):
             )
 
     def _make_mission_fixture(self, session, suffix: str) -> dict[str, str]:
-        """Season -> Chapter -> GeoZone -> ARObject -> Mission (published),
+        """Season -> GeoZone -> ARObject -> Mission (published),
         text_answer c acceptedAnswers=['complete'] (валидация submit_mission)."""
-        from app.models import ARObject, Chapter, GeoZone, Mission, Season
+        from app.models import ARObject, GeoZone, Mission, Season
 
         ids = {
             "season": f"season-{suffix}",
@@ -180,19 +180,6 @@ class PlayerEventsTests(unittest.TestCase):
                 id=ids["season"],
                 slug=f"season-{suffix}",
                 title="Player events season",
-                description="Isolated PlayerEvent fixture",
-                status="published",
-                sort_order=1,
-            )
-        )
-        session.flush()
-
-        session.add(
-            Chapter(
-                id=ids["chapter"],
-                season_id=ids["season"],
-                slug=f"chapter-{suffix}",
-                title="Player events chapter",
                 description="Isolated PlayerEvent fixture",
                 status="published",
                 sort_order=1,
@@ -243,7 +230,7 @@ class PlayerEventsTests(unittest.TestCase):
         session.add(
             Mission(
                 id=ids["mission"],
-                chapter_id=ids["chapter"],
+                season_id=ids["season"],
                 slug=f"mission-{suffix}",
                 mission_type="text_answer",
                 mission_category="solo",

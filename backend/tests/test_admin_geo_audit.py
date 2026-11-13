@@ -55,7 +55,6 @@ from app.models import (
     AdminAuditLog,
     AdminUser,
     AdminUserPermission,
-    Chapter,
     GamePlayer,
     Mission,
     PlayerEvent,
@@ -210,27 +209,17 @@ class AdminGeoAuditTests(unittest.TestCase):
         return player_id
 
     def _seed_mission_chain(self, session, mission_id: str) -> None:
-        """Season + Chapter + Mission: PlayerMission.mission_id — FK."""
+        """Season + Mission: PlayerMission.mission_id — FK."""
         suffix = uuid.uuid4().hex
         season_id = f"season-{suffix}"
-        chapter_id = f"chapter-{suffix}"
         session.add(
             Season(id=season_id, slug=f"season-{suffix}", title="Season")
         )
         session.flush()
         session.add(
-            Chapter(
-                id=chapter_id,
-                season_id=season_id,
-                slug=f"chapter-{suffix}",
-                title="Chapter",
-            )
-        )
-        session.flush()
-        session.add(
             Mission(
                 id=mission_id,
-                chapter_id=chapter_id,
+                season_id=season_id,
                 slug=f"mission-{suffix}",
                 mission_type="text_answer",
                 mission_category="solo",

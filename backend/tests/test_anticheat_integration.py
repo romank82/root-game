@@ -116,16 +116,15 @@ class AnticheatIntegrationTests(unittest.TestCase):
 
     # ---- Fixtures -------------------------------------------------------
     def _fixture(self) -> dict[str, str]:
-        """Season -> Chapter -> GeoZone -> Mission (published) + GamePlayer.
+        """Season -> GeoZone -> Mission (published) + GamePlayer.
 
         PlayerMission НЕ сеется: accept создаёт её через
         _synchronize_player_missions и сразу переводит в in_progress.
         """
-        from app.models import Chapter, GamePlayer, GeoZone, Mission, Season
+        from app.models import GamePlayer, GeoZone, Mission, Season
 
         suffix = uuid.uuid4().hex
         season_id = f"season-{suffix}"
-        chapter_id = f"chapter-{suffix}"
         zone_id = f"geo-zone-{suffix}"
         zone_slug = f"zone-{suffix}"
         mission_id = f"mission-{suffix}"
@@ -137,18 +136,6 @@ class AnticheatIntegrationTests(unittest.TestCase):
                     id=season_id,
                     slug=f"season-{suffix}",
                     title="Anti-cheat season",
-                    description="Isolated 8.9.d fixture",
-                    status="published",
-                    sort_order=1,
-                )
-            )
-            session.flush()
-            session.add(
-                Chapter(
-                    id=chapter_id,
-                    season_id=season_id,
-                    slug=f"chapter-{suffix}",
-                    title="Anti-cheat chapter",
                     description="Isolated 8.9.d fixture",
                     status="published",
                     sort_order=1,
@@ -179,7 +166,7 @@ class AnticheatIntegrationTests(unittest.TestCase):
             session.add(
                 Mission(
                     id=mission_id,
-                    chapter_id=chapter_id,
+                    season_id=season_id,
                     slug=f"mission-{suffix}",
                     mission_type="text_answer",
                     mission_category="solo",

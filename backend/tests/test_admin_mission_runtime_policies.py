@@ -353,7 +353,7 @@ class MissionRuntimePolicyLifecycleIntegrationTests(unittest.TestCase):
     def _fixture(
         self, *, mission_type="text_answer", mission_category="solo", item_status="published"
     ):
-        from app.models import AdminUser, Chapter, Item, Mission, Season
+        from app.models import AdminUser, Item, Mission, Season
 
         suffix = uuid.uuid4().hex
         ids = {
@@ -377,21 +377,9 @@ class MissionRuntimePolicyLifecycleIntegrationTests(unittest.TestCase):
             )
             session.flush()
             session.add(
-                Chapter(
-                    id=ids["chapter"],
-                    season_id=ids["season"],
-                    slug=f"chapter-{suffix}",
-                    title="Policy chapter",
-                    description="Isolated integration fixture",
-                    status="published",
-                    sort_order=1,
-                )
-            )
-            session.flush()
-            session.add(
                 Mission(
                     id=ids["mission"],
-                    chapter_id=ids["chapter"],
+                    season_id=ids["season"],
                     slug=f"mission-{suffix}",
                     mission_type=mission_type,
                     mission_category=mission_category,

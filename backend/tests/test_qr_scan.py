@@ -83,7 +83,7 @@ class QrScanTests(unittest.TestCase):
 
     def _fixture(self, *, mission_status: str = "published") -> dict[str, str]:
         from app.models import (
-            ARObject, Chapter, GamePlayer, GeoZone, Mission, Season,
+            ARObject, GamePlayer, GeoZone, Mission, Season,
         )
 
         suffix = uuid.uuid4().hex
@@ -103,11 +103,6 @@ class QrScanTests(unittest.TestCase):
             ))
             session.flush()
             session.add_all([
-                Chapter(
-                    id=ids["chapter"], season_id=ids["season"],
-                    slug=f"chapter-{suffix}", title="Test",
-                    status="published", sort_order=1,
-                ),
                 GamePlayer(
                     id=ids["player"], display_name="Test",
                     auth_provider="telegram",
@@ -134,7 +129,7 @@ class QrScanTests(unittest.TestCase):
             ))
             session.flush()
             session.add(Mission(
-                id=ids["mission"], chapter_id=ids["chapter"],
+                id=ids["mission"], season_id=ids["season"],
                 slug=f"mission-{suffix}", mission_type="text_answer",
                 mission_category="solo", title="Test",
                 content={"schemaVersion": 1},

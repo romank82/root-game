@@ -174,8 +174,8 @@ class CountryPolicyIntegrationTests(unittest.TestCase):
     # ---- Fixtures и хелперы -------------------------------------------
 
     def _make_mission_fixture(self, session, suffix: str) -> dict[str, str]:
-        """Season -> Chapter -> GeoZone -> ARObject -> Mission (published)."""
-        from app.models import ARObject, Chapter, GeoZone, Mission, Season
+        """Season -> GeoZone -> ARObject -> Mission (published)."""
+        from app.models import ARObject, GeoZone, Mission, Season
 
         ids = {
             "season": f"season-{suffix}",
@@ -189,19 +189,6 @@ class CountryPolicyIntegrationTests(unittest.TestCase):
                 id=ids["season"],
                 slug=f"season-{suffix}",
                 title="Country integration season",
-                description="Isolated country gate fixture",
-                status="published",
-                sort_order=1,
-            )
-        )
-        session.flush()
-
-        session.add(
-            Chapter(
-                id=ids["chapter"],
-                season_id=ids["season"],
-                slug=f"chapter-{suffix}",
-                title="Country integration chapter",
                 description="Isolated country gate fixture",
                 status="published",
                 sort_order=1,
@@ -252,7 +239,7 @@ class CountryPolicyIntegrationTests(unittest.TestCase):
         session.add(
             Mission(
                 id=ids["mission"],
-                chapter_id=ids["chapter"],
+                season_id=ids["season"],
                 slug=f"mission-{suffix}",
                 mission_type="text_answer",
                 mission_category="solo",

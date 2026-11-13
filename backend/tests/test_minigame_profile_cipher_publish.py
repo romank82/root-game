@@ -60,8 +60,7 @@ def _make_mission(
         validation_config=validation_config
         if validation_config is not None
         else {"validator": "cipher_match"},
-        chapter_id="chapter-test",
-        story_node_id=None,
+        season_id="season-test",
         geo_zone_id="zone-test",
         ar_object_id="ar-test",
         minigame_profile_id=minigame_profile_id,

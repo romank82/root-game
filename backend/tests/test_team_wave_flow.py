@@ -679,8 +679,6 @@ class TeamWaveFlowTests(unittest.TestCase):
             self.assertIsInstance(snap["items"], list)
             self.assertEqual(len(snap["items"]), 1)
             self.assertEqual(snap["items"][0]["quantity"], 1)
-            self.assertIsInstance(snap["storyNodeIds"], list)
-            self.assertEqual(snap["storyNodeIds"], [])
 
         self.assertEqual(self._snapshot(session_id)["status"], "succeeded")
 
@@ -755,7 +753,6 @@ class TeamWaveFlowTests(unittest.TestCase):
             self.assertIsInstance(awarded, dict)
             self.assertEqual(awarded["root"], 10)
             self.assertEqual(len(awarded["items"]), 1)
-            self.assertEqual(awarded["storyNodeIds"], [])
 
     def test_last_session_returns_failed_with_awarded_for_passed(self) -> None:
         """A честно прошёл волну, B провалил единственную → сессия failed;

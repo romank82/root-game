@@ -164,11 +164,10 @@ class SoloLocationProofTests(unittest.TestCase):
         mission_category: str = "solo",
         status: str = "published",
     ) -> str:
-        from app.models import Chapter, Mission, Season
+        from app.models import Mission, Season
 
         suffix = uuid.uuid4().hex
         season_id = f"season-{suffix}"
-        chapter_id = f"chapter-{suffix}"
         mission_id = f"mission-{suffix}"
         with self.SessionLocal.begin() as session:
             session.add(
@@ -176,18 +175,9 @@ class SoloLocationProofTests(unittest.TestCase):
             )
             session.flush()
             session.add(
-                Chapter(
-                    id=chapter_id,
-                    season_id=season_id,
-                    slug=f"chapter-{suffix}",
-                    title="Chapter",
-                )
-            )
-            session.flush()
-            session.add(
                 Mission(
                     id=mission_id,
-                    chapter_id=chapter_id,
+                    season_id=season_id,
                     slug=f"mission-{suffix}",
                     mission_type=mission_type,
                     mission_category=mission_category,

@@ -401,7 +401,7 @@ class MissionQrPayloadEntrypointTests(unittest.TestCase):
 
     # ---- Fixtures и хелперы -------------------------------------------
     def _fixture(self, *, players: int = 1) -> dict[str, Any]:
-        from app.models import Chapter, GamePlayer, GeoZone, Mission, Season
+        from app.models import GamePlayer, GeoZone, Mission, Season
 
         suffix = uuid.uuid4().hex
         ids: dict[str, Any] = {
@@ -418,19 +418,6 @@ class MissionQrPayloadEntrypointTests(unittest.TestCase):
                     id=ids["season"],
                     slug=f"season-{suffix}",
                     title="QR test season",
-                    description="Isolated qr fixture",
-                    status="published",
-                    sort_order=1,
-                )
-            )
-            session.flush()
-
-            session.add(
-                Chapter(
-                    id=ids["chapter"],
-                    season_id=ids["season"],
-                    slug=f"chapter-{suffix}",
-                    title="QR test chapter",
                     description="Isolated qr fixture",
                     status="published",
                     sort_order=1,
@@ -472,7 +459,7 @@ class MissionQrPayloadEntrypointTests(unittest.TestCase):
             session.add(
                 Mission(
                     id=ids["mission"],
-                    chapter_id=ids["chapter"],
+                    season_id=ids["season"],
                     slug=f"mission-{suffix}",
                     mission_type="text_answer",
                     mission_category="solo",
