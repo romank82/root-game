@@ -29,7 +29,7 @@ request_id на уже отменённой миссии -> 200 idempotent; от
 Тот же идемпотентный механизм для force-complete (5.6.b): признаком
 «request_id уже применили» служит запись в immutable admin_audit_log
 (action player.mission_force_complete[.via_approval]). Replay отдаёт
-исторические awardedRoot/awardedItems/awardedStoryNodeIds/rewardSkipped/
+исторические awardedRoot/awardedItems/rewardSkipped/
 entryConsumed из metadata_json audit-записи.
 """
 from __future__ import annotations
@@ -472,7 +472,7 @@ def _apply_mission_force_complete(
     player_mission.status = COMPLETED_STATUS
     player_mission.completed_at = now_ts
 
-    reward_outcome: dict[str, Any] = {"root": 0, "items": [], "storyNodeIds": []}
+    reward_outcome: dict[str, Any] = {"root": 0, "items": []}
     reward_skipped = False
     if award_rewards:
         mission = session.get(Mission, mission_id)
@@ -495,7 +495,6 @@ def _apply_mission_force_complete(
         "requestId": request_id,
         "awardedRoot": reward_outcome["root"],
         "awardedItems": reward_outcome["items"],
-        "awardedStoryNodeIds": reward_outcome["storyNodeIds"],
         "rewardSkipped": reward_skipped,
         "entryConsumed": entry_consumed,
         "fullReason": reason,
@@ -652,7 +651,6 @@ def _serialize_force_complete_result(
         "rewardOutcome": {
             "awardedRoot": reward_outcome.get("root", 0),
             "awardedItems": reward_outcome.get("items", []),
-            "awardedStoryNodeIds": reward_outcome.get("storyNodeIds", []),
         },
         "rewardSkipped": reward_skipped,
         "entryConsumed": entry_consumed,
@@ -1229,7 +1227,6 @@ def create_player_mission_force_complete(
                     {
                         "root": meta.get("awardedRoot", 0),
                         "items": meta.get("awardedItems", []),
-                        "storyNodeIds": meta.get("awardedStoryNodeIds", []),
                     },
                     reward_skipped=bool(meta.get("rewardSkipped", False)),
                     entry_consumed=bool(meta.get("entryConsumed", False)),

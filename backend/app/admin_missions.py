@@ -21,13 +21,12 @@ from app.models import (
     AdminAuditLog,
     AdminUser,
     ARObject,
-    Chapter,
     GeoZone,
     Item,
     Mission,
     MinigameProfile,
     MissionReward,
-    StoryNode,
+    Season,
     SystemSetting,
 )
 from app.slug_utils import _normalize_slug, _slugify_title, unique_slug
@@ -39,7 +38,7 @@ router = APIRouter(prefix="/api/v1/admin/missions", tags=["admin-missions"])
 MISSION_READ_PERMISSION = "missions.read"
 MISSION_MANAGE_PERMISSION = "missions.manage"
 VALID_MISSION_STATUSES = {"draft", "published"}
-VALID_REWARD_TYPES = {"currency", "item", "story_node"}
+VALID_REWARD_TYPES = {"currency", "item"}
 
 # Sprint Trans-2b-2: ручной перевод контента миссии (Mission.translations).
 # Источник истины по языкам — CMS-настройка content.supported_languages
@@ -134,14 +133,12 @@ class AdminMissionRewardPayload(BaseModel):
     reward_type: str = Field(min_length=1, max_length=64)
     amount: int | None = Field(default=None, ge=1, le=1_000_000)
     item_id: str | None = Field(default=None, max_length=64)
-    story_node_id: str | None = Field(default=None, max_length=64)
     reward_value: dict[str, Any] = Field(default_factory=dict)
     sort_order: int = Field(default=0, ge=0, le=100_000)
 
 
 class AdminMissionCreatePayload(BaseModel):
-    chapter_id: str = Field(min_length=1, max_length=64)
-    story_node_id: str | None = Field(default=None, max_length=64)
+    season_id: str = Field(min_length=1, max_length=64)
     geo_zone_id: str | None = Field(default=None, max_length=64)
     ar_object_id: str | None = Field(default=None, max_length=64)
     minigame_profile_id: str | None = Field(default=None, max_length=64)
@@ -169,8 +166,7 @@ class AdminMissionCreatePayload(BaseModel):
 
 
 class AdminMissionUpdatePayload(BaseModel):
-    chapter_id: str | None = Field(default=None, min_length=1, max_length=64)
-    story_node_id: str | None = Field(default=None, max_length=64)
+    season_id: str | None = Field(default=None, min_length=1, max_length=64)
     geo_zone_id: str | None = Field(default=None, max_length=64)
     ar_object_id: str | None = Field(default=None, max_length=64)
     minigame_profile_id: str | None = Field(default=None, max_length=64)
@@ -223,7 +219,6 @@ def _serialize_reward(reward: MissionReward) -> dict[str, Any]:
         "rewardType": reward.reward_type,
         "amount": reward.amount,
         "itemId": reward.item_id,
-        "storyNodeId": reward.story_node_id,
         "rewardValue": reward.reward_value,
         "sortOrder": reward.sort_order,
     }
@@ -241,8 +236,7 @@ def _serialize_mission(
 
     return {
         "id": mission.id,
-        "chapterId": mission.chapter_id,
-        "storyNodeId": mission.story_node_id,
+        "seasonId": mission.season_id,
         "geoZoneId": mission.geo_zone_id,
         "arObjectId": mission.ar_object_id,
         "minigameProfileId": mission.minigame_profile_id,
@@ -295,32 +289,15 @@ def _audit(
 def _validate_references(
     session: Session,
     *,
-    chapter_id: str,
-    story_node_id: str | None,
+    season_id: str,
     geo_zone_id: str | None,
     ar_object_id: str | None,
 ) -> None:
-    if session.get(Chapter, chapter_id) is None:
+    if session.get(Season, season_id) is None:
         raise HTTPException(
             status_code=422,
-            detail="Указанная глава (chapter_id) не существует.",
+            detail="Указанный сезон (season_id) не существует.",
         )
-
-    if story_node_id is not None:
-        story_node = session.get(StoryNode, story_node_id)
-        if story_node is None:
-            raise HTTPException(
-                status_code=422,
-                detail="Указанный story_node_id не существует.",
-            )
-        if story_node.chapter_id != chapter_id:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "StoryNode должен принадлежать той же главе, "
-                    "что и миссия."
-                ),
-            )
 
     if geo_zone_id is not None and session.get(GeoZone, geo_zone_id) is None:
         raise HTTPException(
@@ -340,9 +317,9 @@ def _validate_unlock_chain(
     *,
     mission_id: str | None,
     unlock_after_mission_id: str | None,
-    chapter_id: str,
+    season_id: str,
 ) -> None:
-    """Проверить, что unlock_after_mission_id не создаёт self-ref, cross-chapter или цикл."""
+    """Проверить, что unlock_after_mission_id не создаёт self-ref, cross-season или цикл."""
     if unlock_after_mission_id is None or unlock_after_mission_id == "":
         return
 
@@ -361,11 +338,11 @@ def _validate_unlock_chain(
             detail="Указанная миссия для разблокировки (unlock_after_mission_id) не существует.",
         )
 
-    # Та же глава?
-    if target.chapter_id != chapter_id:
+    # Тот же сезон?
+    if target.season_id != season_id:
         raise HTTPException(
             status_code=422,
-            detail="Разблокирующая миссия должна быть в той же главе.",
+            detail="Разблокирующая миссия должна быть в том же сезоне.",
         )
 
     # Цикл — пройти по цепочке вверх, до 20 шагов
@@ -390,7 +367,6 @@ def _validate_unlock_chain(
 def _validate_rewards(
     session: Session,
     *,
-    chapter_id: str,
     rewards: list[AdminMissionRewardPayload],
 ) -> None:
     for reward in rewards:
@@ -399,7 +375,7 @@ def _validate_rewards(
                 status_code=422,
                 detail=(
                     "Недопустимый reward_type. Разрешены: "
-                    "currency, item, story_node."
+                    "currency, item."
                 ),
             )
 
@@ -427,32 +403,6 @@ def _validate_rewards(
                 raise HTTPException(
                     status_code=422,
                     detail="Награда item ссылается на несуществующий item_id.",
-                )
-
-        elif reward.reward_type == "story_node":
-            if not reward.story_node_id:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Награда story_node должна содержать story_node_id.",
-                )
-
-            story_node = session.get(StoryNode, reward.story_node_id)
-            if story_node is None:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "Награда story_node ссылается на несуществующий "
-                        "story_node_id."
-                    ),
-                )
-
-            if story_node.chapter_id != chapter_id:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "StoryNode награды должен принадлежать той же "
-                        "главе, что и миссия."
-                    ),
                 )
 
 
@@ -715,8 +665,7 @@ def _validate_for_publish(
     )
     _validate_references(
         session,
-        chapter_id=mission.chapter_id,
-        story_node_id=mission.story_node_id,
+        season_id=mission.season_id,
         geo_zone_id=mission.geo_zone_id,
         ar_object_id=mission.ar_object_id,
     )
@@ -906,7 +855,6 @@ def _validate_for_publish(
             reward_type=reward.reward_type,
             amount=reward.amount,
             item_id=reward.item_id,
-            story_node_id=reward.story_node_id,
             reward_value=reward.reward_value,
             sort_order=reward.sort_order,
         )
@@ -914,7 +862,6 @@ def _validate_for_publish(
     ]
     _validate_rewards(
         session,
-        chapter_id=mission.chapter_id,
         rewards=reward_payloads,
     )
 
@@ -942,7 +889,6 @@ def _replace_rewards(
                 reward_type=reward.reward_type,
                 amount=reward.amount,
                 item_id=reward.item_id,
-                story_node_id=reward.story_node_id,
                 reward_value=reward.reward_value,
                 sort_order=reward.sort_order,
             )
@@ -951,25 +897,25 @@ def _replace_rewards(
 
 @router.get("")
 def list_admin_missions(
-    chapter_id: str | None = None,
+    season_id: str | None = None,
     _admin: AdminUser = Depends(require_permission(MISSION_READ_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
-        # Sprint 8.23 (Этап 1, часть 2b): опциональный фильтр chapter_id —
-        # только миссии этой главы. Без параметра поведение не меняется
-        # (обратная совместимость). Несуществующая глава -> 404; валидатор
+        # Sprint 8.23 (Этап 1, часть 2b): опциональный фильтр season_id —
+        # только миссии этого сезона. Без параметра поведение не меняется
+        # (обратная совместимость). Несуществующий сезон -> 404; валидатор
         # _validate_references отдаёт 422 и используется create/update, поэтому
         # здесь проверка через сессию с литералом 404 (без затенения
         # fastapi.status параметром функции).
-        if chapter_id is not None and session.get(Chapter, chapter_id) is None:
+        if season_id is not None and session.get(Season, season_id) is None:
             raise HTTPException(
                 status_code=404,
-                detail="Глава не найдена.",
+                detail="Сезон не найден.",
             )
 
         query = select(Mission).order_by(Mission.status, Mission.sort_order, Mission.id)
-        if chapter_id is not None:
-            query = query.where(Mission.chapter_id == chapter_id)
+        if season_id is not None:
+            query = query.where(Mission.season_id == season_id)
 
         missions = session.scalars(query).all()
 
@@ -1024,8 +970,7 @@ def create_admin_mission(
 
         _validate_references(
             session,
-            chapter_id=payload.chapter_id,
-            story_node_id=payload.story_node_id,
+            season_id=payload.season_id,
             geo_zone_id=payload.geo_zone_id,
             ar_object_id=payload.ar_object_id,
         )
@@ -1041,19 +986,17 @@ def create_admin_mission(
             session,
             mission_id=None,
             unlock_after_mission_id=payload.unlock_after_mission_id,
-            chapter_id=payload.chapter_id,
+            season_id=payload.season_id,
         )
         _validate_rewards(
             session,
-            chapter_id=payload.chapter_id,
             rewards=payload.rewards,
         )
         _validate_mission_category(payload.mission_category)
 
         mission = Mission(
             id=_new_id("mission"),
-            chapter_id=payload.chapter_id,
-            story_node_id=payload.story_node_id,
+            season_id=payload.season_id,
             geo_zone_id=payload.geo_zone_id,
             ar_object_id=payload.ar_object_id,
             minigame_profile_id=payload.minigame_profile_id,
@@ -1141,13 +1084,9 @@ def update_admin_mission(
             mission.slug = slug
             changed_fields.append("slug")
 
-        if "chapter_id" in updates:
-            mission.chapter_id = updates["chapter_id"]
-            changed_fields.append("chapterId")
-
-        if "story_node_id" in updates:
-            mission.story_node_id = updates["story_node_id"]
-            changed_fields.append("storyNodeId")
+        if "season_id" in updates:
+            mission.season_id = updates["season_id"]
+            changed_fields.append("seasonId")
 
         if "geo_zone_id" in updates:
             mission.geo_zone_id = updates["geo_zone_id"]
@@ -1171,8 +1110,7 @@ def update_admin_mission(
 
         _validate_references(
             session,
-            chapter_id=mission.chapter_id,
-            story_node_id=mission.story_node_id,
+            season_id=mission.season_id,
             geo_zone_id=mission.geo_zone_id,
             ar_object_id=mission.ar_object_id,
         )
@@ -1209,7 +1147,7 @@ def update_admin_mission(
             session,
             mission_id=mission.id,
             unlock_after_mission_id=mission.unlock_after_mission_id,
-            chapter_id=mission.chapter_id,
+            season_id=mission.season_id,
         )
 
         scalar_fields = {
@@ -1239,7 +1177,6 @@ def update_admin_mission(
         if "rewards" in updates:
             _validate_rewards(
                 session,
-                chapter_id=mission.chapter_id,
                 rewards=payload.rewards or [],
             )
             _replace_rewards(

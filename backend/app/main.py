@@ -117,15 +117,12 @@ from app.admin_auth import (
 from app.admin_approvals import router as admin_approvals_router
 from app.admin_management import router as admin_management_router
 from app.admin_missions import router as admin_missions_router
-from app.admin_segments import router as admin_segments_router
 from app.admin_key_rules import router as admin_key_rules_router
 from app.admin_reward_pools import router as admin_reward_pools_router
 from app.admin_geo_zones import router as admin_geo_zones_router
 from app.admin_ar_objects import router as admin_ar_objects_router
 from app.admin_minigame_profiles import router as admin_minigame_profiles_router
 from app.admin_seasons import router as admin_seasons_router
-from app.admin_chapters import router as admin_chapters_router
-from app.admin_story_nodes import router as admin_story_nodes_router
 from app.admin_mission_runtime_policies import (
     router as admin_mission_runtime_policies_router,
     router_missions as admin_mission_runtime_policies_missions_router,
@@ -2125,15 +2122,12 @@ def admin_logout(request: Request, response: Response):
 app.include_router(admin_management_router)
 app.include_router(admin_approvals_router)
 app.include_router(admin_missions_router)
-app.include_router(admin_segments_router)
 app.include_router(admin_key_rules_router)
 app.include_router(admin_reward_pools_router)
 app.include_router(admin_geo_zones_router)
 app.include_router(admin_ar_objects_router)
 app.include_router(admin_minigame_profiles_router)
 app.include_router(admin_seasons_router)
-app.include_router(admin_chapters_router)
-app.include_router(admin_story_nodes_router)
 app.include_router(admin_mission_runtime_policies_router)
 app.include_router(admin_mission_runtime_policies_missions_router)
 app.include_router(admin_system_settings_router)

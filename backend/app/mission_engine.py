@@ -37,8 +37,6 @@ from app.models import (
     MinigameProfile,
     PlayerItem,
     PlayerMission,
-    Segment,
-    StoryNode,
     SystemSetting,
     TeamSession,
     TeamSessionMember,
@@ -496,17 +494,6 @@ def _serialize_item(player_item: PlayerItem, item: Item) -> dict:
     }
 
 
-def _serialize_story_node(story_node: StoryNode) -> dict:
-    return {
-        "id": story_node.id,
-        "slug": story_node.slug,
-        "title": story_node.title,
-        "body": story_node.body,
-        "presentationType": story_node.presentation_type,
-        "content": story_node.content,
-    }
-
-
 def _inject_ar_object_type(
     content: dict[str, Any] | None,
     object_type: str | None,
@@ -579,26 +566,13 @@ def _localize_mission_content(mission: Mission, lang: str) -> dict[str, Any]:
 def _collect_ar_object_types(
     session: Session,
     missions: list[Mission],
-    segments: list[Segment],
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Карта mission/segment id -> object_type связанного AR-объекта.
-
-    У миссии привязка — mission.ar_object_id. У сегмента своей привязки нет,
-    поэтому тип берётся из первой active/published linked-миссии с назначенным
-    AR-объектом (порядок совпадает с linkedMissions в bootstrap).
-    """
-    ar_object_ids: set[str] = set()
-    for mission in missions:
-        if mission.ar_object_id:
-            ar_object_ids.add(mission.ar_object_id)
-    for segment in segments:
-        for link in segment.mission_links:
-            if (
-                link.status == "active"
-                and link.mission.status == "published"
-                and link.mission.ar_object_id
-            ):
-                ar_object_ids.add(link.mission.ar_object_id)
+) -> dict[str, str]:
+    """Карта mission id -> object_type связанного AR-объекта."""
+    ar_object_ids = {
+        mission.ar_object_id
+        for mission in missions
+        if mission.ar_object_id
+    }
 
     ar_objects_by_id: dict[str, ARObject] = {}
     if ar_object_ids:
@@ -616,24 +590,7 @@ def _collect_ar_object_types(
                 mission.ar_object_id
             ].object_type
 
-    by_segment_id: dict[str, str] = {}
-    for segment in segments:
-        for link in sorted(
-            segment.mission_links,
-            key=lambda current: (current.sort_order, current.mission_id),
-        ):
-            if (
-                link.status == "active"
-                and link.mission.status == "published"
-                and link.mission.ar_object_id
-                and link.mission.ar_object_id in ar_objects_by_id
-            ):
-                by_segment_id[segment.id] = ar_objects_by_id[
-                    link.mission.ar_object_id
-                ].object_type
-                break
-
-    return by_mission_id, by_segment_id
+    return by_mission_id
 
 
 def _team_max_members_from_config(mission: Mission) -> int | None:
@@ -696,41 +653,9 @@ def _build_bootstrap(
         .order_by(Item.code)
     ).all()
 
-    unlocked_story_node_exists = (
-        select(MissionReward.id)
-        .join(
-            PlayerMission,
-            PlayerMission.mission_id == MissionReward.mission_id,
-        )
-        .where(
-            MissionReward.story_node_id == StoryNode.id,
-            MissionReward.reward_type == "story_node",
-            PlayerMission.player_id == player_id,
-            PlayerMission.status == "completed",
-        )
-        .exists()
-    )
-
-    # Avoid SELECT DISTINCT over StoryNode.content (JSON): PostgreSQL JSON
-    # has no equality operator. EXISTS also naturally prevents duplicates.
-    story_nodes = session.scalars(
-        select(StoryNode)
-        .where(unlocked_story_node_exists)
-        .order_by(StoryNode.sort_order, StoryNode.id)
-    ).all()
-
-    # Get published segments
-    segments = session.scalars(
-        select(Segment)
-        .where(Segment.status == "published")
-        .order_by(Segment.sort_order, Segment.id)
-    ).all()
-
     # Инъекция object_type из привязанного AR-объекта при отдаче в игру:
     # каталог AR-объектов наружу не отдаётся, фронт читает arScene из content.
-    ar_object_type_by_mission_id, ar_object_type_by_segment_id = (
-        _collect_ar_object_types(session, missions, segments)
-    )
+    ar_object_type_by_mission_id = _collect_ar_object_types(session, missions)
 
     # Sprint 8.14 (ui): лимит попыток для UI-счётчика. Sprint 8.x: публичные
     # данные policy (entry_root, required items) отдаются в bootstrap, чтобы
@@ -758,7 +683,7 @@ def _build_bootstrap(
             policy.max_attempts if policy is not None else None
         )
 
-    # Sprint 8.x: награды миссий (currency ROOT / item / story_node) для поля
+    # Sprint 8.x: награды миссий (currency ROOT / item) для поля
     # "rewards" в объекте миссии — игра показывает «Возможные награды».
     # Загружаем батчем одним запросом, без N+1; у миссий без наград — [].
     rewards_by_mission: dict[str, list[MissionReward]] = {}
@@ -1005,7 +930,6 @@ def _build_bootstrap(
                             if reward.reward_type == "item" and reward.item_id
                             else None
                         ),
-                        "storyNodeId": reward.story_node_id,
                     }
                     for reward in rewards_by_mission.get(mission.id, [])
                 ],
@@ -1078,43 +1002,9 @@ def _build_bootstrap(
             }
             for mission in missions
         ],
-        "segments": [
-            {
-                "id": segment.id,
-                "slug": segment.slug,
-                "title": segment.title,
-                "description": segment.description,
-                "content": _inject_ar_object_type(
-                    segment.content,
-                    ar_object_type_by_segment_id.get(segment.id),
-                ),
-                "status": segment.status,
-                "sortOrder": segment.sort_order,
-                "linkedMissions": [
-                    {
-                        "id": link.mission.id,
-                        "slug": link.mission.slug,
-                        "title": link.mission.title,
-                    }
-                    for link in sorted(
-                        segment.mission_links,
-                        key=lambda current: (current.sort_order, current.mission_id),
-                    )
-                    if (
-                        link.status == "active"
-                        and link.mission.status == "published"
-                    )
-                ],
-            }
-            for segment in segments
-        ],
         "inventory": [
             _serialize_item(player_item, item)
             for player_item, item in inventory_rows
-        ],
-        "storyNodes": [
-            _serialize_story_node(story_node)
-            for story_node in story_nodes
         ],
     }
 
@@ -1296,7 +1186,6 @@ def _award_mission_rewards(
     wallet = _get_root_wallet_for_update(session, player_id)
     awarded_root = 0
     awarded_items: list[dict] = []
-    unlocked_story_node_ids: list[str] = []
 
     # Sprint 8.14 (шаг 4): per-attempt reward multiplier. Множитель выбирается
     # по номеру попытки в текущем проходе (1-базовый): attempt 1 → 1.0,
@@ -1450,9 +1339,6 @@ def _award_mission_rewards(
                 }
             )
 
-        elif reward.reward_type == "story_node" and reward.story_node_id:
-            unlocked_story_node_ids.append(reward.story_node_id)
-
     session.flush()
 
     # Sprint Referral R-6: реферальный бонус — побочный эффект награды.
@@ -1478,7 +1364,6 @@ def _award_mission_rewards(
     return {
         "root": awarded_root,
         "items": awarded_items,
-        "storyNodeIds": unlocked_story_node_ids,
     }
 
 
@@ -1903,7 +1788,6 @@ def _submit_mission_once(
                 "awarded": {
                     "root": 0,
                     "items": [],
-                    "storyNodeIds": [],
                 },
                 "bootstrap": _build_bootstrap(session, player_id),
             }
@@ -1922,7 +1806,7 @@ def _submit_mission_once(
                 "missionStatus": player_mission.status,
                 "timedOut": True,
                 "message": "Время попытки истекло. Попытка сгорела.",
-                "awarded": {"root": 0, "items": [], "storyNodeIds": []},
+                "awarded": {"root": 0, "items": []},
                 "bootstrap": _build_bootstrap(session, player_id),
             }
 
@@ -2034,7 +1918,6 @@ def _submit_mission_once(
                 "awarded": {
                     "root": 0,
                     "items": [],
-                    "storyNodeIds": [],
                 },
                 "bootstrap": _build_bootstrap(session, player_id),
             }
@@ -2075,7 +1958,7 @@ def _submit_mission_once(
         )
 
         # 13.3-b-2: лог mission.completed (PlayerEvent). Награда уже выдана
-        # (awarded = {"root": ..., "items": ..., "storyNodeIds": ...}).
+        # (awarded = {"root": ..., "items": ...}).
         # Запись — в SAVEPOINT (begin_nested): та же транзакция, собственный
         # флаш; при сбое журнала откатится только savepoint, транзакция
         # коммита миссии/награды не будет отравлена (иначе после упавшего

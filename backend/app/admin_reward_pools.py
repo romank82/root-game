@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
-from app.models import AdminUser, Item, RewardPool, RewardPoolEntry, StoryNode
+from app.models import AdminUser, Item, RewardPool, RewardPoolEntry
 from app.slug_utils import _normalize_slug
 
 
@@ -20,14 +20,13 @@ router = APIRouter(prefix="/api/v1/admin/reward-pools", tags=["admin-reward-pool
 REWARD_POOLS_READ_PERMISSION = "reward_pools.read"
 REWARD_POOLS_MANAGE_PERMISSION = "reward_pools.manage"
 VALID_POOL_STATUSES = {"draft", "published"}
-VALID_REWARD_TYPES = {"currency", "item", "story_node"}
+VALID_REWARD_TYPES = {"currency", "item"}
 
 
 class AdminRewardPoolEntryPayload(BaseModel):
     reward_type: str = Field(min_length=1, max_length=64)
     amount: int | None = Field(default=None, ge=1, le=1_000_000)
     item_id: str | None = Field(default=None, max_length=64)
-    story_node_id: str | None = Field(default=None, max_length=64)
     reward_value: dict[str, Any] = Field(default_factory=dict)
     weight: int = Field(default=1, ge=1, le=1_000_000)
     sort_order: int = Field(default=0, ge=0, le=100_000)
@@ -64,7 +63,7 @@ def _validate_entries(
                 status_code=422,
                 detail=(
                     "Недопустимый reward_type. Разрешены: "
-                    "currency, item, story_node."
+                    "currency, item."
                 ),
             )
 
@@ -92,22 +91,6 @@ def _validate_entries(
                 raise HTTPException(
                     status_code=422,
                     detail="Награда item ссылается на несуществующий item_id.",
-                )
-
-        elif entry.reward_type == "story_node":
-            if not entry.story_node_id:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Награда story_node должна содержать story_node_id.",
-                )
-
-            if session.get(StoryNode, entry.story_node_id) is None:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "Награда story_node ссылается на несуществующий "
-                        "story_node_id."
-                    ),
                 )
 
         if entry.weight <= 0:
@@ -146,7 +129,6 @@ def _replace_entries(
                 reward_type=entry.reward_type,
                 amount=entry.amount,
                 item_id=entry.item_id,
-                story_node_id=entry.story_node_id,
                 reward_value=entry.reward_value,
                 weight=entry.weight,
                 sort_order=entry.sort_order,
@@ -160,7 +142,6 @@ def _serialize_entry(entry: RewardPoolEntry) -> dict[str, Any]:
         "rewardType": entry.reward_type,
         "amount": entry.amount,
         "itemId": entry.item_id,
-        "storyNodeId": entry.story_node_id,
         "rewardValue": entry.reward_value,
         "weight": entry.weight,
         "sortOrder": entry.sort_order,
