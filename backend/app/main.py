@@ -11,7 +11,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -520,6 +526,73 @@ class TeamWaveSubmitPayload(BaseModel):
 class TeamSessionMessagePayload(BaseModel):
     """POST /api/v1/engine/team-missions/sessions/{id}/messages (6.6-a)."""
     text: str = Field(min_length=1, max_length=1000)
+
+
+# --- A3: Pydantic-схемы поддерживаемых Telegram update types ----------------
+# extra="ignore": Telegram присылает много полей (from/chat/date/…), которые
+# webhook не использует. Обязательными помечены только те поля, которые
+# реально читают обработчики stars_service — неполный payload отклоняется 400.
+class TelegramUser(BaseModel):
+    """Подмножество Telegram User, нужное webhook."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    first_name: str | None = None
+    username: str | None = None
+
+
+class PreCheckoutQuery(BaseModel):
+    """pre_checkout_query: поля, которые читает stars_service."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    # В Telegram поле называется "from".
+    from_user: TelegramUser | None = Field(default=None, alias="from")
+    currency: str | None = None
+    total_amount: int | None = None
+    invoice_payload: str = Field(..., min_length=1)
+
+
+class PreCheckoutQueryUpdate(BaseModel):
+    """Update с pre_checkout_query (валидируется A3)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    update_id: int | None = None
+    pre_checkout_query: PreCheckoutQuery
+
+
+class SuccessfulPayment(BaseModel):
+    """successful_payment: поля, которые читает stars_service."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    currency: str | None = None
+    total_amount: int | None = None
+    invoice_payload: str = Field(..., min_length=1)
+    telegram_payment_charge_id: str = Field(..., min_length=1)
+    provider_payment_charge_id: str | None = None
+
+
+class TelegramMessage(BaseModel):
+    """Сообщение Telegram с успешным платежом."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    message_id: int | None = None
+    successful_payment: SuccessfulPayment | None = None
+
+
+class SuccessfulPaymentUpdate(BaseModel):
+    """Update с message.successful_payment (валидируется A3)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    update_id: int | None = None
+    message: TelegramMessage
+
 
 def _new_player_id() -> str:
     return f"player-{uuid4().hex}"
@@ -2194,12 +2267,34 @@ def telegram_webhook(request: Request, update: dict):
         if provided_secret != expected_secret:
             raise HTTPException(status_code=403, detail="Forbidden.")
 
+    # A3: структурная валидация поддерживаемых update types. Неизвестные типы
+    # по-прежнему игнорируются (200); неполный/битый payload поддерживаемого
+    # типа отклоняется 400, и обработчики stars_service не вызываются.
     try:
         if update.get("pre_checkout_query"):
-            handle_pre_checkout_query(update)
-        elif (update.get("message") or {}).get("successful_payment"):
-            handle_successful_payment(update)
-        # Прочие типы update (text, callback_query, my_chat_member, ...) — игнор.
+            normalized = PreCheckoutQueryUpdate.model_validate(
+                update
+            ).model_dump(by_alias=True, exclude_none=True)
+        elif (
+            isinstance(update.get("message"), dict)
+            and update["message"].get("successful_payment")
+        ):
+            normalized = SuccessfulPaymentUpdate.model_validate(
+                update
+            ).model_dump(by_alias=True, exclude_none=True)
+        else:
+            # Прочие типы update (text, callback_query, my_chat_member, ...).
+            return {"ok": True}
+    except ValidationError:
+        raise HTTPException(
+            status_code=400, detail="Invalid Telegram update"
+        ) from None
+
+    try:
+        if "pre_checkout_query" in normalized:
+            handle_pre_checkout_query(normalized)
+        else:
+            handle_successful_payment(normalized)
     except Exception as error:  # noqa: BLE001 — webhook не должен падать
         logger.exception("Telegram webhook error: %s", error)
         # Всегда 200: Telegram ретраит не-2xx бесконечно, а successful_payment
