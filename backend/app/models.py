@@ -1299,6 +1299,67 @@ class PlayerItem(TimestampMixin, Base):
     )
 
 
+class PlayerItemAward(TimestampMixin, Base):
+    """Immutable-событие выдачи предмета за миссию (B2).
+
+    Идемпотентность item-наград: одна строка награды MissionReward выдаётся
+    игроку за конкретный прогон (reference_id) не более одного раза.
+    У WalletTransaction (currency) такая защита уже есть; у PlayerItem её не
+    было, поэтому параллельный submit мог дважды увеличить quantity.
+    PlayerItem.quantity остаётся кэшем, источник истины по выдачам — эта
+    append-only таблица.
+
+    reward_id входит в уникальный ключ (а не только item_id): у миссии может
+    быть несколько строк наград на один item, и каждая строка должна быть
+    идемпотентна отдельно. FK на mission_rewards намеренно нет: строки
+    наград редактируются CMS, история выдач не должна блокировать CMS.
+
+    Физическое удаление запрещено: append-only история выдач.
+    """
+
+    __tablename__ = "player_item_awards"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    reward_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_id: Mapped[str] = mapped_column(
+        ForeignKey("items.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    reference_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_id",
+            "mission_id",
+            "reward_id",
+            "reference_id",
+            name="uq_player_item_awards_grant",
+        ),
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_player_item_awards_quantity_positive",
+        ),
+        Index(
+            "ix_player_item_awards_player_mission_item",
+            "player_id",
+            "mission_id",
+            "item_id",
+        ),
+    )
+
+
 class Wallet(TimestampMixin, Base):
     __tablename__ = "wallets"
 

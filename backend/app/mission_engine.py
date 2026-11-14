@@ -6,8 +6,8 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy import func, inspect as sa_inspect, select
+from sqlalchemy.exc import IntegrityError, NoInspectionAvailable, OperationalError
 from sqlalchemy.orm import Session
 
 from app.country_policy import is_feature_restricted
@@ -36,6 +36,7 @@ from app.models import (
     MissionRuntimePolicy,
     MinigameProfile,
     PlayerItem,
+    PlayerItemAward,
     PlayerMission,
     SystemSetting,
     TeamSession,
@@ -1157,6 +1158,11 @@ def _award_mission_rewards(
     ROOT защищён на уровне БД уникальным индексом:
     wallet_id + reference_type + reference_id.
 
+    Item-награды защищены immutable-событием PlayerItemAward: уникальный
+    ключ (player_id, mission_id, reward_id, reference_id) не даёт выдать
+    одну строку награды за один прогон дважды (повторный submit и
+    параллельная гонка). PlayerItem.quantity — кэш поверх этих выдач.
+
     reference_id — чем помечаем проводку: для solo это миссия
     (mission.id), для team — сессия (team_session.id), чтобы одну
     командную миссию можно было награждать в каждой новой сессии.
@@ -1308,14 +1314,41 @@ def _award_mission_rewards(
             ):
                 continue  # ключ уже в магазине
 
+            quantity = reward.amount or 1
+
+            # B2: immutable award event — item-награда идемпотентна по
+            # (player_id, mission_id, reward_id, reference_id). В solo это
+            # выполняется под row-lock PlayerMission; уникальный ключ
+            # player_item_awards — DB-level барьер для всех путей награды.
+            existing_award = session.scalar(
+                select(PlayerItemAward.id).where(
+                    PlayerItemAward.player_id == player_id,
+                    PlayerItemAward.mission_id == mission.id,
+                    PlayerItemAward.reward_id == reward.id,
+                    PlayerItemAward.reference_id == reference_id,
+                )
+            )
+            if existing_award is not None:
+                continue
+
+            session.add(
+                PlayerItemAward(
+                    id=_new_id("player-item-award"),
+                    player_id=player_id,
+                    mission_id=mission.id,
+                    reward_id=reward.id,
+                    item_id=reward.item_id,
+                    reference_id=reference_id,
+                    quantity=quantity,
+                )
+            )
+
             player_item = session.scalar(
                 select(PlayerItem).where(
                     PlayerItem.player_id == player_id,
                     PlayerItem.item_id == reward.item_id,
                 )
             )
-
-            quantity = reward.amount or 1
 
             if player_item is None:
                 player_item = PlayerItem(
@@ -1766,6 +1799,11 @@ def _submit_mission_once(
 
         progress = _synchronize_player_missions(session, player_id)
         player_mission = progress[mission.id]
+
+        # B2: row-lock ДО проверки статуса и начисления. Второй параллельный
+        # submit сериализуется здесь и после коммита первого увидит
+        # status='completed' -> alreadyCompleted без повторной награды.
+        _lock_player_mission_for_update(session, player_mission)
 
         if player_mission.status == "cancelled":
             raise MissionEngineError(
@@ -2327,6 +2365,29 @@ def _solo_proof_freshness_seconds() -> int:
     шаг (8.5-5, docs/CMS). System Settings в этом шаге не трогаем.
     """
     return 60
+
+
+def _lock_player_mission_for_update(
+    session: Session, player_mission: PlayerMission
+) -> None:
+    """Взять row-lock на PlayerMission (B2) для сериализации submit.
+
+    Выборка по (player_id, mission_id) с FOR UPDATE гарантирует, что два
+    параллельных submit одной и той же миссии не пройдут проверку статуса и
+    начисление наград одновременно (PostgreSQL; SQLite — no-op).
+
+    refresh пропускается для не-ORM объектов (unit-тесты подменяют sync и
+    кладут в progress фейковые SimpleNamespace-заглушки): лог остаётся
+    диагностическим, поведение для реальной БД не меняется.
+    """
+    try:
+        state = sa_inspect(player_mission)
+    except NoInspectionAvailable:
+        # Unit-тесты: SimpleNamespace-заглушка, в БД такой строки нет.
+        return
+    if not state.persistent:
+        return
+    session.refresh(player_mission, with_for_update=True)
 
 
 def _submit_solo_location_proof(
