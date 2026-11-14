@@ -1,0 +1,27 @@
+[Unit]
+Description=ROOT Game Backend (FastAPI)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=deployer
+Group=deployer
+WorkingDirectory=/opt/root-game/backend
+EnvironmentFile=/opt/root-game/backend/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/root-game/backend/venv/bin/gunicorn app.main:app \
+    -w 3 \
+    -k uvicorn.workers.UvicornWorker \
+    -b 127.0.0.1:8001 \
+    --access-logfile - \
+    --error-logfile -
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
