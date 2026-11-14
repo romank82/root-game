@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import secrets
 
 import httpx
 from sqlalchemy import select
@@ -37,6 +38,9 @@ JETTON_TRANSFER_OP = 0xF8A7EA5
 # Комиссия, которую Jetton wallet берёт за обработку transfer (наноTON):
 # отправляем transfer-сообщением вместе с ним, чтобы кошельку хватило TON.
 JETTON_TRANSFER_GAS = 60_000_000  # 0.06 TON
+
+# query_id в TEP-74 transfer — uint64 (A7: уникальный id попытки выплаты).
+MAX_TON_QUERY_ID = (1 << 64) - 1
 
 # SystemSetting (CMS, категория ton) с адресом «спец» payout-кошелька.
 PAYOUT_WALLET_SETTING_KEY = "ton.payout_wallet"
@@ -208,18 +212,44 @@ class _TonCenterProvider:
         return tx_hash
 
 
-def _jetton_transfer_body(to_address: Address, amount_nano: int) -> Cell:
+def _new_query_id() -> int:
+    """Уникальный uint64 query_id (fallback, если вызывающий не передал свой)."""
+    value = secrets.randbits(64)
+    return value if value else 1
+
+
+def _normalize_query_id(query_id: int | str | None) -> int:
+    """Привести query_id к uint64; None -> сгенерировать уникальный."""
+    if query_id is None:
+        return _new_query_id()
+    try:
+        value = int(query_id)
+    except (TypeError, ValueError):
+        raise MissionEngineError(
+            422, "query_id должен быть uint64."
+        ) from None
+    if not 0 <= value <= MAX_TON_QUERY_ID:
+        raise MissionEngineError(
+            422, "query_id должен быть uint64 (0..2^64-1)."
+        )
+    return value
+
+
+def _jetton_transfer_body(
+    to_address: Address, amount_nano: int, query_id: int
+) -> Cell:
     """Тело transfer (TEP-74) в Jetton wallet: OP, сумма, получатель.
 
-    Поля: query_id=0, jetton_amount=amount_nano, to_owner, response_dest=None,
-    custom_payload=None, forward_ton_amount=0, forward_payload=None.
+    Поля: query_id (uint64, A7 — id payout attempt), jetton_amount=amount_nano,
+    to_owner, response_dest=None, custom_payload=None, forward_ton_amount=0,
+    forward_payload=None.
     Комиссию за обработку transfer Jetton wallet берёт из value сообщения
     (передаётся через amount=JETTON_TRANSFER_GAS в wallet.transfer).
     """
     return (
         begin_cell()
         .store_uint(JETTON_TRANSFER_OP, 32)
-        .store_uint(0, 64)  # query_id
+        .store_uint(query_id, 64)  # query_id (A7: уникальный id выплаты)
         .store_coins(amount_nano)  # jetton_amount (сумма в наноROOT)
         .store_address(to_address)  # to_owner — TON-адрес игрока
         .store_address(None)  # response_dest
@@ -251,13 +281,22 @@ async def get_jetton_wallet_address(
     return jetton_wallet
 
 
-async def send_jetton_transfer(to_address: str, amount_nano: int) -> str:
+async def send_jetton_transfer(
+    to_address: str,
+    amount_nano: int,
+    query_id: int | str | None = None,
+) -> str:
     """Перевод Jetton ROOT из «спец» payout-кошелька на TON-адрес игрока.
 
     Возвращает tx_hash (hash внешнего сообщения) — в 11.5-a он сохраняется
     в WithdrawalRequest.ton_tx_hash. Конфигурационные проверки — 503
     (мнемоника в .env, master/endpoint — env), игровые ошибки — 422.
     Сеть/endpoint не вшиваются: приходят из settings (TON_NETWORK).
+
+    query_id (A7) — уникальный id попытки выплаты (uint64). Вызывающий
+    (withdrawal_service) передаёт его из PayoutAttempt.query_id, чтобы
+    blockchain-операция была идемпотентной. Без query_id генерируется
+    уникальный uint64 (fallback для ручных вызовов).
     """
     if not settings.ton_payout_mnemonic:
         raise MissionEngineError(
@@ -271,6 +310,8 @@ async def send_jetton_transfer(to_address: str, amount_nano: int) -> str:
         raise MissionEngineError(
             422, "Сумма вывода должна быть положительным целым (наноROOT)."
         )
+
+    normalized_query_id = _normalize_query_id(query_id)
 
     destination = Address(validate_ton_address(to_address))
     try:
@@ -287,7 +328,9 @@ async def send_jetton_transfer(to_address: str, amount_nano: int) -> str:
         jetton_wallet_address = await get_jetton_wallet_address(
             minter, wallet.address, provider
         )
-        body = _jetton_transfer_body(destination, amount_nano)
+        body = _jetton_transfer_body(
+            destination, amount_nano, normalized_query_id
+        )
         # tx hash приходит из provider.raw_send_message (hash сообщения).
         return await wallet.transfer(
             destination=jetton_wallet_address,
@@ -298,6 +341,12 @@ async def send_jetton_transfer(to_address: str, amount_nano: int) -> str:
         await provider.aclose()
 
 
-def send_jetton_transfer_sync(to_address: str, amount_nano: int) -> str:
+def send_jetton_transfer_sync(
+    to_address: str,
+    amount_nano: int,
+    query_id: int | str | None = None,
+) -> str:
     """Синхронная обёртка для HTTP-слоя и админ-задач (FastAPI sync handler)."""
-    return asyncio.run(send_jetton_transfer(to_address, amount_nano))
+    return asyncio.run(
+        send_jetton_transfer(to_address, amount_nano, query_id=query_id)
+    )

@@ -1971,7 +1971,7 @@ seed-миграции `d4e7a1c93b52`). Права гео-аудита — `geo_a
 
 ## Открытые долги (аудит 2026-11-14)
 
-Полный аудит backend/frontend/безопасности/логики/стабильности. Найдено 13 critical/high, 15 medium, 5 low.
+Полный аудит backend/frontend/безопасности/логики/стабильности. Найдено 12 critical/high, 16 medium, 5 low.
 Чинить — по приоритету (critical → high → medium → low). Аудит проведён 2026-11-14, read-only.
 
 ### 🔴 Critical (чинить немедленно, до запуска)
@@ -1980,7 +1980,6 @@ seed-миграции `d4e7a1c93b52`). Права гео-аудита — `geo_a
 |---|----------|-------------|------------|
 | A2+C6 | TELEGRAM_WEBHOOK_SECRET пустой в Docker → webhook без аутентификации Telegram. Docker не передаёт secret в backend. | docker-compose.yml:47-55, config.py:80, main.py:2154-2165 | Обязать secret через Compose/secret manager; startup validation (не стартовать в prod без secret). |
 | A6+A7 | TON-выплата: внешний send и DB commit неатомарны → при сбое повторный batch отправит выплату ещё раз. query_id=0 (нет уникального id). | withdrawal_service.py:294-325, ton_service.py:218-228 | Durable outbox/state machine + уникальный query_id из payout attempt ID. |
-| B1 | ON DELETE CASCADE на игровых/финансовых сущностях: удаление Season/GamePlayer каскадно сносит историю/ledger. Нарушает правило «физическое удаление запрещено». | models.py:108-112, 245, 328, 1302-1340 | Заменить на RESTRICT/архивацию; миграция (append-only). |
 
 ### 🟠 High (чинить до запуска, по возможности)
 
@@ -2016,6 +2015,7 @@ seed-миграции `d4e7a1c93b52`). Права гео-аудита — `geo_a
 | C10 | .all() без limit (requirements, wallets, CMS-списки). | mission_engine.py:234, admin_economy.py:109, admin_missions.py:920, admin_seasons.py:169 | Pagination / stream / batch. |
 | B9 | WITHDRAWAL_HOLD_STATUSES включает confirmed (hold до конца суток). | withdrawal_service.py:61-63, 165-170 | Явно разделить лимиты: заявки / hold / confirmed. |
 | B10 | Orphan-check не выполнен (запрет чтения SQLite в аудите). | — | SQL-проверка на backup/копии (counts only). |
+| B1 | ON DELETE CASCADE на игровых/финансовых сущностях: удаление Season/GamePlayer каскадно сносит историю/ledger. | models.py:108-112, 245, 328, 1302-1340 | Не актуально сейчас: кнопки «Удалить» нет, только архивация. При появлении delete-флоу — RESTRICT/архивация + миграция (append-only). |
 
 ### ⚪ Low (косметика/политика)
 
@@ -2035,5 +2035,6 @@ seed-миграции `d4e7a1c93b52`). Права гео-аудита — `geo_a
 - ROOT transfer — idempotency key + row locks.
 - Stars payment — with_for_update + статусная идемпотентность.
 - Bare except: нет.
+- Физического удаления нет: admin-флоу используют архивацию (B1 не актуален).
 - Frontend timers/polling/listeners/GPS — cleanup есть.
 - python compileall — exit 0; tsc --noEmit — exit 0.

@@ -1935,3 +1935,49 @@ class WithdrawalRequest(TimestampMixin, Base):
         ),
     )
 
+
+class PayoutAttempt(TimestampMixin, Base):
+    """Одна попытка TON-выплаты по заявке (A6+A7, durable outbox).
+
+    Создаётся ДО отправки Jetton (status='sending'), затем переходит в
+    'sent' (с tx_hash) либо 'failed' (с error). query_id — blockchain-level
+    idempotency key перевода (uint64, хранится строкой). Повторный batch не
+    отправляет выплату, если для заявки уже есть 'sending'/'sent' попытка:
+    это гарантируют partial unique индексы.
+
+    Физическое удаление запрещено: append-only история выплат.
+    """
+
+    __tablename__ = "payout_attempts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    withdrawal_id: Mapped[str] = mapped_column(
+        ForeignKey("withdrawal_requests.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="sending", index=True
+    )
+    # uint64 query_id как строка (String(64)): не теряет точность в SQLite.
+    query_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tx_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('sending', 'sent', 'failed')",
+            name="ck_payout_attempts_status",
+        ),
+        UniqueConstraint("query_id", name="uq_payout_attempts_query_id"),
+        # Не более одной 'sending'/'sent' попытки на заявку: гонка двух
+        # batch-запусков и повторная отправка уже отправленной выплаты.
+        Index(
+            "uq_payout_attempts_no_second_send",
+            "withdrawal_id",
+            unique=True,
+            postgresql_where=text("status IN ('sending', 'sent')"),
+            sqlite_where=text("status IN ('sending', 'sent')"),
+        ),
+    )
+

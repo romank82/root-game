@@ -11,17 +11,23 @@ ton.daily_withdrawal_limit (UTC-сутки). Всё — в одной транз
 баланс не меняется.
 
 11.5-b: process_withdrawal_batch — админский батч-выплата pending-заявок
-(игроки с активным withdrawal_restricted пропускаются): processing ->
-send_jetton_transfer_sync (Jetton ROOT из payout-кошелька ton_service) ->
-confirmed + ton_tx_hash; при ошибке — failed + автоматический возврат холда
-игроку (_refund_withdrawal_hold). reject_withdrawal — отклонение одной
+(игроки с активным withdrawal_restricted пропускаются). A6+A7 (durable
+outbox): перед сетевым вызовом в отдельной транзакции создаётся immutable
+PayoutAttempt(status='sending', query_id=uint64) и заявка переводится в
+processing; затем send_jetton_transfer_sync (Jetton ROOT из payout-кошелька
+ton_service) с query_id попытки; результат фиксируется отдельной транзакцией
+(sent + ton_tx_hash -> confirmed; либо failed + возврат холда игроку
+_refund_withdrawal_hold). Повторный batch не отправляет выплату, если для
+заявки уже есть sending/sent попытка. reject_withdrawal — отклонение одной
 заявки с возвратом холда. Админский HTTP-слой — этап 11.6.
 """
 from __future__ import annotations
 
 import logging
+import secrets
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.admin_player_wallet import ACTIVE_SETTING_STATUS
@@ -34,6 +40,7 @@ from app.mission_engine import (
     _utcnow,
 )
 from app.models import (
+    PayoutAttempt,
     PlayerRestriction,
     SystemSetting,
     Wallet,
@@ -70,8 +77,28 @@ WITHDRAWAL_REJECTABLE_STATUSES = ("pending", "approved", "processing")
 # Лимит заявок в одном батч-выплате (админский операционный лимит).
 WITHDRAWAL_BATCH_DEFAULT_LIMIT = 50
 
+# A6+A7: статусы immutable-попытки выплаты (payout_attempts) — durable outbox.
+PAYOUT_ATTEMPT_SENDING = "sending"
+PAYOUT_ATTEMPT_SENT = "sent"
+PAYOUT_ATTEMPT_FAILED = "failed"
+# Попытки, после которых повторная отправка перевода запрещена.
+PAYOUT_ATTEMPT_ACTIVE_STATUSES = (PAYOUT_ATTEMPT_SENDING, PAYOUT_ATTEMPT_SENT)
+# Предел длины текста ошибки попытки (обрезка перед записью в БД).
+MAX_PAYOUT_ERROR_LENGTH = 2000
+
 # Sprint 11.8 NanoROOT: 1 ROOT = 10^8 наноROOT.
 NANO_PER_ROOT = 100_000_000
+
+
+def _new_payout_query_id() -> str:
+    """Уникальный uint64 query_id (строкой) для TON-перевода (A7).
+
+    TON query_id — uint64; храним его строкой в PayoutAttempt.query_id
+    (String(64)), чтобы не терять точность в SQLite. Значение 0 исключаем:
+    раньше 0 был «нет id», теперь это признак отсутствия идемпотентности.
+    """
+    value = secrets.randbits(64)
+    return str(value if value else 1)
 
 
 def _read_int_setting(session: Session, key: str, fallback: int) -> int:
@@ -269,16 +296,76 @@ def _refund_withdrawal_hold(
     )
 
 
+def _complete_payout_attempt(
+    attempt_id: str, withdrawal_id: str, tx_hash: str
+) -> None:
+    """Зафиксировать успешную отправку: attempt='sent' + заявка 'confirmed'.
+
+    Отдельная короткая транзакция (сеть уже отработала): attempt и заявка
+    обновляются вместе, чтобы 'sent' и 'confirmed' не разъезжались.
+    """
+    with SessionLocal.begin() as session:
+        attempt = session.scalar(
+            select(PayoutAttempt)
+            .where(PayoutAttempt.id == attempt_id)
+            .with_for_update()
+        )
+        if attempt is not None and attempt.status == PAYOUT_ATTEMPT_SENDING:
+            attempt.status = PAYOUT_ATTEMPT_SENT
+            attempt.tx_hash = tx_hash
+        withdrawal = session.scalar(
+            select(WithdrawalRequest)
+            .where(WithdrawalRequest.id == withdrawal_id)
+            .with_for_update()
+        )
+        if withdrawal is not None and withdrawal.status == "processing":
+            withdrawal.status = "confirmed"
+            withdrawal.ton_tx_hash = tx_hash
+        session.flush()
+
+
+def _fail_payout_attempt(
+    attempt_id: str, withdrawal_id: str, error: BaseException
+) -> None:
+    """Зафиксировать провал: attempt='failed' + refund холда + 'failed'.
+
+    Отдельная короткая транзакция: возврат холда (immutable credit-проводка)
+    выполняется вместе с переводом заявки в 'failed'.
+    """
+    with SessionLocal.begin() as session:
+        attempt = session.scalar(
+            select(PayoutAttempt)
+            .where(PayoutAttempt.id == attempt_id)
+            .with_for_update()
+        )
+        if attempt is not None and attempt.status == PAYOUT_ATTEMPT_SENDING:
+            attempt.status = PAYOUT_ATTEMPT_FAILED
+            attempt.error = str(error)[:MAX_PAYOUT_ERROR_LENGTH]
+        withdrawal = session.scalar(
+            select(WithdrawalRequest)
+            .where(WithdrawalRequest.id == withdrawal_id)
+            .with_for_update()
+        )
+        if withdrawal is not None and withdrawal.status == "processing":
+            withdrawal.status = "failed"
+            _refund_withdrawal_hold(session, withdrawal)
+        session.flush()
+
+
 def process_withdrawal_batch(
     admin_id: str, limit: int = WITHDRAWAL_BATCH_DEFAULT_LIMIT
 ) -> dict:
-    """Батч-выплата pending-заявок (этап 11.5-b).
+    """Батч-выплата pending-заявок (11.5-b; durable outbox A6+A7).
 
-    Берутся pending (кроме игроков с активным withdrawal_restricted) по
-    created_at, лимитом. Каждая помечается processing, шлётся Jetton
-    ROOT через send_jetton_transfer_sync (sync-обёртка ton_service с
-    asyncio.run); успех -> confirmed + ton_tx_hash, ошибка -> failed +
-    возврат холда в кошелёк игрока. Всё в одной транзакции.
+    Для каждой заявки: (1) отдельная транзакция создаёт immutable
+    PayoutAttempt(status='sending', query_id=uint64) и переводит заявку в
+    'processing' — коммит ДО сетевого вызова; (2) TON-перевод с
+    query_id=attempt.query_id; (3) отдельная транзакция фиксирует результат
+    (sent+tx_hash -> confirmed; либо failed + refund холда).
+
+    Повторный batch не отправит выплату снова: заявка уже не 'pending', а
+    partial unique index (withdrawal_id) WHERE status IN ('sending','sent')
+    не даст создать вторую активную попытку даже при гонке двух запусков.
 
     Возвращает {"batchId", "confirmed", "failed"}.
     """
@@ -286,49 +373,102 @@ def process_withdrawal_batch(
     confirmed = 0
     failed = 0
 
-    with SessionLocal.begin() as session:
+    # 1. Только чтение: кандидаты pending без активного restriction.
+    with SessionLocal() as session:
         restricted_player_ids = select(PlayerRestriction.player_id).where(
             PlayerRestriction.restriction_type == "withdrawal_restricted",
             PlayerRestriction.status == "active",
         )
-        withdrawals = session.scalars(
-            select(WithdrawalRequest)
-            .where(
-                WithdrawalRequest.status == "pending",
-                WithdrawalRequest.player_id.not_in(restricted_player_ids),
-            )
-            .order_by(WithdrawalRequest.created_at)
-            .limit(limit)
-        ).all()
+        candidates = [
+            (row.id, row.to_address)
+            for row in session.scalars(
+                select(WithdrawalRequest)
+                .where(
+                    WithdrawalRequest.status == "pending",
+                    WithdrawalRequest.player_id.not_in(restricted_player_ids),
+                )
+                .order_by(WithdrawalRequest.created_at)
+                .limit(limit)
+            ).all()
+        ]
 
-        for withdrawal in withdrawals:
-            withdrawal.status = "processing"
-            withdrawal.batch_id = batch_id
-            withdrawal.admin_id = admin_id
-            session.flush()
-            try:
-                amount_nano = withdrawal.amount_root_nano  # уже в nano (Sprint 11.8)
+    for withdrawal_id, to_address in candidates:
+        attempt_id = _new_id("payout-attempt")
+        query_id = _new_payout_query_id()
+        amount_nano = 0
+
+        # 2. Durable outbox: attempt='sending' + заявка 'processing' (commit).
+        try:
+            with SessionLocal.begin() as session:
+                withdrawal = session.scalar(
+                    select(WithdrawalRequest)
+                    .where(WithdrawalRequest.id == withdrawal_id)
+                    .with_for_update()
+                )
+                if withdrawal is None or withdrawal.status != "pending":
+                    # Уже обработана другим batch/админом между выборкой и lock.
+                    continue
+
+                active_attempt = session.scalar(
+                    select(PayoutAttempt.id).where(
+                        PayoutAttempt.withdrawal_id == withdrawal_id,
+                        PayoutAttempt.status.in_(PAYOUT_ATTEMPT_ACTIVE_STATUSES),
+                    )
+                )
+                if active_attempt is not None:
+                    logger.warning(
+                        "Withdrawal %s already has an active payout attempt; "
+                        "batch %s skips it",
+                        withdrawal_id,
+                        batch_id,
+                    )
+                    continue
+
+                amount_nano = withdrawal.amount_root_nano
                 if amount_nano is None:
                     # Fallback для legacy-заявок без _nano: вычислить из ROOT.
                     amount_nano = withdrawal.amount_root * NANO_PER_ROOT
-                tx_hash = send_jetton_transfer_sync(
-                    withdrawal.to_address, amount_nano
+
+                withdrawal.status = "processing"
+                withdrawal.batch_id = batch_id
+                withdrawal.admin_id = admin_id
+                session.add(
+                    PayoutAttempt(
+                        id=attempt_id,
+                        withdrawal_id=withdrawal_id,
+                        status=PAYOUT_ATTEMPT_SENDING,
+                        query_id=query_id,
+                    )
                 )
-                withdrawal.status = "confirmed"
-                withdrawal.ton_tx_hash = tx_hash
                 session.flush()
-                confirmed += 1
-            except Exception as error:  # noqa: BLE001 — сеть/пайлоад/конфиг
-                withdrawal.status = "failed"
-                _refund_withdrawal_hold(session, withdrawal)
-                session.flush()
-                failed += 1
-                logger.warning(
-                    "Withdrawal %s failed in batch %s: %s",
-                    withdrawal.id,
-                    batch_id,
-                    error,
-                )
+        except IntegrityError:
+            # Гонка: параллельный batch уже создал активную попытку.
+            logger.warning(
+                "Withdrawal %s payout attempt conflict; batch %s skips it",
+                withdrawal_id,
+                batch_id,
+            )
+            continue
+
+        # 3. Сетевой вызов — вне транзакции БД (attempt уже durable).
+        try:
+            tx_hash = send_jetton_transfer_sync(
+                to_address, amount_nano, query_id=int(query_id)
+            )
+        except Exception as error:  # noqa: BLE001 — сеть/пайлоад/конфиг
+            _fail_payout_attempt(attempt_id, withdrawal_id, error)
+            failed += 1
+            logger.warning(
+                "Withdrawal %s failed in batch %s: %s",
+                withdrawal_id,
+                batch_id,
+                error,
+            )
+            continue
+
+        # 4. Успех: attempt='sent' + заявка 'confirmed' (одна транзакция).
+        _complete_payout_attempt(attempt_id, withdrawal_id, tx_hash)
+        confirmed += 1
 
     return {"batchId": batch_id, "confirmed": confirmed, "failed": failed}
 
