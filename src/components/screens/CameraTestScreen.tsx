@@ -5,7 +5,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { EngineMission } from '../../api/engineApi'
 import type { Screen } from '../../types/game'
-import { useCameraStream } from '../../hooks/useCameraStream'
+import {
+  releaseCameraStream,
+  useCameraStream,
+} from '../../hooks/useCameraStream'
 import { useActiveMission } from '../../hooks/useActiveMission'
 import { MissionTimer } from '../MissionTimer'
 import Game3DScene from '../Game3DScene'
@@ -87,6 +90,15 @@ export function CameraTestScreen({
       videoRef.current.play().catch(() => {})
     }
   }, [stream])
+
+  // C4: освобождать камеру при уходе с экрана. Кэш хука переживает
+  // переключение экранов, поэтому без явного release камера остаётся
+  // включённой (индикатор, батарея, приватность).
+  useEffect(() => {
+    return () => {
+      releaseCameraStream()
+    }
+  }, [])
 
   // Компас с throttle 10 Hz + EMA 0.3.
   const lastUpdateRef = useRef<number>(0)

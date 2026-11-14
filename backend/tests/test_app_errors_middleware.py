@@ -3,8 +3,10 @@
 Охват:
 
   1. test_5xx_writes_app_error — необработанный 5xx пишет AppError с
-     error_type/message/safe_context/correlation_id из audit_context
-     (основной путь).
+     error_type/safe_context/endpoint/correlation_id из audit_context
+     (основной путь). A12: message и stack намеренно НЕ сохраняются —
+     str(exc)/traceback могут содержать внутренние URL, SQL и секреты;
+     полный контекст уходит только в Sentry.
   2. test_4xx_not_written — HTTPException (как делают все endpoint'ы для
      4xx) пробрасывается БЕЗ записи.
   3. test_correlation_id_fallback_not_from_audit_context — при
@@ -154,8 +156,9 @@ class AppErrorsMiddlewareTests(unittest.TestCase):
     def test_5xx_writes_app_error(self) -> None:
         """Необработанный 5xx -> AppError записан, исключение проброшено.
 
-        Проверяем error_type/message/safe_context и correlation_id из
-        audit_context (основной путь — именно ТЗ 13.4-b).
+        Проверяем error_type/safe_context/endpoint и correlation_id из
+        audit_context (основной путь — именно ТЗ 13.4-b). A12: message
+        пустой, stack=None — тексты исключений в БД не пишутся.
         """
         request = self._request(
             method="GET",
@@ -178,18 +181,18 @@ class AppErrorsMiddlewareTests(unittest.TestCase):
         self.assertEqual(row.correlation_id, "corr-123")
         self.assertEqual(row.severity, "error")
         self.assertEqual(row.error_type, "RuntimeError")
-        self.assertEqual(row.message, "boom")
+        # A12: текст исключения не сохраняется (утечка URL/SQL/секретов).
+        self.assertEqual(row.message, "")
         self.assertEqual(
             row.safe_context,
             {"method": "GET"},
         )
-        # M-2b: структурированные поля (endpoint/status_code/stack).
+        # M-2b: структурированные поля (endpoint/status_code/player_id).
         self.assertEqual(row.endpoint, "/x")
         self.assertEqual(row.status_code, 500)
         self.assertEqual(row.player_id, "player-abc")
-        self.assertIsNotNone(row.stack)
-        self.assertIn("RuntimeError", row.stack)
-        self.assertLessEqual(len(row.stack), 4000)
+        # A12: stack не сохраняется (traceback — только в Sentry).
+        self.assertIsNone(row.stack)
 
     def test_correlation_middleware_player_id_from_cookie(self) -> None:
         """M-2c: correlation_id_middleware кладёт player_id из cookie в audit_context.

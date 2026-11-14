@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import traceback
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -230,6 +229,10 @@ async def app_errors_middleware(request: Request, call_next):
             )
             or uuid4().hex
         )
+        endpoint = request.url.path
+        player_id = getattr(
+            getattr(request, "state", None), "audit_context", {}
+        ).get("player_id")
         try:
             with SessionLocal.begin() as session:
                 record_app_error(
@@ -237,33 +240,40 @@ async def app_errors_middleware(request: Request, call_next):
                     correlation_id=correlation_id,
                     severity="error",
                     error_type=type(exc).__name__,
-                    message=str(exc)[:512],
+                    # A12: message/stack НЕ сохраняем. str(exc) и traceback
+                    # могут содержать внутренние URL, SQL-фрагменты и
+                    # секреты. Полный контекст ошибки уходит только в Sentry
+                    # (ниже); в БД остаются тип, endpoint, correlation_id,
+                    # status_code и player_id. AppError.message NOT NULL —
+                    # пишем пустую строку (миграция для default — отдельно).
+                    message="",
                     safe_context={
                         "method": request.method,
                     },
-                    endpoint=request.url.path,
+                    endpoint=endpoint,
                     status_code=500,
-                    player_id=getattr(
-                        getattr(request, "state", None), "audit_context", {}
-                    ).get("player_id"),
-                    stack=traceback.format_exc()[:4000],
+                    player_id=player_id,
+                    stack=None,
                 )
             # Sprint 13.6: явный capture_exception, т.к. кастомный handler(Exception)
             # перехватывает 500 и не пробрасывает exc наружу (Sentry сам не увидит).
-            # В этой области видимости отдельной переменной endpoint нет —
-            # используем request.url.path; player_id берём из audit_context.
             if settings.sentry_dsn:
                 import sentry_sdk
 
                 with sentry_sdk.push_scope() as scope:
                     scope.set_tag("correlation_id", correlation_id)
-                    scope.set_tag("endpoint", request.url.path)
-                    player_id = getattr(
-                        getattr(request, "state", None), "audit_context", {}
-                    ).get("player_id")
+                    scope.set_tag("endpoint", endpoint)
                     if player_id:
                         scope.set_tag("player_id", str(player_id))
                     sentry_sdk.capture_exception(exc)
+            # В обычный лог — без текста исключения (A12): только тип и
+            # correlation_id, чтобы связать с Sentry/app_errors.
+            logger.warning(
+                "unhandled 500 at %s: %s (correlation %s)",
+                endpoint,
+                type(exc).__name__,
+                correlation_id,
+            )
         except Exception as log_error:  # noqa: BLE001 — лог не важнее ответа
             logger.warning("app_error record failed: %s", log_error)
         raise
