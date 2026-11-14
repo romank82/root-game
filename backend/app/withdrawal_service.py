@@ -185,6 +185,12 @@ def create_withdrawal_request(
         ):
             raise MissionEngineError(403, "Вывод средств для вас ограничен.")
 
+        # A9: сначала блокируем ROOT-кошелёк (row-lock), чтобы параллельные
+        # заявки ИГРОКА сериализовались; потом проверяем дневной лимит.
+        # Иначе два параллельных вызова видели бы один и тот же daily_sum
+        # и вместе превышали лимит.
+        wallet = _get_root_wallet_for_update(session, player_id)
+
         # 5. Дневной лимит (UTC-сутки): суммы холд-заявок за сегодня.
         start_of_day = _utcnow().replace(
             hour=0, minute=0, second=0, microsecond=0
@@ -205,8 +211,7 @@ def create_withdrawal_request(
                 f"Превышен дневной лимит вывода ({daily_limit} ROOT).",
             )
 
-        # 6. ROOT-кошелёк (FOR UPDATE на Postgres) и баланс.
-        wallet = _get_root_wallet_for_update(session, player_id)
+        # 6. Баланс.
         if wallet.available_balance < amount_root:
             raise MissionEngineError(409, "Недостаточно ROOT.")
 

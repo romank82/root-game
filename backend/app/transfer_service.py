@@ -272,37 +272,6 @@ def transfer_root(
             f"Нужно заработать минимум {limits['earned']} ROOT в игре для переводов.",
         )
 
-    # 5. Дневной лимит (UTC-сутки). Sprint 8.x-fractional-transfer (A2-1):
-    # сумма считается в наноROOT по точной amount_nano; для старых строк
-    # (amount_nano IS NULL) — legacy amount * 10^8 внутри coalesce, чтобы
-    # NULL-строки не выпадали из суммы.
-    start_of_day = _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    daily_sum_nano = session.scalar(
-        select(
-            func.coalesce(
-                func.sum(
-                    func.coalesce(
-                        PlayerTransfer.amount_nano,
-                        # CAST в BIGINT: в PG amount — INTEGER, и в fallback
-                        # amount * 10^8 возможен int4-overflow.
-                        cast(PlayerTransfer.amount, BigInteger)
-                        * NANO_PER_ROOT,
-                    )
-                ),
-                0,
-            )
-        ).where(
-            PlayerTransfer.from_player_id == from_player_id,
-            PlayerTransfer.status == "completed",
-            PlayerTransfer.created_at >= start_of_day,
-        )
-    ) or 0
-    if daily_sum_nano + amount_nano > limits["daily"] * NANO_PER_ROOT:
-        raise MissionEngineError(
-            429,
-            f"Превышен дневной лимит переводов ({limits['daily']} ROOT).",
-        )
-
     # 5b. Комиссия за перевод газом (10.4-i): fee = amount * percent / 100,
     # дробная (без ceil). Процент — из CMS (economy.gas_fee_percent).
     # При percent=0 газ не трогаем (обратная совместимость).
@@ -353,6 +322,38 @@ def transfer_root(
         wallet_from, wallet_to = wallet_first, wallet_second
     else:
         wallet_from, wallet_to = wallet_second, wallet_first
+
+    # A8: дневной лимит проверяем ПОСЛЕ блокировки кошельков. Иначе два
+    # параллельных перевода одного отправителя видели бы один и тот же
+    # daily_sum и вместе превышали лимит. Sprint 8.x-fractional-transfer:
+    # сумма в наноROOT по точной amount_nano; для старых строк
+    # (amount_nano IS NULL) — legacy amount * 10^8 внутри coalesce.
+    start_of_day = _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    daily_sum_nano = session.scalar(
+        select(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(
+                        PlayerTransfer.amount_nano,
+                        # CAST в BIGINT: в PG amount — INTEGER, и в fallback
+                        # amount * 10^8 возможен int4-overflow.
+                        cast(PlayerTransfer.amount, BigInteger)
+                        * NANO_PER_ROOT,
+                    )
+                ),
+                0,
+            )
+        ).where(
+            PlayerTransfer.from_player_id == from_player_id,
+            PlayerTransfer.status == "completed",
+            PlayerTransfer.created_at >= start_of_day,
+        )
+    ) or 0
+    if daily_sum_nano + amount_nano > limits["daily"] * NANO_PER_ROOT:
+        raise MissionEngineError(
+            429,
+            f"Превышен дневной лимит переводов ({limits['daily']} ROOT).",
+        )
 
     # Sprint 8.x-fractional-transfer: балансовая логика — по наноROOT.
     # Legacy available_balance (Integer ROOT) — производное floor(nano / 10^8):
