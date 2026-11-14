@@ -1966,3 +1966,74 @@ seed-миграции `d4e7a1c93b52`). Права гео-аудита — `geo_a
 блокировки); enforce — mark-only (review в progress), отдельный шаг.
 
 **Остаток:** AR (вне Telegram Web).
+
+---
+
+## Открытые долги (аудит 2026-11-14)
+
+Полный аудит backend/frontend/безопасности/логики/стабильности. Найдено 13 critical/high, 15 medium, 5 low.
+Чинить — по приоритету (critical → high → medium → low). Аудит проведён 2026-11-14, read-only.
+
+### 🔴 Critical (чинить немедленно, до запуска)
+
+| # | Проблема | Файл:строка | Что делать |
+|---|----------|-------------|------------|
+| A2+C6 | TELEGRAM_WEBHOOK_SECRET пустой в Docker → webhook без аутентификации Telegram. Docker не передаёт secret в backend. | docker-compose.yml:47-55, config.py:80, main.py:2154-2165 | Обязать secret через Compose/secret manager; startup validation (не стартовать в prod без secret). |
+| A6+A7 | TON-выплата: внешний send и DB commit неатомарны → при сбое повторный batch отправит выплату ещё раз. query_id=0 (нет уникального id). | withdrawal_service.py:294-325, ton_service.py:218-228 | Durable outbox/state machine + уникальный query_id из payout attempt ID. |
+| B1 | ON DELETE CASCADE на игровых/финансовых сущностях: удаление Season/GamePlayer каскадно сносит историю/ledger. Нарушает правило «физическое удаление запрещено». | models.py:108-112, 245, 328, 1302-1340 | Заменить на RESTRICT/архивацию; миграция (append-only). |
+
+### 🟠 High (чинить до запуска, по возможности)
+
+| # | Проблема | Файл:строка | Что делать |
+|---|----------|-------------|------------|
+| B2 | Параллельный submit не блокирует PlayerMission → двойное начисление item-награды (currency спасает unique ledger, item — нет). | mission_engine.py:1752-1767, 1275-1342 | with_for_update() на PlayerMission + immutable award event для item. |
+| A8+A9 | Дневные лимиты ROOT (transfer/withdrawal) проверяются до блокировки кошелька → гонка, лимит обходится. | transfer_service.py:275-300, 347, withdrawal_service.py:161-183 | Блокировать кошелёк до проверки лимита; атомарная quota-row. |
+| A10 | Withdrawal request без idempotency key → повтор POST создаёт две заявки/два списания. | main.py:426-430, withdrawal_service.py:186-217 | Обязательный client request ID + unique constraint (player_id, request_id). |
+| A11 | Batch/reject withdrawal: финансовая операция commit'ится отдельно от admin audit → audit может не записаться. | admin_withdrawals.py:188-205, 223-236, withdrawal_service.py:289-325 | Одна session для domain executor + audit writer (атомарно). |
+| B6 | Geo proof доверяет координатам клиента (dev_mock); fake GPS проходит. | geo_location_proof.py:23-29, 39-55, mission_engine.py:2342-2351 | Внешний/device-attested verifier ИЛИ явно запретить geo-rewards в dev_mock/prod. |
+| B7 | Anti-cheat enforce не блокирует (только лог), название врёт. | mission_engine.py:2349-2351, 2453-2505 | Реализовать reject/review/hold при enforce ИЛИ переименовать режим в log до реализации. |
+| C4 | Камера не освобождается: releaseCameraStream() объявлен, но не вызывается. | useCameraStream.ts:10-18, 84-88 | Вызывать release при выходе с camera screen / завершении сессии. |
+| A3 | Telegram webhook без Pydantic-схемы (принимает любой dict). | main.py:2154-2171 | Pydantic-схемы для поддерживаемых update types. |
+| A12 | AppError сохраняет str(exc) + traceback (может содержать внутренние URL/SQL/секреты). | main.py:239-249 | Сохранять только тип/код/endpoint/correlation_id; traceback — в redacted sink. |
+
+### 🟡 Medium (в бэклог, чинить после запуска)
+
+| # | Проблема | Файл:строка | Что делать |
+|---|----------|-------------|------------|
+| A4 | Admin approvals: list/get/cancel без admin_approvals.read/manage (owner-only/super-admin, но не permission-модель). | admin_approvals.py:167-184, 186-210, 328-378 | Добавить permission или формализовать owner-only исключение. |
+| A5 | Нет CSRF-защиты (только SameSite=Lax). | main.py:772-779, 2065-2072 | CSRF-токен для cookie-mutations ИЛИ anti-CSRF middleware (Origin/Referer). |
+| A13 | Webhook error логируется через logger.exception(..., error) (текст исключения в логах). | main.py:2173-2177 | Логировать тип + correlation_id, без текста исключения. |
+| B4 | Deadline cancel захардкожен (180 сек), не CMS. | mission_engine.py:65-69, 2184-2187 | Перенести в System Settings, сохранять snapshot при accept. |
+| B5 | Freshness location proof захардкожен (60 сек), не CMS. | mission_engine.py:2323-2329, 2507-2512 | Читать из System Settings, фиксировать в runtime snapshot. |
+| B8 | Anti-cheat velocity: только расстояние spawn→точка; fake GPS проходит. | geo_anticheat.py:45-89 | Несколько сигналов + server-side timestamps + device integrity + review/hold. |
+| C1 | N+1 в списке активных командных сессий. | team_missions_service.py:427-478 | Batch query / selectinload. |
+| C2 | N+1 в синхронизации миссий (requirements + policy). | mission_engine.py:227-241, 249-280, 386-405 | Batch query, только published missions. |
+| C3 | Admin economy audit: все Wallet без pagination. | admin_economy.py:64-112 | Background job / SQL aggregate / pagination. |
+| C5 | TeamSessionScreen: 2 polling (session + chat) каждые 3 сек. | TeamSessionScreen.tsx:175-233, 238-270 | Объединить polling / backoff / websocket. |
+| C6 | Docker не передаёт TON_/SENTRY_/ADMIN_SESSION_LIFETIME_SECONDS → TON/Sentry отключены. | docker-compose.yml:47-55, config.py:75-97 | Сверить все Settings с Compose; startup validation. |
+| C7 | Два .env.example (корень + backend) с разными наборами переменных. | .env.example:1-22, backend/.env.example:1-30 | Единый документ конфигурации (local/Docker/prod). |
+| C9 | Широкие except Exception (частично оправданы SAVEPOINT, но скрывают сбои). | mission_engine.py:1350-1361, 2245-2246, stars_service.py:310-311, withdrawal_service.py:321-331 | Конкретные exception types + machine-readable codes. |
+| C10 | .all() без limit (requirements, wallets, CMS-списки). | mission_engine.py:234, admin_economy.py:109, admin_missions.py:920, admin_seasons.py:169 | Pagination / stream / batch. |
+| B9 | WITHDRAWAL_HOLD_STATUSES включает confirmed (hold до конца суток). | withdrawal_service.py:61-63, 165-170 | Явно разделить лимиты: заявки / hold / confirmed. |
+| B10 | Orphan-check не выполнен (запрет чтения SQLite в аудите). | — | SQL-проверка на backup/копии (counts only). |
+
+### ⚪ Low (косметика/политика)
+
+| # | Проблема | Файл:строка | Что делать |
+|---|----------|-------------|------------|
+| A1 | Docker test creds (postgres/postgres) на порту 5433. | docker-compose.yml:21-41 | Не публиковать порт / не фиксировать creds. |
+| C8 | Retention scheduler в каждом worker. | main.py:176-188, retention.py:94-127 | Отдельный worker/cron / distributed lock. |
+
+### ✅ Хорошие новости (НЕ найдено)
+
+- Секретов в репо нет (.env gitignored).
+- SQL-инъекций (raw f-string) нет.
+- dangerouslySetInnerHTML нет.
+- Telegram initData — HMAC + compare_digest.
+- Игровая/admin сессии — подписанные/server-side.
+- Admin passwords — Argon2id.
+- ROOT transfer — idempotency key + row locks.
+- Stars payment — with_for_update + статусная идемпотентность.
+- Bare except: нет.
+- Frontend timers/polling/listeners/GPS — cleanup есть.
+- python compileall — exit 0; tsc --noEmit — exit 0.
