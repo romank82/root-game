@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 import time
@@ -20,11 +21,16 @@ from app.fallback_shop import (
 )
 from app.geo_country import resolve_country_or_none
 from app.geo_spawn import generate_spawn_point
-from app.player_restrictions_engine import recompute_player_status
+from app.player_restrictions_engine import (
+    ACTIVE_RESTRICTION_STATUS,
+    get_active_restrictions,
+    recompute_player_status,
+)
 from app.qr_service import generate_qr_payload, get_qr_ttl_seconds
 from app.runtime_policy_contract import scaled_attempt_multipliers
 from app.models import (
     ARObject,
+    AdminUser,
     GamePlayer,
     GeoZone,
     InventoryEvent,
@@ -38,6 +44,7 @@ from app.models import (
     PlayerItem,
     PlayerItemAward,
     PlayerMission,
+    PlayerRestriction,
     SystemSetting,
     TeamSession,
     TeamSessionMember,
@@ -112,6 +119,99 @@ def _new_id(prefix: str) -> str:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# --- B6/B7: системные ограничения по гео-флагу -------------------------------
+# PlayerRestriction.admin_id — NOT NULL FK на admin_users, поэтому «системного»
+# актора нельзя передать как None без изменения модели (запрещено в этом
+# шаге). Заводим зарезервированную неактивную учётную запись: войти под ней
+# нельзя (is_active=False отсекает authenticate_admin), удалять её нельзя
+# (PlayerRestriction.admin_id ON DELETE RESTRICT).
+SYSTEM_ANTICHEAT_ADMIN_ID = "admin-system-anticheat"
+SYSTEM_ANTICHEAT_ADMIN_USERNAME = "system.anticheat"
+SYSTEM_ANTICHEAT_ADMIN_ROLE = "system"
+# Типы ограничений, которые накладывает гео-флаг (B6): награда выдаётся,
+# вывод и перевод блокируются. Gate-типы (blocked/suspended) здесь нет —
+# их накладывает только админ через «Заблокировать».
+ANTICHEAT_FLAG_RESTRICTION_TYPES = (
+    "transfer_restricted",
+    "withdrawal_restricted",
+)
+ANTICHEAT_REASON_MAX_LENGTH = 240
+ANTICHEAT_EVIDENCE_MAX_LENGTH = 4_000
+
+
+def _ensure_system_admin(session: Session) -> None:
+    """Гарантировать существование зарезервированного системного актора.
+
+    password_hash = "!" — заведомо невалидный Argon2-хэш: argon2 бросает
+    InvalidHashError, поэтому вход под этой учёткой невозможен.
+    """
+    existing = session.get(AdminUser, SYSTEM_ANTICHEAT_ADMIN_ID)
+    if existing is not None:
+        return
+    session.add(
+        AdminUser(
+            id=SYSTEM_ANTICHEAT_ADMIN_ID,
+            username=SYSTEM_ANTICHEAT_ADMIN_USERNAME,
+            password_hash="!",
+            role=SYSTEM_ANTICHEAT_ADMIN_ROLE,
+            is_super_admin=False,
+            is_active=False,
+            is_deleted=False,
+        )
+    )
+    session.flush()
+
+
+def apply_anticheat_restrictions(
+    session: Session,
+    player_id: str,
+    signals: list[dict],
+) -> list[str]:
+    """B6: при гео-флаге наложить transfer_restricted + withdrawal_restricted.
+
+    Награда НЕ отменяется — ограничения блокируют только вывод/перевод через
+    существующие гейты (withdrawal_service / transfer_service) и запись
+    бюджетного контракта. Идемпотентно: активное ограничение того же типа
+    пропускается (страховка — partial unique
+    uq_player_restrictions_active_per_type). Возвращает созданные типы.
+    """
+    _ensure_system_admin(session)
+    present = {r.restriction_type for r in get_active_restrictions(session, player_id)}
+
+    reason_names = [
+        str(signal.get("signal"))
+        for signal in signals
+        if isinstance(signal, dict) and signal.get("signal")
+    ]
+    reason = "anticheat: " + (
+        "/".join(reason_names) if reason_names else "signal"
+    )
+    evidence = json.dumps(signals, ensure_ascii=False, sort_keys=True)[
+        :ANTICHEAT_EVIDENCE_MAX_LENGTH
+    ]
+
+    created: list[str] = []
+    for restriction_type in ANTICHEAT_FLAG_RESTRICTION_TYPES:
+        if restriction_type in present:
+            continue
+        session.add(
+            PlayerRestriction(
+                id=_new_id("player-restriction"),
+                player_id=player_id,
+                restriction_type=restriction_type,
+                status=ACTIVE_RESTRICTION_STATUS,
+                reason=reason[:ANTICHEAT_REASON_MAX_LENGTH],
+                evidence=evidence,
+                admin_id=SYSTEM_ANTICHEAT_ADMIN_ID,
+                starts_at=_utcnow(),
+            )
+        )
+        created.append(restriction_type)
+    if created:
+        session.flush()
+    return created
 
 
 def _ensure_player(session: Session, player_id: str) -> GamePlayer:
@@ -1705,17 +1805,26 @@ def _anticheat_settings(session: Session) -> dict[str, Any]:
         return fallback
 
     def _mode() -> str:
+        # B7 (Security-Audit): значение "enforce" переименовано в "review" —
+        # режим никогда не блокировал, только писал флаг и ставил review.
+        # Старые настройки "enforce" читаются как "review" (совместимость).
+        def _normalize(value: object) -> str | None:
+            if value == "enforce":
+                return "review"
+            if value in ("off", "flag", "review"):
+                return str(value)
+            return None
+
         row = rows.get("geo.anticheat_mode")
         if row is not None and row.status == ACTIVE_SETTING_STATUS:
-            value = row.value_json
-            if value in ("off", "flag", "enforce"):
-                return value
+            normalized = _normalize(row.value_json)
+            if normalized is not None:
+                return normalized
         definition = get_definition("geo.anticheat_mode")
-        if (
-            definition is not None
-            and definition.default_value in ("off", "flag", "enforce")
-        ):
-            return definition.default_value
+        if definition is not None:
+            normalized = _normalize(definition.default_value)
+            if normalized is not None:
+                return normalized
         return ANTICHEAT_MODE
 
     return {
@@ -2564,6 +2673,25 @@ def _submit_solo_location_proof(
             "at": _utcnow().isoformat(),
         }
         player_mission.progress = progress
+
+        # B6 (Security-Audit): награда по миссии остаётся, но вывод и перевод
+        # блокируются до решения админа в «Гео-аудите» (geo_audit.manage:
+        # «Снять блок» / «Заблокировать»). Используем существующий домен
+        # PlayerRestriction — гейты уже стоят в withdrawal_service и
+        # transfer_service. Сбой записи не должен отменять proof/награду.
+        try:
+            with session.begin_nested():
+                blocked_types = apply_anticheat_restrictions(
+                    session, player_id, signals
+                )
+            if blocked_types:
+                logger.info(
+                    "anticheat restrictions created: player=%s types=%s",
+                    player_id,
+                    blocked_types,
+                )
+        except Exception as error:  # noqa: BLE001 — ограничения не важнее proof
+            logger.warning("anticheat restrictions failed: %s", error)
 
     proof = create_location_proof(
         session,

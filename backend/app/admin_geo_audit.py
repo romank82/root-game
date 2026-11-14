@@ -14,9 +14,11 @@ progress["anticheat"]; AdminAuditLog остаётся неизменяемым (
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -25,7 +27,20 @@ from sqlalchemy import func, select
 from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
-from app.models import AdminAuditLog, AdminUser, PlayerEvent, PlayerMission
+from app.models import (
+    AdminAuditLog,
+    AdminUser,
+    GamePlayer,
+    PlayerEvent,
+    PlayerMission,
+    PlayerRestriction,
+)
+from app.player_restrictions_engine import (
+    ACTIVE_RESTRICTION_STATUS,
+    REVOKED_RESTRICTION_STATUS,
+    get_active_restrictions,
+    recompute_player_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +63,16 @@ MAX_LIMIT = 200
 PERIOD_DAYS = {"day": 1, "week": 7, "month": 30, "all": None}
 VALID_SIGNALS = ("velocity", "accuracy")
 MAX_REASON_LENGTH = 512
+
+# B6 (Security-Audit): гео-флаг ставит системные ограничения вывода/перевода
+# (см. mission_engine.apply_anticheat_restrictions). Префикс reason отличает
+# античит-блокировки от ручных ограничений админа — review снимает только
+# античит-блокировки и не трогает ручные.
+ANTICHEAT_RESTRICTION_TYPES = ("transfer_restricted", "withdrawal_restricted")
+ANTICHEAT_RESTRICTION_REASON_PREFIX = "anticheat:"
+# decision: reviewed — «Снять блок», dismissed — «Заблокировать».
+REVIEW_DECISION_REVIEWED = "reviewed"
+REVIEW_DECISION_DISMISSED = "dismissed"
 
 
 def _utcnow() -> datetime:
@@ -180,6 +205,72 @@ def _latest_review_audit(
         .order_by(AdminAuditLog.created_at.desc())
         .limit(1)
     )
+
+
+def _revoke_anticheat_restrictions(
+    session: Any,
+    player_id: str,
+    admin: AdminUser,
+    reason: str,
+) -> list[str]:
+    """Снять только античит-блокировки вывода/перевода (B6).
+
+    Ручные ограничения админа (reason без префикса anticheat:) не трогаем.
+    Lifecycle: active -> revoked с причиной и автором снятия.
+    """
+    now = _utcnow()
+    revoked: list[str] = []
+    for restriction in get_active_restrictions(session, player_id):
+        if restriction.restriction_type not in ANTICHEAT_RESTRICTION_TYPES:
+            continue
+        if not (restriction.reason or "").startswith(
+            ANTICHEAT_RESTRICTION_REASON_PREFIX
+        ):
+            continue
+        restriction.status = REVOKED_RESTRICTION_STATUS
+        restriction.revoked_by_admin_id = admin.id
+        restriction.revoked_at = now
+        restriction.revocation_reason = reason[:MAX_REASON_LENGTH]
+        revoked.append(restriction.id)
+    if revoked:
+        session.flush()
+    return revoked
+
+
+def _block_player_for_review(
+    session: Any,
+    player_id: str,
+    admin: AdminUser,
+    reason: str,
+    signals: list[dict[str, Any]],
+) -> str | None:
+    """decision=dismissed: полная блокировка игрока (restriction_type=blocked).
+
+    Если активный blocked уже есть (ручной бан) — не дублируем.
+    GamePlayer.status синхронизируется write-through (blocked).
+    """
+    active = get_active_restrictions(session, player_id)
+    if any(r.restriction_type == "blocked" for r in active):
+        return None
+
+    evidence = json.dumps(signals, ensure_ascii=False, sort_keys=True)[:4_000]
+    restriction = PlayerRestriction(
+        id=f"player-restriction-{uuid4().hex}",
+        player_id=player_id,
+        restriction_type="blocked",
+        status=ACTIVE_RESTRICTION_STATUS,
+        reason=reason[:MAX_REASON_LENGTH],
+        evidence=evidence or None,
+        admin_id=admin.id,
+        starts_at=_utcnow(),
+    )
+    session.add(restriction)
+    session.flush()
+
+    player = session.get(GamePlayer, player_id)
+    if player is not None:
+        recompute_player_status(session, player)
+    return restriction.id
 
 
 @router.get("/flags")
@@ -333,11 +424,13 @@ def review_geo_audit_flag(
     request: Request,
     admin: AdminUser = Depends(require_permission(GEO_AUDIT_MANAGE_PERMISSION)),
 ) -> dict[str, Any]:
-    """Снять/подтвердить флаг: progress["anticheat"] + immutable audit + event.
+    """Рассмотреть флаг: progress["anticheat"] + audit + event + B6-ограничения.
 
     Guard: review возможен только из статуса review (повторный review -> 409).
-    В before/after/metadata попадают только anticheat-проекция и ids — сырых
-    координат там нет.
+    reviewed  — «Снять блок»: снять античит-ограничения вывода/перевода;
+    dismissed — «Заблокировать»: blocked + снять античит-ограничения.
+    В before/after/metadata попадают только anticheat-проекция, ids и флаги —
+    сырых координат там нет.
     """
     reason = (payload.reason or "").strip()[:MAX_REASON_LENGTH] or None
 
@@ -380,6 +473,29 @@ def review_geo_audit_flag(
         flag_event = _latest_flag_event(session, player_id, mission_id)
         zone_id = _flag_payload(flag_event).get("zoneId") if flag_event else None
 
+        # B6 (Security-Audit): ограничения меняются в той же транзакции, что
+        # review и аудит. reviewed — снять блокировку вывода/перевода;
+        # dismissed — дополнительно полный бан (blocked).
+        flag_signals = (
+            _flag_signals(flag_event)
+            if flag_event is not None
+            else [
+                signal
+                for signal in (anticheat.get("signals") or [])
+                if isinstance(signal, dict)
+            ]
+        )
+        review_reason = reason or f"anticheat review: {payload.decision}"
+        blocked_restriction_id: str | None = None
+        if payload.decision == REVIEW_DECISION_DISMISSED:
+            blocked_restriction_id = _block_player_for_review(
+                session, player_id, admin, review_reason, flag_signals
+            )
+        revoked_restriction_ids = _revoke_anticheat_restrictions(
+            session, player_id, admin, review_reason
+        )
+        session.flush()
+
         write_admin_audit(
             session,
             actor=admin,
@@ -397,6 +513,8 @@ def review_geo_audit_flag(
                 "zoneId": zone_id,
                 "decision": payload.decision,
                 "reasonProvided": reason is not None,
+                "restrictionsRevoked": revoked_restriction_ids,
+                "blockedRestrictionId": blocked_restriction_id,
             },
         )
 
@@ -415,6 +533,8 @@ def review_geo_audit_flag(
                         "decision": payload.decision,
                         "reason": reason,
                         "adminId": admin.id,
+                        "restrictionsRevoked": revoked_restriction_ids,
+                        "blockedRestrictionId": blocked_restriction_id,
                     },
                     correlation_id=None,
                 )

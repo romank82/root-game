@@ -1899,10 +1899,12 @@ export async function rejectWithdrawal(
 
 
 
-// ---- Гео-аудит (Sprint 8.9.c) -------------------------------------------
-// Список флагов античита + review-действие. Контракт —
-// backend/app/admin_geo_audit.py. Сырых координат в ответе нет: только
-// производные числа (speedKmh/accuracyMeters/...) и ids.
+// ---- Гео-аудит (Sprint 8.9.c + Security-Audit B6/B7) ---------------------
+// Список флагов античита + решение админа (reviewGeoAuditFlag):
+//   reviewed  — «Снять блок» (revoke withdrawal_restricted/transfer_restricted);
+//   dismissed — «Заблокировать» (blocked + revoke обоих).
+// Контракт — backend/app/admin_geo_audit.py. Сырых координат в ответе нет:
+// только производные числа (speedKmh/accuracyMeters/...) и ids.
 
 export type GeoAuditSignal = {
   signal: 'velocity' | 'accuracy'

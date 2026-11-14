@@ -383,7 +383,9 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         default_value="flag",
         category="geo",
         title="Режим античита",
-        description="Sprint 8.9: античит solo location-proof (off|flag|enforce).",
+        # B7 (Security-Audit): "enforce" переименован в "review" — режим
+        # никогда не блокировал, только писал флаг и ставил review.
+        description="Sprint 8.9: античит solo location-proof (off|flag|review).",
         is_sensitive=False,
     ),
     "geo.anticheat_max_speed_kmh": SystemSettingDefinition(
@@ -447,8 +449,15 @@ def validate_value(definition: SystemSettingDefinition, value: Any) -> None:
             raise ValueError("Значение должно быть строкой.")
         if definition.key == "geo.solo_proof_mode" and value not in ("off", "enforce"):
             raise ValueError("geo.solo_proof_mode должен быть 'off' или 'enforce'.")
-        if definition.key == "geo.anticheat_mode" and value not in ("off", "flag", "enforce"):
-            raise ValueError("geo.anticheat_mode должен быть 'off', 'flag' или 'enforce'.")
+        if definition.key == "geo.anticheat_mode" and value not in (
+            "off",
+            "flag",
+            "review",
+        ):
+            raise ValueError(
+                "geo.anticheat_mode должен быть 'off', 'flag' или 'review'. "
+                "Устаревшее 'enforce' читается как 'review'."
+            )
         return
 
     if definition.key == "missions.default_attempt_reward_multipliers":

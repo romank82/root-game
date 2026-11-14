@@ -7,8 +7,11 @@ import {
   type GeoAuditSignal,
 } from '../../api/adminApi'
 
-// Sprint 8.9.c: фронт раздела «Гео-аудит». Список флагов античита
-// (velocity/accuracy) + review «Подтвердить/Снять» (players.manage — на бэке).
+// Sprint 8.9.c + Security-Audit B6/B7: фронт раздела «Гео-аудит». Список
+// флагов античита (velocity/accuracy) + решение админа:
+//   reviewed  — «Снять блок» (revoke withdrawal_restricted/transfer_restricted);
+//   dismissed — «Заблокировать» (blocked + revoke обоих).
+// Право на бэке — geo_audit.manage (см. admin_geo_audit.py).
 // Ошибки выборки показываются ЛОКАЛЬНО (error), чтобы сбой не выбивал alert
 // всей админки; onNotice — только по явному действию пользователя.
 
@@ -158,8 +161,18 @@ export function GeoAuditSection(props: GeoAuditSectionProps) {
     decision: GeoAuditReviewDecision,
   ) => {
     if (!flag.missionId) return
+    const actionLabel =
+      decision === 'reviewed' ? 'снять блокировку' : 'заблокировать игрока'
+    if (
+      decision === 'dismissed' &&
+      !window.confirm(
+        `Заблокировать игрока ${flag.playerId}? Будет создан restriction blocked; вывод и переводы останутся закрыты.`,
+      )
+    ) {
+      return
+    }
     const reasonInput = window.prompt(
-      `Причина (${decision}) для флага ${flag.id} (пусто — без причины):`,
+      `Причина (${actionLabel}); пусто — без причины:`,
     )
     if (reasonInput === null) return
     const reason = reasonInput.trim()
@@ -173,8 +186,12 @@ export function GeoAuditSection(props: GeoAuditSectionProps) {
         decision,
         reason || undefined,
       )
-      setActionMsg(`Флаг ${flag.id}: ${result.status}.`)
-      props.onNotice(`Флаг ${flag.id}: ${result.status}.`)
+      const message =
+        result.status === 'reviewed'
+          ? `Флаг ${flag.id}: блокировка вывода/перевода снята.`
+          : `Флаг ${flag.id}: игрок заблокирован.`
+      setActionMsg(message)
+      props.onNotice(message)
       setReload((tick) => tick + 1)
     } catch (requestError) {
       setError(
@@ -197,8 +214,9 @@ export function GeoAuditSection(props: GeoAuditSectionProps) {
           <p className="admin-kicker">CHIMERA PROTOCOL / GEO AUDIT</p>
           <h2>Гео-аудит</h2>
           <p className="admin-muted">
-            Флаги античита (velocity/accuracy) и review. Сырые координаты не
-            хранятся — только производные числа.
+            Флаги античита (velocity/accuracy) и решение. Сырые координаты не
+            хранятся — только производные числа. «Снять блок» возвращает вывод
+            и переводы, «Заблокировать» — полный бан игрока.
           </p>
         </div>
       </div>
@@ -322,7 +340,7 @@ export function GeoAuditSection(props: GeoAuditSectionProps) {
                               onClick={() => handleReview(flag, 'reviewed')}
                               disabled={acting}
                             >
-                              Подтвердить
+                              Снять блок
                             </button>
                             <button
                               type="button"
@@ -330,7 +348,7 @@ export function GeoAuditSection(props: GeoAuditSectionProps) {
                               onClick={() => handleReview(flag, 'dismissed')}
                               disabled={acting}
                             >
-                              Снять
+                              Заблокировать
                             </button>
                           </div>
                         )}
