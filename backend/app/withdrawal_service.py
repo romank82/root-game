@@ -548,15 +548,23 @@ def process_withdrawal_batch(
 
 
 def reject_withdrawal(
-    admin_id: str, withdrawal_id: str, reason: str
+    admin_id: str,
+    withdrawal_id: str,
+    reason: str,
+    *,
+    session: Session | None = None,
 ) -> dict:
     """Отклонить одну заявку (11.5-b): refund холда + status='rejected'.
 
     404, если заявки нет или она не в статусе pending/approved/processing
     (failed/confirmed/rejected уже закрыты).
     Возвращает {"withdrawalId", "status": "rejected", "reason"}.
+
+    A11: при переданной session работает в ней (flush, без commit),
+    чтобы вызывающий (admin endpoint) выполнил audit атомарно в той же
+    сессии. Без session — прежнее поведение: отдельная транзакция.
     """
-    with SessionLocal.begin() as session:
+    def _reject(session: Session) -> dict:
         withdrawal = session.scalar(
             select(WithdrawalRequest).where(
                 WithdrawalRequest.id == withdrawal_id,
@@ -578,6 +586,14 @@ def reject_withdrawal(
             "status": "rejected",
             "reason": reason,
         }
+    if session is not None:
+        result = _reject(session)
+        session.flush()
+        return result
+
+    with SessionLocal.begin() as own_session:
+        return _reject(own_session)
+
 
 def _serialize_player_withdrawal(withdrawal: WithdrawalRequest) -> dict:
     """Заявка для игрока (11.7-a): только игровые поля.

@@ -218,10 +218,14 @@ def reject_admin_withdrawal(
 
     reject_withdrawal кидает MissionEngineError(404) для отсутствующих
     или уже закрытых статусов — переводим в HTTPException.
+    A11: финансовая операция (reject_withdrawal) и audit выполняются
+    в одной транзакции. При сбое audit откатывается и финансовое изменение.
     """
     try:
         with SessionLocal.begin() as session:
-            result = reject_withdrawal(admin.id, withdrawal_id, payload.reason)
+            result = reject_withdrawal(
+                admin.id, withdrawal_id, payload.reason, session=session
+            )
             write_admin_audit(
                 session,
                 actor=admin,
