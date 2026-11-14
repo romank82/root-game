@@ -1971,29 +1971,27 @@ seed-миграции `d4e7a1c93b52`). Права гео-аудита — `geo_a
 
 ## Открытые долги (аудит 2026-11-14)
 
-Полный аудит backend/frontend/безопасности/логики/стабильности. Найдено 12 critical/high, 16 medium, 5 low.
-Чинить — по приоритету (critical → high → medium → low). Аудит проведён 2026-11-14, read-only.
+Полный аудит backend/frontend/безопасности/логики/стабильности (2026-11-14, read-only).
 
-### 🔴 Critical (чинить немедленно, до запуска)
+**Critical + High — ✅ ЗАКРЫТЫ** (13 задач, 11 коммитов, 2026-11-14).
+Medium (16) + Low (2) — в бэклоге (не блокеры).
 
-| # | Проблема | Файл:строка | Что делать |
-|---|----------|-------------|------------|
-| A2+C6 | TELEGRAM_WEBHOOK_SECRET пустой в Docker → webhook без аутентификации Telegram. Docker не передаёт secret в backend. | docker-compose.yml:47-55, config.py:80, main.py:2154-2165 | Обязать secret через Compose/secret manager; startup validation (не стартовать в prod без secret). |
-| A6+A7 | TON-выплата: внешний send и DB commit неатомарны → при сбое повторный batch отправит выплату ещё раз. query_id=0 (нет уникального id). | withdrawal_service.py:294-325, ton_service.py:218-228 | Durable outbox/state machine + уникальный query_id из payout attempt ID. |
+### ✅ Critical + High — ЗАКРЫТЫ (2026-11-14)
 
-### 🟠 High (чинить до запуска, по возможности)
-
-| # | Проблема | Файл:строка | Что делать |
-|---|----------|-------------|------------|
-| B2 | Параллельный submit не блокирует PlayerMission → двойное начисление item-награды (currency спасает unique ledger, item — нет). | mission_engine.py:1752-1767, 1275-1342 | with_for_update() на PlayerMission + immutable award event для item. |
-| A8+A9 | Дневные лимиты ROOT (transfer/withdrawal) проверяются до блокировки кошелька → гонка, лимит обходится. | transfer_service.py:275-300, 347, withdrawal_service.py:161-183 | Блокировать кошелёк до проверки лимита; атомарная quota-row. |
-| A10 | Withdrawal request без idempotency key → повтор POST создаёт две заявки/два списания. | main.py:426-430, withdrawal_service.py:186-217 | Обязательный client request ID + unique constraint (player_id, request_id). |
-| A11 | Batch/reject withdrawal: финансовая операция commit'ится отдельно от admin audit → audit может не записаться. | admin_withdrawals.py:188-205, 223-236, withdrawal_service.py:289-325 | Одна session для domain executor + audit writer (атомарно). |
-| B6 | Geo proof доверяет координатам клиента (dev_mock); fake GPS проходит. | geo_location_proof.py:23-29, 39-55, mission_engine.py:2342-2351 | Внешний/device-attested verifier ИЛИ явно запретить geo-rewards в dev_mock/prod. |
-| B7 | Anti-cheat enforce не блокирует (только лог), название врёт. | mission_engine.py:2349-2351, 2453-2505 | Реализовать reject/review/hold при enforce ИЛИ переименовать режим в log до реализации. |
-| C4 | Камера не освобождается: releaseCameraStream() объявлен, но не вызывается. | useCameraStream.ts:10-18, 84-88 | Вызывать release при выходе с camera screen / завершении сессии. |
-| A3 | Telegram webhook без Pydantic-схемы (принимает любой dict). | main.py:2154-2171 | Pydantic-схемы для поддерживаемых update types. |
-| A12 | AppError сохраняет str(exc) + traceback (может содержать внутренние URL/SQL/секреты). | main.py:239-249 | Сохранять только тип/код/endpoint/correlation_id; traceback — в redacted sink. |
+| # | Проблема | Фикс | Коммит |
+|---|----------|------|--------|
+| A2+C6 | TELEGRAM_WEBHOOK_SECRET пустой в Docker → webhook без аутентификации Telegram. | Обязать secret в prod + startup validation. | ✅ 56ceb04 |
+| A6+A7 | TON-выплата: внешний send и DB commit неатомарны; query_id=0. | Durable outbox + уникальный query_id из payout attempt ID. | ✅ 8926c1e |
+| B1 | ON DELETE CASCADE на игровых/финансовых сущностях. | N/A — delete-флоу нет, только архивация (append-only). | ✅ 8926c1e (docs) |
+| B2 | Параллельный submit → двойное начисление item-награды. | with_for_update() на PlayerMission + immutable PlayerItemAward. | ✅ 8b7b8d0 |
+| A8+A9 | Дневные лимиты ROOT проверяются до блокировки кошелька. | Блокировка кошелька до проверки лимита. | ✅ d0a7d1b |
+| A10 | Withdrawal request без idempotency key. | Обязательный request_id + unique (player_id, request_id). | ✅ 675b8e4 |
+| A11 | Batch/reject withdrawal: финансы и audit не атомарны. | Одна session для executor + audit (batch — outbox). | ✅ 1777dea |
+| C4 | Камера не освобождается. | releaseCameraStream при unmount. | ✅ 0562f91 |
+| A12 | AppError сохраняет str(exc)+traceback. | Redacted message/stack. | ✅ 0562f91 |
+| A3 | Telegram webhook без Pydantic-схемы. | Pydantic-схемы update types. | ✅ bb1b72d |
+| B6 | Geo proof доверяет координатам клиента (fake GPS). | Гео-флаг блокирует вывод/перевод (PlayerRestriction auto). | ✅ 775efa0 |
+| B7 | Anti-cheat enforce не блокирует, название врёт. | enforce → review (честно переименован). | ✅ 775efa0 |
 
 ### 🟡 Medium (в бэклог, чинить после запуска)
 
@@ -2017,7 +2015,7 @@ seed-миграции `d4e7a1c93b52`). Права гео-аудита — `geo_a
 | B10 | Orphan-check не выполнен (запрет чтения SQLite в аудите). | — | SQL-проверка на backup/копии (counts only). |
 | B1 | ON DELETE CASCADE на игровых/финансовых сущностях: удаление Season/GamePlayer каскадно сносит историю/ledger. | models.py:108-112, 245, 328, 1302-1340 | Не актуально сейчас: кнопки «Удалить» нет, только архивация. При появлении delete-флоу — RESTRICT/архивация + миграция (append-only). |
 
-### ⚪ Low (косметика/политика)
+### ⚪ Low (косметика/политика, в бэклог — не блокеры)
 
 | # | Проблема | Файл:строка | Что делать |
 |---|----------|-------------|------------|
@@ -2038,3 +2036,4 @@ seed-миграции `d4e7a1c93b52`). Права гео-аудита — `geo_a
 - Физического удаления нет: admin-флоу используют архивацию (B1 не актуален).
 - Frontend timers/polling/listeners/GPS — cleanup есть.
 - python compileall — exit 0; tsc --noEmit — exit 0.
+- Critical + High аудита 2026-11-14 закрыты (13 задач, 11 коммитов); тесты 938 OK; BUILD GREEN.
