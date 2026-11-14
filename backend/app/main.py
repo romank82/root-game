@@ -2159,7 +2159,20 @@ def telegram_webhook(request: Request, update: dict):
     (StarsPayment). Иные типы update намеренно игнорируются (200).
     """
     expected_secret = settings.telegram_webhook_secret
-    if expected_secret:
+    if not expected_secret:
+        # Defense in depth (A2+C6a): config._validate_settings must already
+        # block production startup without a webhook secret. If that guard was
+        # bypassed or settings changed after start, never process an
+        # unauthenticated update. Dev keeps the legacy no-check behaviour.
+        # getattr: test doubles/legacy settings objects may expose only the
+        # fields the endpoint needs; they model dev, while the real production
+        # Settings dataclass always carries app_env.
+        if getattr(settings, "app_env", "development") == "production":
+            raise HTTPException(
+                status_code=403,
+                detail="Webhook secret not configured.",
+            )
+    else:
         provided_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
         if provided_secret != expected_secret:
             raise HTTPException(status_code=403, detail="Forbidden.")

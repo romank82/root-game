@@ -96,3 +96,20 @@ settings = Settings(
     sentry_traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0")),
     sentry_release=os.getenv("SENTRY_RELEASE", ""),
 )
+
+
+def _validate_settings(settings: Settings) -> None:
+    """Fail fast on unsafe production configuration (A2+C6a).
+
+    An empty webhook secret in production would make /webhook/telegram accept
+    unauthenticated updates (Stars payments). Development keeps the legacy
+    behaviour: an empty secret disables header verification only in dev.
+    """
+    if settings.app_env == "production" and not settings.telegram_webhook_secret:
+        raise RuntimeError(
+            "TELEGRAM_WEBHOOK_SECRET is required in production "
+            "(webhook would be unauthenticated)."
+        )
+
+
+_validate_settings(settings)
