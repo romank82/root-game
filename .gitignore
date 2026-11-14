@@ -89,3 +89,8 @@ backend/chimera.db.bak-*
 **/*.bak.*
 *.backup
 **/*.backup
+
+# DB backups (underscore variant) — Sprint Cleanup
+*.db.bak_*
+**/*.db.bak_*
+backend/chimera.db.bak_*
