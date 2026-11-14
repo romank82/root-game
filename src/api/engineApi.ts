@@ -750,6 +750,7 @@ export type CreateWithdrawalResult = {
 export async function createWithdrawal(
   amountRoot: number,
   toAddress: string,
+  requestId: string,
 ): Promise<CreateWithdrawalResult> {
   const response = await apiFetch('/api/v1/me/withdrawals', {
     method: 'POST',
@@ -757,7 +758,13 @@ export async function createWithdrawal(
       'Content-Type': 'application/json',
     },
     // Контракт бэкенда (WithdrawalPayload): поля snake_case.
-    body: JSON.stringify({ amount_root: amountRoot, to_address: toAddress }),
+    // request_id — A10 idempotency key: повтор с тем же ключом не создаёт
+    // вторую заявку и не списывает ROOT повторно.
+    body: JSON.stringify({
+      amount_root: amountRoot,
+      to_address: toAddress,
+      request_id: requestId,
+    }),
   })
 
   if (!response.ok) {

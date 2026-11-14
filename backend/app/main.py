@@ -438,6 +438,9 @@ class WithdrawalPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     amount_root: int = Field(..., gt=0)
     to_address: str = Field(..., min_length=1, max_length=128)
+    # A10: client idempotency key. Повторный POST с тем же request_id
+    # возвращает уже созданную заявку (без второго списания ROOT).
+    request_id: str = Field(..., min_length=1, max_length=64)
 
 class GasInvoicePayload(BaseModel):
     """POST /api/v1/engine/gas/invoice (10.4-j-0)."""
@@ -1166,11 +1169,15 @@ def create_my_withdrawal_route(
 
     ROOT списывается сразу в холд (immutable-проводка withdrawal_hold);
     возвращает {withdrawalId, amountRoot, toAddress, status:"pending"}.
+    requestId — обязательный idempotency key (повтор не создаёт дубль).
     Валидации и коды ошибок — в withdrawal_service.create_withdrawal_request.
     """
     try:
         return create_withdrawal_request(
-            player_id, payload.amount_root, payload.to_address
+            player_id,
+            payload.amount_root,
+            payload.to_address,
+            payload.request_id,
         )
     except MissionEngineError as error:
         raise HTTPException(

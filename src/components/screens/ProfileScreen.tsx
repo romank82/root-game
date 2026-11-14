@@ -336,6 +336,20 @@ function buildPayload(
   return payload
 }
 
+// A10: клиентский idempotency key для заявки на вывод. Генерируется на
+// попытку и НЕ меняется до успешной отправки: повтор после сетевой ошибки
+// с тем же ключом вернёт первую заявку без второго списания ROOT
+// (образец — TransferScreen.makeRequestId).
+function makeWithdrawRequestId(): string {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
+    return crypto.randomUUID()
+  }
+  return `wd-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
   const { t, i18n } = useTranslation(['profile', 'common'])
   // Язык интерфейса: базовый код (en-US → en), чтобы значение select совпадало с опциями.
@@ -370,6 +384,10 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
   const [withdrawNotice, setWithdrawNotice] = useState<string | null>(null)
   const [withdrawals, setWithdrawals] = useState<PlayerWithdrawal[]>([])
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false)
+  // A10: idempotency key текущей попытки вывода (см. makeWithdrawRequestId).
+  const [withdrawRequestId, setWithdrawRequestId] = useState<string>(() =>
+    makeWithdrawRequestId(),
+  )
   // 11.0-b: сохранённый адрес (удобное сужение типа для JSX).
   const savedAddress = tonWallet?.address ?? null
   // 10.0.5-b-2: страна определена автоматически по координатам ('auto') —
@@ -626,9 +644,12 @@ export function ProfileScreen({ onScreenChange }: ProfileScreenProps) {
     setWithdrawError(null)
     setWithdrawNotice(null)
     try {
-      await createWithdrawal(amount, address)
+      await createWithdrawal(amount, address, withdrawRequestId)
       setWithdrawNotice(t('profile:withdrawal.notice.created'))
       setWithdrawAmount('')
+      // Успех: следующий вывод — новая попытка с новым ключом. При ошибке
+      // ключ сохраняется, чтобы повтор был идемпотентным.
+      setWithdrawRequestId(makeWithdrawRequestId())
       // Обновляем список, чтобы новая заявка появилась сразу.
       const refreshed = await listMyWithdrawals(50, 0)
       setWithdrawals(refreshed.withdrawals)

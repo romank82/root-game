@@ -1976,6 +1976,12 @@ class WithdrawalRequest(TimestampMixin, Base):
         ForeignKey("admin_users.id", ondelete="RESTRICT"), nullable=True
     )
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # A10: клиентский idempotency key заявки. Nullable — исторические
+    # заявки (backfill не требуется); partial unique индекс ниже не даёт
+    # создать вторую заявку с тем же (player_id, request_id).
+    request_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     # Sprint 11.8 NanoROOT: дробный ROOT (10^8 нано = 1 ROOT). Nullable —
     # для обратной совместимости (dual-write); после backfill заполнено.
     # amount_root уже BigInteger; amount_root_nano — единый nano-канал
@@ -1993,6 +1999,14 @@ class WithdrawalRequest(TimestampMixin, Base):
             "status IN "
             "('pending','approved','rejected','processing','confirmed','failed')",
             name="ck_withdrawal_requests_status",
+        ),
+        Index(
+            "uq_withdrawal_requests_player_request",
+            "player_id",
+            "request_id",
+            unique=True,
+            postgresql_where=text("request_id IS NOT NULL"),
+            sqlite_where=text("request_id IS NOT NULL"),
         ),
     )
 

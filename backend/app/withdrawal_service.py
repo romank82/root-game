@@ -150,17 +150,60 @@ def _read_bool_setting(session: Session, key: str, fallback: bool) -> bool:
     return fallback
 
 
-def create_withdrawal_request(
+def _serialize_created_withdrawal(withdrawal: WithdrawalRequest) -> dict:
+    """Ответ создания заявки (в т.ч. idempotent-повтора), 11.5-a."""
+    return {
+        "withdrawalId": withdrawal.id,
+        "amountRoot": withdrawal.amount_root,
+        "amountRootNano": (
+            withdrawal.amount_root_nano
+            if withdrawal.amount_root_nano is not None
+            else withdrawal.amount_root * NANO_PER_ROOT
+        ),
+        "toAddress": withdrawal.to_address,
+        "status": withdrawal.status,
+    }
+
+
+def _find_withdrawal_by_request_id(
+    session: Session,
+    player_id: str,
+    request_id: str,
+) -> WithdrawalRequest | None:
+    """Найти заявку игрока по клиентскому idempotency key (A10)."""
+    return session.scalar(
+        select(WithdrawalRequest).where(
+            WithdrawalRequest.player_id == player_id,
+            WithdrawalRequest.request_id == request_id,
+        )
+    )
+
+
+def _create_withdrawal_request_impl(
     player_id: str,
     amount_root: int,
     to_address: str,
+    request_id: str | None = None,
 ) -> dict:
-    """Подать заявку на вывод ROOT в TON (этап 11.5-a).
+    """Подать заявку на вывод ROOT в TON (этап 11.5-a; реализация).
 
     Возвращает {"withdrawalId", "amountRoot", "toAddress", "status"}.
     ROOT списывается сразу в холд; возврат при failed/rejected — отдельный
     механизм (11.5-b). Все проверки и проводки — в одной транзакции.
+
+    A10: при переданном request_id повторный вызов с тем же
+    (player_id, request_id) возвращает уже созданную заявку без второго
+    списания (early-return ниже; гонку закрывает unique-индекс и обёртка
+    create_withdrawal_request).
     """
+    if request_id:
+        with SessionLocal() as session:
+            existing = _find_withdrawal_by_request_id(
+                session, player_id, request_id
+            )
+        if existing is not None:
+            return _serialize_created_withdrawal(existing)
+
     with SessionLocal.begin() as session:
         # 1. Глобальный переключатель вывода (CMS, ton.withdrawal_enabled).
         if not _read_bool_setting(session, WITHDRAWAL_ENABLED_KEY, False):
@@ -237,27 +280,53 @@ def create_withdrawal_request(
                 metadata_json={"toAddress": canonical_address},
             )
         )
-        session.add(
-            WithdrawalRequest(
-                id=withdrawal_id,
-                player_id=player_id,
-                amount_root=amount_root,
-                amount_root_nano=amount_root * NANO_PER_ROOT,
-                to_address=canonical_address,
-                status="pending",
-            )
+        withdrawal = WithdrawalRequest(
+            id=withdrawal_id,
+            player_id=player_id,
+            amount_root=amount_root,
+            amount_root_nano=amount_root * NANO_PER_ROOT,
+            to_address=canonical_address,
+            status="pending",
+            request_id=request_id,
         )
+        session.add(withdrawal)
 
         session.flush()
 
-        return {
-            "withdrawalId": withdrawal_id,
-            "amountRoot": amount_root,
-            # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
-            "amountRootNano": amount_root * NANO_PER_ROOT,
-            "toAddress": canonical_address,
-            "status": "pending",
-        }
+        return _serialize_created_withdrawal(withdrawal)
+
+
+def create_withdrawal_request(
+    player_id: str,
+    amount_root: int,
+    to_address: str,
+    request_id: str | None = None,
+) -> dict:
+    """Подать заявку на вывод ROOT в TON (11.5-a; A10 idempotency).
+
+    request_id — клиентский idempotency key: повторный вызов с тем же
+    (player_id, request_id) возвращает уже созданную заявку без второго
+    списания. API передаёт ключ обязательно; None допустим только для
+    внутренних вызовов (совместимость).
+
+    Гонка двух параллельных запросов: unique-индекс
+    uq_withdrawal_requests_player_request отклонит вторую вставку
+    (IntegrityError), после чего возвращается уже созданная заявка.
+    """
+    try:
+        return _create_withdrawal_request_impl(
+            player_id, amount_root, to_address, request_id=request_id
+        )
+    except IntegrityError:
+        if not request_id:
+            raise
+        with SessionLocal() as session:
+            existing = _find_withdrawal_by_request_id(
+                session, player_id, request_id
+            )
+        if existing is None:
+            raise
+        return _serialize_created_withdrawal(existing)
 
 
 def _refund_withdrawal_hold(
