@@ -64,9 +64,11 @@ alembic upgrade head
 ## 6. Frontend
 
 ```bash
-cd /opt/root-game && npm ci && VITE_API_BASE_URL=/api npm run build
+cd /opt/root-game && npm ci && npm run build
 # dist/ → /opt/root-game/frontend/dist (см. nginx root)
 ```
+
+> ⚠️ VITE_API_BASE_URL задавать НЕЛЬЗЯ: все пути в коде уже содержат `/api` (`/api/v1/...`). Если задать `VITE_API_BASE_URL=/api` — получится двойной `/api` (`/api/api/v1/...`) и 404.
 
 ## 7. systemd
 
@@ -112,6 +114,8 @@ cd /opt/root-game && git pull
 cd backend && source venv/bin/activate && pip install -r requirements.txt
 alembic upgrade head
 sudo systemctl restart root-game
-cd .. && npm ci && VITE_API_BASE_URL=/api npm run build
+cd .. && npm ci && npm run build
 sudo systemctl reload nginx
 ```
+
+> ⚠️ VITE_API_BASE_URL задавать НЕЛЬЗЯ: все пути в коде уже содержат `/api` (`/api/v1/...`). Если задать `VITE_API_BASE_URL=/api` — получится двойной `/api` (`/api/api/v1/...`) и 404.

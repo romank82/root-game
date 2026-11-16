@@ -14,6 +14,7 @@ ExecStart=/opt/root-game/backend/venv/bin/gunicorn app.main:app \
     -w 3 \
     -k uvicorn.workers.UvicornWorker \
     -b 127.0.0.1:8001 \
+    --forwarded-allow-ips="*" \
     --access-logfile - \
     --error-logfile -
 Restart=always
