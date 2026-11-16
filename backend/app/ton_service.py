@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 
 # OP-код transfer у Jetton Wallet (TEP-74, https://docs.ton.org/t2/teps/jettons#transfer).
 JETTON_TRANSFER_OP = 0xF8A7EA5
+# OP-код internal_transfer (TEP-74) — уведомление о входящем jetton на сейф
+# (депозит ROOT-jetton, Sprint 1.2). Тело: query_id, amount, from, ...
+JETTON_INTERNAL_TRANSFER_OP = 0x178D4519
+# get-метод Jetton wallet: (balance, owner, jetton_master, wallet_code).
+JETTON_WALLET_DATA_METHOD = "get_wallet_data"
 # Комиссия, которую Jetton wallet берёт за обработку transfer (наноTON):
 # отправляем transfer-сообщением вместе с ним, чтобы кошельку хватило TON.
 JETTON_TRANSFER_GAS = 60_000_000  # 0.06 TON
@@ -210,6 +215,111 @@ class _TonCenterProvider:
         tx_hash = Cell.one_from_boc(message).hash.hex()
         await self._post("sendBoc", {"boc": base64.b64encode(message).decode()})
         return tx_hash
+
+    async def get_transactions(
+        self,
+        address: str,
+        limit: int = 20,
+        lt: int | None = None,
+        l_hash: str | None = None,
+    ) -> list[dict]:
+        """Список транзакций адреса через TonCenter getTransactions (Sprint 1.2).
+
+        Возвращает raw JSON-список (как от TonCenter). lt/l_hash — курсор
+        (последняя обработанная транзакция), чтобы поллер не дублировал и не
+        пропускал переводы.
+        """
+        payload: dict = {"address": address, "limit": limit}
+        if lt is not None:
+            payload["lt"] = str(lt)
+        if l_hash:
+            payload["hash"] = l_hash
+        return await self._post("getTransactions", payload)
+
+    @staticmethod
+    def _extract_in_msg_body(in_msg: dict) -> Cell | None:
+        """Достать body входящего сообщения (Cell) из raw JSON TonCenter.
+
+        Тело приходит в msg_data.body либо raw_body/body (base64/hex BOC).
+        Невалидный/пустой BOC — None (значит «не jetton-перевод»).
+        """
+        msg_data = in_msg.get("msg_data")
+        if isinstance(msg_data, dict):
+            body = msg_data.get("body")
+        else:
+            body = in_msg.get("raw_body") or in_msg.get("body")
+        if not body:
+            return None
+        try:
+            return Cell.one_from_boc(_boc_bytes(body))
+        except Exception:
+            return None
+
+    async def parse_jetton_transfer(
+        self, tx: dict, session: Session | None = None
+    ) -> dict | None:
+        """Разобрать входящий jetton-перевод (internal_transfer 0x178d4519).
+
+        Только парсинг: НЕ зачисляет и НЕ создаёт JettonDeposit (это Шаг 4).
+        Проверяет OP-код in_msg, извлекает query_id/amount/sender jetton-wallet,
+        через run_get_method(get_wallet_data) получает owner и jetton_master,
+        сверяет jetton_master == settings.ton_root_jetton_master. Не
+        jetton-перевод, чужой мастер или не сконфигурированный мастер — None.
+
+        session — не используется (резерв под будущий deposit_service).
+        """
+        del session
+        if not isinstance(tx, dict):
+            return None
+        in_msg = tx.get("in_msg")
+        if not isinstance(in_msg, dict):
+            return None
+
+        body_cell = self._extract_in_msg_body(in_msg)
+        if body_cell is None:
+            return None
+
+        try:
+            parser = body_cell.begin_parse()
+            if parser.load_uint(32) != JETTON_INTERNAL_TRANSFER_OP:
+                return None
+            query_id = parser.load_uint(64)
+            amount_nano = parser.load_coins()
+            sender_jetton_wallet = parser.load_address()
+        except Exception:
+            return None
+        if sender_jetton_wallet is None:
+            return None
+
+        # get_wallet_data -> (balance, owner, jetton_master, wallet_code).
+        wallet_data = await self.run_get_method(
+            sender_jetton_wallet, JETTON_WALLET_DATA_METHOD
+        )
+        if not isinstance(wallet_data, list) or len(wallet_data) < 3:
+            raise ValueError("Jetton wallet data: неожиданный ответ.")
+        owner = wallet_data[1]
+        jetton_master = wallet_data[2]
+        if not isinstance(owner, Address) or not isinstance(jetton_master, Address):
+            raise ValueError("Jetton wallet data: owner/master не адреса.")
+
+        expected_master = settings.ton_root_jetton_master
+        if not expected_master:
+            return None
+        if jetton_master.to_str(is_user_friendly=False) != Address(
+            expected_master
+        ).to_str(is_user_friendly=False):
+            return None
+
+        return {
+            "tx_hash": tx.get("hash"),
+            "lt": tx.get("lt"),
+            "query_id": query_id,
+            "from_address": owner.to_str(is_user_friendly=True),
+            "to_address": in_msg.get("destination"),
+            "jetton_master": jetton_master.to_str(is_user_friendly=True),
+            "amount_nano": amount_nano,
+            "raw_payload": tx,
+        }
 
 
 def _new_query_id() -> int:

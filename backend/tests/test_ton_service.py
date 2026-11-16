@@ -16,6 +16,7 @@ disposable SQLite + alembic upgrade head; SessionLocal патчится в app.d
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -28,7 +29,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from pytoniq_core import Address
+from pytoniq_core import Address, begin_cell
 
 from app import ton_service
 from app.mission_engine import MissionEngineError
@@ -45,6 +46,13 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 # Тестнет-адрес ROOT-минтера/Jetton wallet'а для assert'ов (kQA… — тестнет).
 MINTER_ADDRESS = "kQA5FajPC6c_6qcU5Ek2RgZfmmeZP_bftqYe16AuLXe6aMpH"
 AMOUNT_NANO = 1000
+# Raw-адреса testnet для моков депозита (0:<64 hex>): jetton-wallet
+# отправителя, owner (кошелёк игрока), ROOT-мастер, сейф, «чужой» мастер.
+SENDER_JETTON_WALLET = Address("0:" + "1" * 64)
+DEPOSITOR_OWNER = Address("0:" + "2" * 64)
+ROOT_MASTER = Address("0:" + "3" * 64)
+VAULT_ADDRESS_RAW = "0:" + "4" * 64
+OTHER_MASTER = Address("0:" + "5" * 64)
 
 
 class _FakeTonCenterProvider:
@@ -172,6 +180,14 @@ class TonServiceTests(unittest.TestCase):
         defaults.update(values)
         return patch.object(self.ton_service, "settings", SimpleNamespace(**defaults))
 
+    def _make_provider(self) -> ton_service._TonCenterProvider:
+        """Реальный _TonCenterProvider с закрытием httpx-клиента после теста."""
+        provider = ton_service._TonCenterProvider(
+            "https://testnet.toncenter.com/api/v2"
+        )
+        self.addCleanup(lambda: asyncio.run(provider.aclose()))
+        return provider
+
     # ---- Тесты ---------------------------------------------------------------
 
     def test_validate_ton_address(self) -> None:
@@ -280,5 +296,107 @@ class TonServiceTests(unittest.TestCase):
         self.assertEqual(
             body.begin_parse().load_uint(32), ton_service.JETTON_TRANSFER_OP
         )
+
+    # ---- Sprint 1.2: депозит (getTransactions + парсинг jetton) --------------
+
+    def _make_internal_transfer_tx(self, op_code: int) -> dict:
+        """Собрать raw tx TonCenter с in_msg internal_transfer (Sprint 1.2)."""
+        body_cell = (
+            begin_cell()
+            .store_uint(op_code, 32)
+            .store_uint(123, 64)  # query_id
+            .store_coins(AMOUNT_NANO)  # amount
+            .store_address(SENDER_JETTON_WALLET)  # sender jetton-wallet
+            .end_cell()
+        )
+        return {
+            "hash": "tx-hash-abc",
+            "lt": "12345",
+            "in_msg": {
+                "source": SENDER_JETTON_WALLET.to_str(is_user_friendly=True),
+                "destination": VAULT_ADDRESS_RAW,
+                "msg_data": {"body": body_cell.to_boc().hex()},
+            },
+        }
+
+    def test_get_transactions(self) -> None:
+        """getTransactions: payload с курсором, raw список возвращается как есть."""
+        provider = self._make_provider()
+        provider._post = AsyncMock(return_value=[{"hash": "h1", "lt": "1"}])
+
+        result = asyncio.run(
+            provider.get_transactions("addr", limit=5, lt=10, l_hash="hash10")
+        )
+
+        self.assertEqual(result, [{"hash": "h1", "lt": "1"}])
+        provider._post.assert_awaited_once()
+        self.assertEqual(provider._post.await_args.args[0], "getTransactions")
+        payload = provider._post.await_args.args[1]
+        self.assertEqual(
+            payload,
+            {"address": "addr", "limit": 5, "lt": "10", "hash": "hash10"},
+        )
+
+    def test_parse_jetton_transfer(self) -> None:
+        """internal_transfer 0x178d4519 + run_get_method -> dict с owner/master."""
+        tx = self._make_internal_transfer_tx(
+            ton_service.JETTON_INTERNAL_TRANSFER_OP
+        )
+        provider = self._make_provider()
+        provider.run_get_method = AsyncMock(
+            return_value=[0, DEPOSITOR_OWNER, ROOT_MASTER, None]
+        )
+
+        with self._patch_ton_settings(
+            ton_root_jetton_master=ROOT_MASTER.to_str(is_user_friendly=False)
+        ):
+            result = asyncio.run(provider.parse_jetton_transfer(tx))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["tx_hash"], "tx-hash-abc")
+        self.assertEqual(result["lt"], "12345")
+        self.assertEqual(result["query_id"], 123)
+        self.assertEqual(result["amount_nano"], AMOUNT_NANO)
+        self.assertEqual(
+            result["from_address"], DEPOSITOR_OWNER.to_str(is_user_friendly=True)
+        )
+        self.assertEqual(result["to_address"], VAULT_ADDRESS_RAW)
+        self.assertEqual(
+            result["jetton_master"], ROOT_MASTER.to_str(is_user_friendly=True)
+        )
+        self.assertEqual(result["raw_payload"], tx)
+        provider.run_get_method.assert_awaited_once()
+        self.assertEqual(
+            provider.run_get_method.await_args.args[0].to_str(is_user_friendly=False),
+            SENDER_JETTON_WALLET.to_str(is_user_friendly=False),
+        )
+        self.assertEqual(
+            provider.run_get_method.await_args.args[1],
+            ton_service.JETTON_WALLET_DATA_METHOD,
+        )
+
+    def test_parse_non_jetton_transfer(self) -> None:
+        """in_msg без OP 0x178d4519 -> None."""
+        tx = self._make_internal_transfer_tx(0xDEADBEEF)
+        provider = self._make_provider()
+        result = asyncio.run(provider.parse_jetton_transfer(tx))
+        self.assertIsNone(result)
+
+    def test_parse_wrong_jetton_master(self) -> None:
+        """jetton_master != TON_ROOT_JETTON_MASTER -> None."""
+        tx = self._make_internal_transfer_tx(
+            ton_service.JETTON_INTERNAL_TRANSFER_OP
+        )
+        provider = self._make_provider()
+        provider.run_get_method = AsyncMock(
+            return_value=[0, DEPOSITOR_OWNER, OTHER_MASTER, None]
+        )
+
+        with self._patch_ton_settings(
+            ton_root_jetton_master=ROOT_MASTER.to_str(is_user_friendly=False)
+        ):
+            result = asyncio.run(provider.parse_jetton_transfer(tx))
+
+        self.assertIsNone(result)
 
 
