@@ -94,3 +94,19 @@ backend/chimera.db.bak-*
 *.db.bak_*
 **/*.db.bak_*
 backend/chimera.db.bak_*
+
+# Technical/assistant files (not part of the game)
+.copilot-instructions.md
+AGENTS.md
+.aiderignore
+.aiignore
+.clineignore
+.codeiumignore
+.copilotignore
+.cursorignore
+.ignore
+.github/copilot-instructions.md
+docs/roadmap-detailed.md
+docs/audit-2026-10-04.md
+.vscode/
+.bak.
