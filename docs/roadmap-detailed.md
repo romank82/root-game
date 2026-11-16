@@ -2037,3 +2037,98 @@ Medium (16) + Low (2) — в бэклоге (не блокеры).
 - Frontend timers/polling/listeners/GPS — cleanup есть.
 - python compileall — exit 0; tsc --noEmit — exit 0.
 - Critical + High аудита 2026-11-14 закрыты (13 задач, 11 коммитов); тесты 938 OK; BUILD GREEN.
+
+---
+
+## Сервер (production) — ✅ настроен (2026-11-15)
+
+Перенос игры с локального окружения (trycloudflare + SQLite) на постоянный
+VPS. Закрывает блокер долга 10.4-fix (сквозная оплата Stars) и разблокирует
+testnet-вывод ROOT (см. Этап 11, «ждёт testnet + постоянный сервер»). Конфиги
+в репозитории — каталог `deploy/` (README.md, `nginx.conf`, `root-game.service`,
+`.env.production.example`, коммит `9c8f668`).
+
+Шаги:
+
+- **VPS**: Aeza (локации Франкфурт/Амстердам), 8 GB RAM / 4 vCPU / 60 GB NVMe,
+  Ubuntu 24.04.
+- **DNS**: домен `himeraprotocol.pro` (Reg.ru), A-записи (`@` и `www`) → IP
+  сервера. Записи AAAA (IPv6) удалены — иначе certbot падает на валидации.
+- **Базовые пакеты**: `python3.12`, `python3.12-venv`, `nginx`, `postgresql`,
+  `certbot`, `git`, `nodejs` (20.x), `npm`.
+- **PostgreSQL**: `createuser rootgame -P` (пароль задан вручную),
+  `createdb rootgame -O rootgame`.
+- **Код**: `git clone` в `/opt/root-game`, venv, `pip install -r requirements.txt`.
+- **`.env`**: `APP_ENV=production`, `DATABASE_URL`, `TELEGRAM_WEBHOOK_SECRET`,
+  `GAME_SESSION_SECRET`, `CORS_ORIGINS`, `TON_*`, `SENTRY_DSN` (по образцу
+  `deploy/.env.production.example`). Секреты — вручную, вне git.
+- **Миграции**: `alembic upgrade head`.
+- **Frontend**: `npm ci` (или `npm install`), `npm run build` (без
+  `VITE_API_BASE_URL` — пути уже с `/api`), `dist/` → `/opt/root-game/frontend/dist/`.
+- **systemd**: `root-game.service` — gunicorn, 3 воркера
+  (`-k uvicorn.workers.UvicornWorker`), `--forwarded-allow-ips="*"`, порт
+  `127.0.0.1:8001`, `Restart=always`.
+- **nginx**: `location /` (frontend dist), `location /api/` (proxy → :8001),
+  `location /webhook/` (Telegram, без префикса `/api`), `location /health`.
+- **HTTPS**: `certbot --nginx -d himeraprotocol.pro -d www.himeraprotocol.pro`
+  (Let's Encrypt, автопродление systemd-таймером).
+- **Telegram**: `setWebhook` на `https://himeraprotocol.pro/webhook/telegram`
+  + `secret_token`; BotFather → Menu Button → URL Mini App.
+- **Бэкап**: `pg_dump` по cron, хранение 7 дней, каталог `/opt/backups/`.
+- **Админ**: создать супер-админа (`create_admin_user`, `role="owner"`).
+- **Проверка**: `GET /health` → OK, вход в админку, открытие Mini App в Telegram.
+
+⚠️ Заметка (сверить с репо): в `deploy/README.md` сборка фронта идёт
+`VITE_API_BASE_URL=/api npm run build`, а `deploy/root-game.service` не задаёт
+`--forwarded-allow-ips` (порт 8001). Актуальные значения на сервере — как
+выше; при расхождении поправить `deploy/` отдельным коммитом (требует
+согласования — это НЕ часть текущей docs-правки).
+
+- **Статус**: ✅ сервер поднят, HTTPS / Telegram webhook / бэкап настроены
+  (2026-11-15).
+
+---
+
+## Покупка газа за Stars — ✅ код закрыт (был заблокирован отсутствием постоянного сервера)
+
+- **Статус**: ✅ **код закрыт** (этап 10.4, 2026-10-24; журнал Stars — 12.2 /
+  12.2-enhance, 2026-11-09). Долг **10.4-fix** (сквозная оплата) был
+  заблокирован локальным окружением (trycloudflare: Vite :5173 вместо
+  uvicorn :8000; меняющийся URL) — **разблокирован постоянным сервером**
+  (см. раздел «Сервер (production)» выше). Осталась финальная проверка оплаты
+  на проде.
+
+- **Что сделано**:
+  - Модель `StarsPayment` (таблица `stars_payments`, миграция
+    `274519482c7d_add_stars_payment.py`, шаг 10.4-g-1): `gas_amount`
+    Numeric(18,4), `amount_stars`, `telegram_payment_charge_id` (nullable,
+    для refund), статусы pending/completed/refunded, unique `reference_id`.
+  - Сервис `backend/app/stars_service.py` (10.4-g-2): `create_invoice_link`
+    (createInvoiceLink, `currency="XTR"`, `provider_token=""`),
+    `handle_pre_checkout_query`, `handle_successful_payment` (идемпотентное
+    начисление газа в `GasWallet`), `send_gas_invoice` (10.4-fix, sendInvoice).
+    Цена пакета — CMS `economy.gas_pack_{gas_amount}`.
+  - HTTP-эндпоинты: `POST /api/v1/engine/gas/invoice` (10.4-j-0),
+    `POST /api/v1/engine/gas/invoice/send` (10.4-fix), webhook
+    `POST /webhook/telegram` (10.4-h; обрабатывает только pre_checkout_query /
+    successful_payment, всегда 200).
+  - Админка: `GET /api/v1/admin/economy/stars-payments` (12.2) + поиск по нику
+    (12.2-enhance); фронт — `src/components/admin/StarsPaymentsSection.tsx`,
+    `src/api/adminApi.ts`. Только чтение: пишет лишь `stars_service`.
+  - Игровой фронт: `ProfileScreen` — покупка газа (`openInvoice`, 10.4-j-1).
+  - Тесты: `test_stars_service.py`, `test_webhook_telegram.py`,
+    `test_stars_send_invoice.py`, `test_admin_stars_payments.py`.
+
+- **Что осталось**:
+  - Сквозная оплата на постоянном сервере (10.4-fix): создать инвойс в Mini App
+    → `pre_checkout_query` → `successful_payment` → газ начислен, запись в
+    `stars_payments` = completed. Ранее не проходила из-за trycloudflare.
+  - Опционально: refund-флоу через `telegram_payment_charge_id` (поле в модели
+    есть, вызова нет).
+
+- **Проверка (grep `stars` в `backend/app/`)**: `admin_economy.py` (32),
+  `stars_service.py` (28), `models.py` (12 — модель `StarsPayment`), `main.py`
+  (10 — инвойсы + webhook), `config.py` (1 — bot token), `retention.py` (1).
+  Endpoint журнала Stars — в `admin_economy.py` (отдельного
+  `admin_stars_payments.py` нет). Миграция — `274519482c7d_add_stars_payment.py`.
+
