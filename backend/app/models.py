@@ -2056,3 +2056,62 @@ class PayoutAttempt(TimestampMixin, Base):
         ),
     )
 
+
+
+class TonPollCursor(TimestampMixin, Base):
+    """Курсор поллинга входящих ROOT-jetton (Sprint 1.x).
+
+    Singleton: ровно одна строка (фиксированный id "ton_poll_cursor").
+    last_lt / last_hash — последняя обработанная транзакция в TonCenter
+    getTransactions; поллер читает их, чтобы не пропускать и не дублировать
+    переводы. Физическое удаление записи запрещено.
+    """
+
+    __tablename__ = "ton_poll_cursor"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_lt: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    last_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default=""
+    )
+
+
+class JettonDeposit(TimestampMixin, Base):
+    """Входящий ROOT-jetton перевод на сейф (Sprint 1.x).
+
+    tx_hash — unique (идемпотентность: повторный перевод не вставится).
+    player_id null + status 'pending' — перевод не сопоставлен с игроком
+    (ручной разбор); 'confirmed' — зачислено; 'rejected' — отклонено
+    (например, не тот jetton-мастер). Физическое удаление запрещено.
+    """
+
+    __tablename__ = "jetton_deposits"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tx_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    lt: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    query_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    from_address: Mapped[str] = mapped_column(String(128), nullable=False)
+    to_address: Mapped[str] = mapped_column(String(128), nullable=False)
+    jetton_master: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount_nano: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    player_id: Mapped[str | None] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", index=True
+    )
+    raw_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("tx_hash", name="uq_jetton_deposits_tx_hash"),
+        CheckConstraint(
+            "status IN ('pending','confirmed','rejected')",
+            name="ck_jetton_deposits_status",
+        ),
+        Index("ix_jetton_deposits_player_id", "player_id"),
+    )
+
