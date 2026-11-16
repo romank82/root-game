@@ -218,6 +218,15 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         description="Минимальная сумма депозита ROOT-jetton (в ROOT).",
         is_sensitive=False,
     ),
+    "ton.deposit_wallet": SystemSettingDefinition(
+        key="ton.deposit_wallet",
+        value_type="string",
+        default_value="",
+        category="ton",
+        title="TON deposit wallet",
+        description="Адрес «спец» кошелька для приёма ROOT-jetton (депозит).",
+        is_sensitive=True,
+    ),
     "gameplay.manual_item_adjustment_approval_threshold": SystemSettingDefinition(
         key="gameplay.manual_item_adjustment_approval_threshold",
         value_type="integer",
