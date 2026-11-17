@@ -1,0 +1,24 @@
+[Unit]
+Description=ROOT Game Deposit Poller (Jetton ROOT deposits)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+# TODO(deployer): приведено к текущему серверу (root); в бэклоге — отдать
+# под пользователя deployer, как root-game.service.
+User=root
+Group=root
+WorkingDirectory=/opt/root-game/backend
+EnvironmentFile=/opt/root-game/backend/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/root-game/backend/venv/bin/python -m app.deposit_poller
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
