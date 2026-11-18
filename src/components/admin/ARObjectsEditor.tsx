@@ -92,9 +92,8 @@ export function ARObjectsEditor({
   }
 
   function buildARObjectPayloadCommon() {
-    const slug = arObjectSlug.trim()
+    const slug = arObjectSlug.trim() || undefined
     const title = arObjectTitle.trim()
-    if (slug.length < 3) throw new Error('Slug минимум 3 символа.')
     if (title.length < 1) throw new Error('Название обязательно.')
     const geoZoneId = arObjectGeoZoneId.trim()
     if (geoZoneId.length < 1) throw new Error('GeoZone обязателен.')
@@ -120,7 +119,7 @@ export function ARObjectsEditor({
     try {
       const p = buildARObjectPayloadCommon()
       const created = await createARObject({
-        slug: p.slug,
+        slug: p.slug || undefined,
         title: p.title,
         description: arObjectDescription.trim() || null,
         sort_order: p.sortOrder,
@@ -153,7 +152,7 @@ export function ARObjectsEditor({
     try {
       const p = buildARObjectPayloadCommon()
       const updated = await updateARObject(o.id, {
-        slug: p.slug,
+        slug: p.slug || undefined,
         title: p.title,
         description: arObjectDescription.trim() || null,
         status: arObjectStatus,
@@ -285,8 +284,9 @@ export function ARObjectsEditor({
                 </label>
 
                 <label>
-                  Slug *
+                  Slug
                   <input value={arObjectSlug} disabled={!canWrite}
+                    placeholder="сгенерируется автоматически"
                     onChange={(e) => setARObjectSlug(e.target.value)} />
                 </label>
 

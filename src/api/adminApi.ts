@@ -793,7 +793,7 @@ export type AdminGeoZone = {
 }
 
 export type CreateGeoZonePayload = {
-  slug: string
+  slug?: string
   title: string
   description?: string | null
   zone_type?: string
@@ -901,7 +901,7 @@ export type AdminARObject = {
 }
 
 export type CreateARObjectPayload = {
-  slug: string
+  slug?: string
   title: string
   description?: string | null
   sort_order?: number

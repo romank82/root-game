@@ -13,7 +13,7 @@ from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
 from app.models import AdminUser, GeoZone
-from app.slug_utils import _normalize_slug
+from app.slug_utils import _normalize_slug, _slugify_title, unique_slug
 
 
 router = APIRouter(prefix="/api/v1/admin/geo-zones", tags=["admin-geo-zones"])
@@ -25,7 +25,7 @@ VALID_ZONE_STATUSES = {"draft", "published", "archived"}
 
 
 class AdminGeoZoneCreatePayload(BaseModel):
-    slug: str = Field(min_length=3, max_length=128)
+    slug: str | None = Field(default=None, min_length=3, max_length=128)
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
     zone_type: str = Field(default="radius", min_length=1, max_length=32)
@@ -355,9 +355,21 @@ def create_admin_geo_zone(
     admin: AdminUser = Depends(require_permission(GEO_ZONES_MANAGE_PERMISSION)),
 ):
     with SessionLocal.begin() as session:
-        slug = _normalize_slug(payload.slug)
+        title = payload.title.strip()
+        slug = (
+            _normalize_slug(payload.slug)
+            if payload.slug is not None
+            else _slugify_title(title)
+        )
 
-        if session.scalar(select(GeoZone.id).where(GeoZone.slug == slug)):
+        if payload.slug is None:
+            slug = unique_slug(
+                slug,
+                lambda s: session.scalar(
+                    select(GeoZone.id).where(GeoZone.slug == s)
+                ) is not None,
+            )
+        elif session.scalar(select(GeoZone.id).where(GeoZone.slug == slug)):
             raise HTTPException(
                 status_code=409,
                 detail="Геозона с таким slug уже существует.",
@@ -368,7 +380,7 @@ def create_admin_geo_zone(
         zone = GeoZone(
             id=_new_id("geo-zone"),
             slug=slug,
-            title=payload.title.strip(),
+            title=title,
             description=payload.description.strip() if payload.description else None,
             zone_type=payload.zone_type,
             status="draft",

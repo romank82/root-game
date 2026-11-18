@@ -87,9 +87,8 @@ export function GeoZonesEditor({
   }
 
   function buildGeoZonePayloadCommon() {
-    const slug = geoZoneSlug.trim()
+    const slug = geoZoneSlug.trim() || undefined
     const title = geoZoneTitle.trim()
-    if (slug.length < 3) throw new Error('Slug минимум 3 символа.')
     if (title.length < 1) throw new Error('Название обязательно.')
 
     const sortOrder = Number.parseInt(geoZoneSortOrder, 10)
@@ -132,7 +131,7 @@ export function GeoZonesEditor({
     try {
       const p = buildGeoZonePayloadCommon()
       const created = await createGeoZone({
-        slug: p.slug,
+        slug: p.slug || undefined,
         title: p.title,
         description: geoZoneDescription.trim() || null,
         zone_type: 'radius',
@@ -158,7 +157,7 @@ export function GeoZonesEditor({
     try {
       const p = buildGeoZonePayloadCommon()
       const updated = await updateGeoZone(z.id, {
-        slug: p.slug,
+        slug: p.slug || undefined,
         title: p.title,
         description: geoZoneDescription.trim() || null,
         zone_type: 'radius',
@@ -297,10 +296,11 @@ export function GeoZonesEditor({
                 </label>
 
                 <label>
-                  Slug *
+                  Slug
                   <input
                     value={geoZoneSlug}
                     disabled={!canWrite}
+                    placeholder="сгенерируется автоматически"
                     onChange={(e) => setGeoZoneSlug(e.target.value)}
                   />
                 </label>
