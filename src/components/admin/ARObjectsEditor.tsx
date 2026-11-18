@@ -100,7 +100,11 @@ export function ARObjectsEditor({
     const objectType = arObjectObjectType.trim()
     if (objectType.length < 1) throw new Error('Тип объекта обязателен.')
     const assetUri = arObjectAssetUri.trim()
-    if (assetUri.length < 1) throw new Error('URL ассета обязателен.')
+    // URL ассета обязателен только для «custom» (внешняя 3D-модель).
+    // Для типов, рисуемых кодом (cube/sphere/root_logo/quantum_shield), URL не нужен.
+    if (objectType === 'custom' && assetUri.length < 1) {
+      throw new Error('URL ассета обязателен.')
+    }
     const scale = Number.parseFloat(arObjectScaleMeters)
     if (!Number.isFinite(scale) || scale <= 0 || scale > 10) {
       throw new Error('Размер (scale) — число в диапазоне (0, 10].')
@@ -340,19 +344,23 @@ export function ARObjectsEditor({
                   </select>
                 </label>
 
-                <label>
-                  URL ассета *
-                  <input value={arObjectAssetUri} disabled={!canWrite}
-                    placeholder="https://cdn.example.com/models/cube.glb"
-                    onChange={(e) => setARObjectAssetUri(e.target.value)} />
-                </label>
+                {arObjectObjectType === 'custom' && (
+                  <label>
+                    URL ассета *
+                    <input value={arObjectAssetUri} disabled={!canWrite}
+                      placeholder="https://cdn.example.com/models/cube.glb"
+                      onChange={(e) => setARObjectAssetUri(e.target.value)} />
+                  </label>
+                )}
 
-                <label>
-                  MIME-тип (опционально)
-                  <input value={arObjectAssetMimeType} disabled={!canWrite}
-                    placeholder="model/gltf-binary"
-                    onChange={(e) => setARObjectAssetMimeType(e.target.value)} />
-                </label>
+                {arObjectObjectType === 'custom' && (
+                  <label>
+                    MIME-тип (опционально)
+                    <input value={arObjectAssetMimeType} disabled={!canWrite}
+                      placeholder="model/gltf-binary"
+                      onChange={(e) => setARObjectAssetMimeType(e.target.value)} />
+                  </label>
+                )}
 
                 <label>
                   Scene preset (опционально)
