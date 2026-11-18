@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   createARObject,
   listARObjects,
@@ -7,6 +7,68 @@ import {
   type AdminGeoZone,
   type AdminUser,
 } from '../../api/adminApi'
+
+// --- Черновик формы AR-объекта ----------------------------------------------
+// Хранится в localStorage по ключу `draft_ar_object_<id|'new'>`. Компонент
+// сохраняет изменённую форму, восстанавливает её при повторном открытии и
+// удаляет после успешного создания/сохранения (аналог MissionsSection).
+function saveDraft<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // localStorage недоступен (приватный режим/SSR) — черновик не сохранится.
+  }
+}
+
+function loadDraft<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? null : (JSON.parse(raw) as T)
+  } catch {
+    return null
+  }
+}
+
+function clearDraft(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // localStorage недоступен — чистить нечего.
+  }
+}
+
+/** Снимок полей формы AR-объекта (единый порядок ключей для стабильного JSON). */
+function arObjectSnapshot(v: {
+  slug: string
+  title: string
+  description: string
+  geoZoneId: string
+  objectType: string
+  assetUri: string
+  assetMimeType: string
+  scenePreset: string
+  instructionText: string
+  scaleMeters: string
+  orientation: string
+  sortOrder: string
+  status: string
+}) {
+  return {
+    slug: v.slug,
+    title: v.title,
+    description: v.description,
+    geoZoneId: v.geoZoneId,
+    objectType: v.objectType,
+    assetUri: v.assetUri,
+    assetMimeType: v.assetMimeType,
+    scenePreset: v.scenePreset,
+    instructionText: v.instructionText,
+    scaleMeters: v.scaleMeters,
+    orientation: v.orientation,
+    sortOrder: v.sortOrder,
+    status: v.status,
+  }
+}
 
 type ARObjectsEditorProps = {
   admin: AdminUser | null
@@ -54,6 +116,16 @@ export function ARObjectsEditor({
   // поэтому loadingGeoZones всегда false (как было в AdminApp до выноса).
   const [loadingGeoZones] = useState(false)
 
+  // Черновик: последний сохранённый/загруженный снимок формы (JSON). Нужен,
+  // чтобы программное заполнение из БД не создавало и не перезаписывало
+  // черновик — сохраняем только реальные правки пользователя.
+  const lastSavedDraftRef = useRef('')
+  const skipNextDraftSaveRef = useRef(false)
+  const draftKey = `draft_ar_object_${selectedARObjectId ?? 'new'}`
+  // Форма «активна», когда открыт объект на редактирование или создание.
+  // В пустом редакторе черновик не трогаем.
+  const formActive = selectedARObjectId !== null || showCreateARObject
+
   // Заполнение формы при выборе AR-объекта (перенесено из AdminApp дословно).
   useEffect(() => {
     const o = selectedARObject()
@@ -75,6 +147,24 @@ export function ARObjectsEditor({
     setARObjectOrientation(o.orientation)
     setARObjectSortOrder(String(o.sortOrder))
     setARObjectStatus(o.status)
+    // Заполнение из БД помечаем как «уже сохранённое» — черновик не пишем.
+    lastSavedDraftRef.current = JSON.stringify(
+      arObjectSnapshot({
+        slug: o.slug,
+        title: o.title,
+        description: o.description ?? '',
+        geoZoneId: o.geoZoneId,
+        objectType: o.objectType,
+        assetUri: o.assetUri,
+        assetMimeType: o.assetMimeType ?? '',
+        scenePreset: o.scenePreset ?? '',
+        instructionText: o.instructionText ?? '',
+        scaleMeters: String(o.scaleMeters),
+        orientation: o.orientation,
+        sortOrder: String(o.sortOrder),
+        status: o.status,
+      }),
+    )
     setARObjectError(null)
     setARObjectNotice(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,6 +175,74 @@ export function ARObjectsEditor({
     setShowCreateARObject(false)
     setARObjectError(null)
   }, [selectedARObjectId])
+
+  // Восстановление черновика при открытии объекта/создании. Ставим флаг
+  // до эффекта автосохранения ниже, чтобы заполнение из БД не перезаписало draft.
+  useEffect(() => {
+    if (!formActive) return
+    skipNextDraftSaveRef.current = true
+    const restored = loadDraft<ReturnType<typeof arObjectSnapshot>>(draftKey)
+    if (restored === null) return
+    setARObjectSlug(restored.slug)
+    setARObjectTitle(restored.title)
+    setARObjectDescription(restored.description)
+    setARObjectGeoZoneId(restored.geoZoneId)
+    setARObjectObjectType(restored.objectType)
+    setARObjectAssetUri(restored.assetUri)
+    setARObjectAssetMimeType(restored.assetMimeType)
+    setARObjectScenePreset(restored.scenePreset)
+    setARObjectInstructionText(restored.instructionText)
+    setARObjectScaleMeters(restored.scaleMeters)
+    setARObjectOrientation(restored.orientation)
+    setARObjectSortOrder(restored.sortOrder)
+    setARObjectStatus(restored.status)
+    lastSavedDraftRef.current = JSON.stringify(restored)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, formActive])
+
+  // Автосохранение черновика при реальных правках формы.
+  useEffect(() => {
+    if (skipNextDraftSaveRef.current) {
+      skipNextDraftSaveRef.current = false
+      return
+    }
+    if (!formActive) return
+    const snapshot = arObjectSnapshot({
+      slug: arObjectSlug,
+      title: arObjectTitle,
+      description: arObjectDescription,
+      geoZoneId: arObjectGeoZoneId,
+      objectType: arObjectObjectType,
+      assetUri: arObjectAssetUri,
+      assetMimeType: arObjectAssetMimeType,
+      scenePreset: arObjectScenePreset,
+      instructionText: arObjectInstructionText,
+      scaleMeters: arObjectScaleMeters,
+      orientation: arObjectOrientation,
+      sortOrder: arObjectSortOrder,
+      status: arObjectStatus,
+    })
+    const serialized = JSON.stringify(snapshot)
+    if (serialized === lastSavedDraftRef.current) return
+    lastSavedDraftRef.current = serialized
+    saveDraft(draftKey, snapshot)
+  }, [
+    formActive,
+    draftKey,
+    arObjectSlug,
+    arObjectTitle,
+    arObjectDescription,
+    arObjectGeoZoneId,
+    arObjectObjectType,
+    arObjectAssetUri,
+    arObjectAssetMimeType,
+    arObjectScenePreset,
+    arObjectInstructionText,
+    arObjectScaleMeters,
+    arObjectOrientation,
+    arObjectSortOrder,
+    arObjectStatus,
+  ])
 
   function selectedARObject(): AdminARObject | null {
     if (selectedARObjectId === null) return null
@@ -137,6 +295,8 @@ export function ARObjectsEditor({
         orientation: arObjectOrientation,
       })
       onARObjectsChange([...arObjects, created])
+      // Черновик «нового» объекта больше не нужен.
+      clearDraft('draft_ar_object_new')
       setSelectedARObjectId(created.id)
       setShowCreateARObject(false)
       setARObjectNotice('AR-объект создан.')
@@ -171,6 +331,8 @@ export function ARObjectsEditor({
         orientation: arObjectOrientation,
       })
       onARObjectsChange(arObjects.map((x) => (x.id === updated.id ? updated : x)))
+      // Черновик сохранённого объекта очищаем — данные уже в базе.
+      clearDraft(`draft_ar_object_${o.id}`)
       setARObjectNotice('Сохранено.')
     } catch (err) {
       setARObjectError((err as Error).message)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   createGeoZone,
   listGeoZones,
@@ -6,6 +6,68 @@ import {
   type AdminGeoZone,
   type AdminUser,
 } from '../../api/adminApi'
+
+// --- Черновик формы геозоны -------------------------------------------------
+// Хранится в localStorage по ключу `draft_geozone_<id|'new'>`. Компонент
+// сохраняет изменённую форму, восстанавливает её при повторном открытии и
+// удаляет после успешного создания/сохранения (аналог MissionsSection).
+function saveDraft<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // localStorage недоступен (приватный режим/SSR) — черновик не сохранится.
+  }
+}
+
+function loadDraft<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? null : (JSON.parse(raw) as T)
+  } catch {
+    return null
+  }
+}
+
+function clearDraft(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // localStorage недоступен — чистить нечего.
+  }
+}
+
+/** Снимок полей формы геозоны (единый порядок ключей для стабильного JSON). */
+function geoZoneSnapshot(v: {
+  slug: string
+  title: string
+  description: string
+  sortOrder: string
+  radiusMeters: string
+  searchRadiusMeters: string
+  maxAccuracy: string
+  minPresence: string
+  status: string
+  avoidBuildings: boolean
+  avoidWater: boolean
+  avoidRoads: boolean
+  avoidPrivate: boolean
+}) {
+  return {
+    slug: v.slug,
+    title: v.title,
+    description: v.description,
+    sortOrder: v.sortOrder,
+    radiusMeters: v.radiusMeters,
+    searchRadiusMeters: v.searchRadiusMeters,
+    maxAccuracy: v.maxAccuracy,
+    minPresence: v.minPresence,
+    status: v.status,
+    avoidBuildings: v.avoidBuildings,
+    avoidWater: v.avoidWater,
+    avoidRoads: v.avoidRoads,
+    avoidPrivate: v.avoidPrivate,
+  }
+}
 
 type GeoZonesEditorProps = {
   admin: AdminUser | null
@@ -48,6 +110,16 @@ export function GeoZonesEditor({
   const [refreshing, setRefreshing] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
 
+  // Черновик: последний сохранённый/загруженный снимок формы (JSON). Нужен,
+  // чтобы программное заполнение из БД не создавало и не перезаписывало
+  // черновик — сохраняем только реальные правки пользователя.
+  const lastSavedDraftRef = useRef('')
+  const skipNextDraftSaveRef = useRef(false)
+  const draftKey = `draft_geozone_${selectedGeoZoneId ?? 'new'}`
+  // Форма «активна», когда открыта геозона на редактирование или создание.
+  // В пустом редакторе черновик не трогаем.
+  const formActive = selectedGeoZoneId !== null || showCreateGeoZone
+
   // Заполнение формы при выборе геозоны (перенесено из AdminApp дословно).
   useEffect(() => {
     const z = selectedGeoZone()
@@ -70,6 +142,28 @@ export function GeoZonesEditor({
     setGeoZoneAvoidWater(lc.avoid_water ?? false)
     setGeoZoneAvoidRoads(lc.avoid_roads ?? false)
     setGeoZoneAvoidPrivate(lc.avoid_private ?? false)
+    // Заполнение из БД помечаем как «уже сохранённое» — черновик не пишем.
+    lastSavedDraftRef.current = JSON.stringify(
+      geoZoneSnapshot({
+        slug: z.slug,
+        title: z.title,
+        description: z.description ?? '',
+        sortOrder: String(z.sortOrder),
+        radiusMeters: z.radiusMeters === null ? '' : String(z.radiusMeters),
+        searchRadiusMeters:
+          z.searchRadiusMeters === null ? '' : String(z.searchRadiusMeters),
+        maxAccuracy:
+          z.maxLocationAccuracyMeters === null
+            ? ''
+            : String(z.maxLocationAccuracyMeters),
+        minPresence: String(z.minimumPresenceSeconds),
+        status: z.status,
+        avoidBuildings: lc.avoid_buildings ?? false,
+        avoidWater: lc.avoid_water ?? false,
+        avoidRoads: lc.avoid_roads ?? false,
+        avoidPrivate: lc.avoid_private ?? false,
+      }),
+    )
     setGeoZoneError(null)
     setGeoZoneNotice(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -80,6 +174,74 @@ export function GeoZonesEditor({
     setShowCreateGeoZone(false)
     setGeoZoneError(null)
   }, [selectedGeoZoneId])
+
+  // Восстановление черновика при открытии геозоны/создании. Ставим флаг
+  // до эффекта автосохранения ниже, чтобы заполнение из БД не перезаписало draft.
+  useEffect(() => {
+    if (!formActive) return
+    skipNextDraftSaveRef.current = true
+    const restored = loadDraft<ReturnType<typeof geoZoneSnapshot>>(draftKey)
+    if (restored === null) return
+    setGeoZoneSlug(restored.slug)
+    setGeoZoneTitle(restored.title)
+    setGeoZoneDescription(restored.description)
+    setGeoZoneSortOrder(restored.sortOrder)
+    setGeoZoneRadiusMeters(restored.radiusMeters)
+    setGeoZoneSearchRadiusMeters(restored.searchRadiusMeters)
+    setGeoZoneMaxAccuracy(restored.maxAccuracy)
+    setGeoZoneMinPresence(restored.minPresence)
+    setGeoZoneStatus(restored.status)
+    setGeoZoneAvoidBuildings(restored.avoidBuildings)
+    setGeoZoneAvoidWater(restored.avoidWater)
+    setGeoZoneAvoidRoads(restored.avoidRoads)
+    setGeoZoneAvoidPrivate(restored.avoidPrivate)
+    lastSavedDraftRef.current = JSON.stringify(restored)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, formActive])
+
+  // Автосохранение черновика при реальных правках формы.
+  useEffect(() => {
+    if (skipNextDraftSaveRef.current) {
+      skipNextDraftSaveRef.current = false
+      return
+    }
+    if (!formActive) return
+    const snapshot = geoZoneSnapshot({
+      slug: geoZoneSlug,
+      title: geoZoneTitle,
+      description: geoZoneDescription,
+      sortOrder: geoZoneSortOrder,
+      radiusMeters: geoZoneRadiusMeters,
+      searchRadiusMeters: geoZoneSearchRadiusMeters,
+      maxAccuracy: geoZoneMaxAccuracy,
+      minPresence: geoZoneMinPresence,
+      status: geoZoneStatus,
+      avoidBuildings: geoZoneAvoidBuildings,
+      avoidWater: geoZoneAvoidWater,
+      avoidRoads: geoZoneAvoidRoads,
+      avoidPrivate: geoZoneAvoidPrivate,
+    })
+    const serialized = JSON.stringify(snapshot)
+    if (serialized === lastSavedDraftRef.current) return
+    lastSavedDraftRef.current = serialized
+    saveDraft(draftKey, snapshot)
+  }, [
+    formActive,
+    draftKey,
+    geoZoneSlug,
+    geoZoneTitle,
+    geoZoneDescription,
+    geoZoneSortOrder,
+    geoZoneRadiusMeters,
+    geoZoneSearchRadiusMeters,
+    geoZoneMaxAccuracy,
+    geoZoneMinPresence,
+    geoZoneStatus,
+    geoZoneAvoidBuildings,
+    geoZoneAvoidWater,
+    geoZoneAvoidRoads,
+    geoZoneAvoidPrivate,
+  ])
 
   function selectedGeoZone(): AdminGeoZone | null {
     if (selectedGeoZoneId === null) return null
@@ -143,6 +305,8 @@ export function GeoZonesEditor({
         location_constraints: p.locationConstraints,
       })
       onGeoZonesChange((prev) => [...prev, created])
+      // Черновик «новой» геозоны больше не нужен.
+      clearDraft('draft_geozone_new')
       setSelectedGeoZoneId(created.id)
       setShowCreateGeoZone(false)
       setGeoZoneNotice('Шаблон создан.')
@@ -170,6 +334,8 @@ export function GeoZonesEditor({
         location_constraints: p.locationConstraints,
       })
       onGeoZonesChange((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+      // Черновик сохранённой геозоны очищаем — данные уже в базе.
+      clearDraft(`draft_geozone_${z.id}`)
       setGeoZoneNotice('Сохранено.')
     } catch (err) { setGeoZoneError((err as Error).message) }
     finally { setSavingGeoZone(false) }
