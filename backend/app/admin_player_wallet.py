@@ -592,10 +592,12 @@ def create_player_wallet_adjustment(
 
         threshold = _read_threshold(session)
 
-        # Super-admin не блокируется порогом: по конвенции admin_system_settings
-        # он не создаёт заявки (одобрять его некому), а только исполняет.
-        needs_approval = (execution_mode == APPROVAL_EXECUTION_MODE) or (
-            not admin.is_super_admin and amount >= threshold
+        # Super-admin не блокируется ни порогом, ни approval-режимом: по
+        # конвенции admin_system_settings он не создаёт заявки (одобрять его
+        # некому), а исполняет сразу. Обычный админ попадает на approval, если
+        # его право требует approval-режима ИЛИ сумма достигает порога.
+        needs_approval = not admin.is_super_admin and (
+            execution_mode == APPROVAL_EXECUTION_MODE or amount >= threshold
         )
 
         if needs_approval:
