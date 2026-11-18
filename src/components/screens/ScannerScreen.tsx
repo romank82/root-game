@@ -15,6 +15,7 @@ import { MissionTimer } from '../MissionTimer'
 import { useActiveMission, type MissionLayer } from '../../hooks/useActiveMission'
 import { MISSION_LAYER_COLORS } from '../../constants/missionLayerColors'
 import Game3DScene from '../Game3DScene'
+import QuantumShield from '../game/QuantumShield'
 
 type MissionContent = {
   code: string
@@ -612,6 +613,10 @@ export function ScannerScreen({
               {content.objectType === 'root_logo' ? (
                 <div className="ar-3d-scene">
                   <Game3DScene />
+                </div>
+              ) : content.objectType === 'quantum_shield' ? (
+                <div className="ar-3d-scene">
+                  <QuantumShield />
                 </div>
               ) : (
                 <>
