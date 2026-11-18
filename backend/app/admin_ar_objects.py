@@ -30,7 +30,7 @@ class AdminARObjectCreatePayload(BaseModel):
     sort_order: int = Field(default=0, ge=0, le=100_000)
     geo_zone_id: str = Field(min_length=1, max_length=64)
     object_type: str = Field(min_length=1, max_length=64)
-    asset_uri: str = Field(min_length=1, max_length=512)
+    asset_uri: str | None = Field(default=None, max_length=512)
     asset_mime_type: str | None = Field(default=None, max_length=128)
     scene_preset: str | None = Field(default=None, max_length=128)
     scale_meters: float = Field(default=1.0, gt=0.0, le=10.0)
@@ -51,7 +51,7 @@ class AdminARObjectUpdatePayload(BaseModel):
     sort_order: int | None = Field(default=None, ge=0, le=100_000)
     geo_zone_id: str | None = Field(default=None, min_length=1, max_length=64)
     object_type: str | None = Field(default=None, min_length=1, max_length=64)
-    asset_uri: str | None = Field(default=None, min_length=1, max_length=512)
+    asset_uri: str | None = Field(default=None, max_length=512)
     asset_mime_type: str | None = Field(default=None, max_length=128)
     scene_preset: str | None = Field(default=None, max_length=128)
     scale_meters: float | None = Field(default=None, gt=0.0, le=10.0)
@@ -221,6 +221,17 @@ def create_admin_ar_object(
         _validate_time_window(payload.starts_at, payload.ends_at)
         _validate_orientation(payload.orientation)
 
+        object_type = payload.object_type.strip()
+        # URL ассета обязателен только для «custom» (внешняя 3D-модель).
+        # Для типов, рисуемых кодом (cube/sphere/root_logo/quantum_shield),
+        # URL не нужен — храним пустую строку (колонка NOT NULL).
+        asset_uri = payload.asset_uri.strip() if payload.asset_uri else ""
+        if object_type == "custom" and not asset_uri:
+            raise HTTPException(
+                status_code=422,
+                detail="URL ассета обязателен для типа 'custom'.",
+            )
+
         obj = ARObject(
             id=_new_id("ar-object"),
             slug=slug,
@@ -231,8 +242,8 @@ def create_admin_ar_object(
             status="draft",
             sort_order=payload.sort_order,
             geo_zone_id=payload.geo_zone_id,
-            object_type=payload.object_type.strip(),
-            asset_uri=payload.asset_uri.strip(),
+            object_type=object_type,
+            asset_uri=asset_uri,
             asset_mime_type=(
                 payload.asset_mime_type.strip() if payload.asset_mime_type else None
             ),
@@ -300,6 +311,17 @@ def update_admin_ar_object(
         _validate_time_window(effective_starts, effective_ends)
         _validate_orientation(payload.orientation)
 
+        # Итоговое состояние: тип custom требует непустой URL ассета.
+        effective_object_type = updates.get("object_type", obj.object_type)
+        effective_asset_uri = updates.get("asset_uri", obj.asset_uri)
+        if effective_object_type == "custom" and not (
+            effective_asset_uri or ""
+        ).strip():
+            raise HTTPException(
+                status_code=422,
+                detail="URL ассета обязателен для типа 'custom'.",
+            )
+
         if "slug" in updates:
             slug = _normalize_slug(updates["slug"])
             existing_id = session.scalar(
@@ -344,6 +366,10 @@ def update_admin_ar_object(
 
             if field_name in ("title", "object_type", "asset_uri") and value is not None:
                 value = value.strip()
+
+            # asset_uri хранится в NOT NULL-колонке: пустое значение → ''.
+            if field_name == "asset_uri" and value is None:
+                value = ""
 
             if field_name == "orientation" and value is not None:
                 value = value.strip().lower()
