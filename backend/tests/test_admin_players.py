@@ -1410,6 +1410,10 @@ class AdminPlayerRootPatchTests(unittest.TestCase):
 
         # Баланс в карточке (блок wallet): 10 + 5 = 15.
         self.assertEqual(result["player"]["wallet"]["availableBalance"], 15)
+        # Sprint 2.3-fix: nano-баланс синхронизирован (dual-write).
+        self.assertEqual(
+            result["player"]["wallet"]["availableBalanceNano"], 15 * NANO_PER_ROOT
+        )
 
         # Проводка: credit, amount, balance_after.
         txs = self._get_wallet_transactions(wallet_id)
@@ -1417,11 +1421,17 @@ class AdminPlayerRootPatchTests(unittest.TestCase):
         tx = txs[0]
         self.assertEqual(tx.transaction_type, "credit")
         self.assertEqual(tx.amount, 5)
+        self.assertEqual(tx.amount_nano, 5 * NANO_PER_ROOT)
         self.assertEqual(tx.balance_after, 15)
+        self.assertEqual(tx.balance_after_nano, 15 * NANO_PER_ROOT)
         self.assertEqual(tx.reason, "bonus")
         self.assertEqual(tx.reference_type, "admin_root_adjustment")
         self.assertIsNotNone(tx.reference_id)
         self.assertEqual(tx.metadata_json, {"adminId": admin.id})
+
+        # Sprint 2.3-fix: кошелёк в БД тоже хранит nano (не 0/NULL).
+        wallet = self._get_wallet(player_id)
+        self.assertEqual(wallet.available_balance_nano, 15 * NANO_PER_ROOT)
 
         # Аудит: action зафиксирован фильтром, before/after и amount — int.
         audits = self._find_root_audits()
@@ -1442,14 +1452,24 @@ class AdminPlayerRootPatchTests(unittest.TestCase):
 
         # Баланс в карточке (блок wallet): 10 - 3 = 7.
         self.assertEqual(result["player"]["wallet"]["availableBalance"], 7)
+        # Sprint 2.3-fix: nano-баланс синхронизирован (dual-write).
+        self.assertEqual(
+            result["player"]["wallet"]["availableBalanceNano"], 7 * NANO_PER_ROOT
+        )
 
         txs = self._get_wallet_transactions(wallet_id)
         self.assertEqual(len(txs), 1)
         tx = txs[0]
         self.assertEqual(tx.transaction_type, "debit")
         self.assertEqual(tx.amount, 3)
+        self.assertEqual(tx.amount_nano, 3 * NANO_PER_ROOT)
         self.assertEqual(tx.balance_after, 7)
+        self.assertEqual(tx.balance_after_nano, 7 * NANO_PER_ROOT)
         self.assertEqual(tx.reason, "spend")
+
+        # Sprint 2.3-fix: кошелёк в БД тоже хранит nano (не 0/NULL).
+        wallet = self._get_wallet(player_id)
+        self.assertEqual(wallet.available_balance_nano, 7 * NANO_PER_ROOT)
 
     def test_patch_root_insufficient(self) -> None:
         admin = self._make_admin()
@@ -1484,17 +1504,27 @@ class AdminPlayerRootPatchTests(unittest.TestCase):
 
         # Баланс в карточке (блок wallet): 0 + 5 = 5.
         self.assertEqual(result["player"]["wallet"]["availableBalance"], 5)
+        # Sprint 2.3-fix: nano-баланс синхронизирован (dual-write).
+        self.assertEqual(
+            result["player"]["wallet"]["availableBalanceNano"], 5 * NANO_PER_ROOT
+        )
 
         # Кошелёк создан (у игрока его не было) + проводка credit.
         wallet = self._get_wallet(player_id)
         self.assertIsNotNone(wallet)
         self.assertEqual(wallet.available_balance, 5)
+        # Sprint 2.3-fix: новый кошелёк сразу получает корректный nano,
+        # а не 0/NULL.
+        self.assertEqual(wallet.available_balance_nano, 5 * NANO_PER_ROOT)
+        self.assertEqual(wallet.locked_balance_nano, 0)
 
         txs = self._get_wallet_transactions(wallet.id)
         self.assertEqual(len(txs), 1)
         self.assertEqual(txs[0].transaction_type, "credit")
         self.assertEqual(txs[0].amount, 5)
+        self.assertEqual(txs[0].amount_nano, 5 * NANO_PER_ROOT)
         self.assertEqual(txs[0].balance_after, 5)
+        self.assertEqual(txs[0].balance_after_nano, 5 * NANO_PER_ROOT)
 
 
 class AdminPlayerRootTransactionsTests(unittest.TestCase):

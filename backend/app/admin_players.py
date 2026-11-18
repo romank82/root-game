@@ -862,6 +862,9 @@ def update_admin_player_root(
                 currency="ROOT",
                 available_balance=0,
                 locked_balance=0,
+                # Sprint 2.3-fix NanoROOT: 0 * NANO_PER_ROOT = 0 (dual-write).
+                available_balance_nano=0,
+                locked_balance_nano=0,
             )
             session.add(wallet)
             session.flush()
@@ -874,6 +877,10 @@ def update_admin_player_root(
                 detail="Недостаточно ROOT для списания.",
             )
         wallet.available_balance = new_balance
+        # Sprint 2.3-fix NanoROOT: зеркальная запись (dual-write). Без неё
+        # available_balance_nano оставался 0/NULL и рассинхронизировался
+        # с available_balance (баг отображения баланса во фронтенде).
+        wallet.available_balance_nano = new_balance * NANO_PER_ROOT
 
         transaction_type = "credit" if payload.amount > 0 else "debit"
         session.add(
@@ -881,7 +888,9 @@ def update_admin_player_root(
                 id=_new_id("wallet-transaction"),
                 wallet_id=wallet.id,
                 amount=abs(payload.amount),
+                amount_nano=abs(payload.amount) * NANO_PER_ROOT,
                 balance_after=new_balance,
+                balance_after_nano=wallet.available_balance_nano,
                 transaction_type=transaction_type,
                 reason=payload.reason,
                 reference_type="admin_root_adjustment",
