@@ -120,7 +120,6 @@ export function ARObjectsEditor({
   // чтобы программное заполнение из БД не создавало и не перезаписывало
   // черновик — сохраняем только реальные правки пользователя.
   const lastSavedDraftRef = useRef('')
-  const skipNextDraftSaveRef = useRef(false)
   const draftKey = `draft_ar_object_${selectedARObjectId ?? 'new'}`
   // Форма «активна», когда открыт объект на редактирование или создание.
   // В пустом редакторе черновик не трогаем.
@@ -170,17 +169,9 @@ export function ARObjectsEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedARObjectId, arObjects])
 
-  // Сброс create-режима при смене выбранного AR-объекта.
-  useEffect(() => {
-    setShowCreateARObject(false)
-    setARObjectError(null)
-  }, [selectedARObjectId])
-
-  // Восстановление черновика при открытии объекта/создании. Ставим флаг
-  // до эффекта автосохранения ниже, чтобы заполнение из БД не перезаписало draft.
+  // Восстановление черновика при открытии объекта/создании.
   useEffect(() => {
     if (!formActive) return
-    skipNextDraftSaveRef.current = true
     const restored = loadDraft<ReturnType<typeof arObjectSnapshot>>(draftKey)
     if (restored === null) return
     setARObjectSlug(restored.slug)
@@ -202,10 +193,6 @@ export function ARObjectsEditor({
 
   // Автосохранение черновика при реальных правках формы.
   useEffect(() => {
-    if (skipNextDraftSaveRef.current) {
-      skipNextDraftSaveRef.current = false
-      return
-    }
     if (!formActive) return
     const snapshot = arObjectSnapshot({
       slug: arObjectSlug,
@@ -359,6 +346,7 @@ export function ARObjectsEditor({
     setARObjectError(null)
     setARObjectNotice(null)
     setSelectedARObjectId(null)
+    lastSavedDraftRef.current = JSON.stringify({ slug: '', title: '', description: '', geoZoneId: '', objectType: 'cube', assetUri: '', assetMimeType: '', scenePreset: '', instructionText: '', scaleMeters: '1.0', orientation: 'free', sortOrder: '0', status: 'draft' })
   }
 
   // Обновление списка изнутри редактора (кнопка «Обновить список»).
