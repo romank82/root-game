@@ -1186,6 +1186,42 @@ def update_admin_mission(
             )
             changed_fields.append("rewards")
 
+        # translation_status зависит от набора content.ui-ключей
+        # (_required_content_ui_keys). Если PATCH изменил контент или
+        # оригинальный текст, ранее посчитанный "complete" мог устареть:
+        # перевод остался для старого набора ключей. Пересчитываем статус
+        # теми же правилами, что и PUT /{mission_id}/translations.
+        translation_source_fields = {
+            "title",
+            "description",
+            "content",
+            "validation_config",
+        }
+        if translation_source_fields & set(updates):
+            supported_languages = _read_supported_languages(session)
+            existing_translations = (
+                mission.translations
+                if isinstance(mission.translations, dict)
+                else {}
+            )
+            recomputed_status = _compute_translation_status(
+                existing_translations,
+                supported_languages,
+                _required_content_ui_keys(mission),
+            )
+            if recomputed_status != (mission.translation_status or TRANSLATION_STATUS_NONE):
+                previous_status = mission.translation_status
+                mission.translation_status = recomputed_status
+                changed_fields.append("translationStatus")
+                translation_status_change = {
+                    "from": previous_status,
+                    "to": recomputed_status,
+                }
+            else:
+                translation_status_change = None
+        else:
+            translation_status_change = None
+
         if (
             mission.status == "published"
             and {"content", "mission_type", "validation_config"} & set(updates)
@@ -1208,6 +1244,9 @@ def update_admin_mission(
                     if "rewards" in updates and payload.rewards is not None
                     else None
                 ),
+                # Пересчёт статуса перевода при правке контента: только
+                # переход статусов, без текстов переводов.
+                "translationStatusChange": translation_status_change,
             },
             request=request,
         )

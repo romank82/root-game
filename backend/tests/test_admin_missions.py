@@ -642,3 +642,117 @@ class AdminMissionsApiTests(unittest.TestCase):
 
         self.assertEqual(published["status"], "published")
         self.assertEqual(published["translationStatus"], "complete")
+
+    def test_patch_content_recomputes_translation_status(self) -> None:
+        """PATCH нового content.ui-ключа обязан сбросить complete → partial/none.
+
+        Дефект: translation_status пересчитывался только в
+        PUT /{mission_id}/translations. Если после полного перевода добавить
+        в content.ui новый ключ, статус оставался complete, и миссию можно
+        было опубликовать с непереведённым контентом.
+        """
+        from app.models import Mission
+
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+        mission_id = create_admin_mission(
+            _create_payload(
+                season_id=ids["season"],
+                content={"schemaVersion": 1, "ui": {"label": "Метка"}},
+            ),
+            request=None,
+            admin=admin,
+        )["mission"]["id"]
+
+        # Полный перевод для исходного content.ui = {label}.
+        put_mission_translations(
+            mission_id,
+            MissionTranslationsPayload(
+                translations={
+                    "en": {
+                        "title": "Label mission",
+                        "description": "English description",
+                        "contentUi": {"label": "Label"},
+                    },
+                    "zh": {
+                        "title": "标签任务",
+                        "description": "中文描述",
+                        "contentUi": {"label": "标签"},
+                    },
+                }
+            ),
+            request=None,
+            admin=admin,
+        )
+
+        with self.SessionLocal.begin() as session:
+            stored = session.get(Mission, mission_id)
+            self.assertEqual(stored.translation_status, "complete")
+
+        # Добавляем новый content.ui-ключ, которого нет в переводах.
+        update_admin_mission(
+            mission_id,
+            AdminMissionUpdatePayload(
+                content={
+                    "schemaVersion": 1,
+                    "ui": {"label": "Метка", "question": "Новый вопрос?"},
+                }
+            ),
+            request=None,
+            admin=admin,
+        )
+
+        with self.SessionLocal.begin() as session:
+            stored = session.get(Mission, mission_id)
+            self.assertNotEqual(
+                stored.translation_status,
+                "complete",
+                "translation_status остался complete после изменения content.ui — "
+                "публикация пройдёт с непереведённым контентом",
+            )
+
+    def test_patch_unrelated_field_keeps_translation_status(self) -> None:
+        """PATCH без изменения контента не должен сбрасывать complete."""
+        from app.models import Mission
+
+        ids = self._references_fixture()
+        admin = self._admin(ids["admin"])
+        mission_id = create_admin_mission(
+            _create_payload(
+                season_id=ids["season"],
+                content={"schemaVersion": 1, "ui": {"label": "Метка"}},
+            ),
+            request=None,
+            admin=admin,
+        )["mission"]["id"]
+
+        put_mission_translations(
+            mission_id,
+            MissionTranslationsPayload(
+                translations={
+                    "en": {
+                        "title": "Label mission",
+                        "description": "English description",
+                        "contentUi": {"label": "Label"},
+                    },
+                    "zh": {
+                        "title": "标签任务",
+                        "description": "中文描述",
+                        "contentUi": {"label": "标签"},
+                    },
+                }
+            ),
+            request=None,
+            admin=admin,
+        )
+
+        update_admin_mission(
+            mission_id,
+            AdminMissionUpdatePayload(sort_order=7),
+            request=None,
+            admin=admin,
+        )
+
+        with self.SessionLocal.begin() as session:
+            stored = session.get(Mission, mission_id)
+            self.assertEqual(stored.translation_status, "complete")
