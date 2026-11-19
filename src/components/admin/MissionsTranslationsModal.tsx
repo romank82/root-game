@@ -7,6 +7,11 @@ import {
   type MissionTranslationsResponse,
   type MissionTranslationStatus,
 } from '../../api/adminApi'
+import {
+  mergeParsedFields,
+  normalizeBlocks,
+  parseNumbered,
+} from '../../utils/missionTranslationParse'
 
 type Props = {
   missionId: string
@@ -41,28 +46,6 @@ function fieldLabel(field: string): string {
   return FIELD_LABELS[field] || field
 }
 
-function parseNumbered(text: string, fieldsCount: number): string[] | null {
-  const lines = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-  const result = new Array<string>(fieldsCount).fill('')
-
-  for (const line of lines) {
-    const match = line.match(/^\[(\d+)\]\s*(.*)$/)
-    if (!match) {
-      return null
-    }
-    const index = Number.parseInt(match[1], 10) - 1
-    if (index < 0 || index >= fieldsCount) {
-      return null
-    }
-    result[index] = match[2]
-  }
-
-  return result
-}
-
 function fieldValue(
   translation: MissionTranslation | undefined,
   field: string,
@@ -92,15 +75,6 @@ function originalFieldValue(
   }
   const value = contentUi[field]
   return Array.isArray(value) ? JSON.stringify(value) : (value ?? '')
-}
-
-function parseBlocks(value: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(value)
-    return Array.isArray(parsed) ? (parsed as string[]) : []
-  } catch {
-    return []
-  }
 }
 
 export function MissionsTranslationsModal({
@@ -181,7 +155,9 @@ export function MissionsTranslationsModal({
   function selectLanguage(lang: string) {
     setActiveLang(lang)
     setPasteText('')
-    setBlocksText(JSON.stringify(draft[lang]?.contentUi?.blocks ?? []))
+    const blocks = draft[lang]?.contentUi?.blocks
+    setBlocksText(Array.isArray(blocks) ? JSON.stringify(blocks) : '')
+    setError('')
   }
 
   function buildCopyText(): string {
@@ -196,6 +172,24 @@ export function MissionsTranslationsModal({
   }
 
   function updateField(field: string, value: string) {
+    if (field === 'blocks') {
+      setBlocksText(value)
+      const normalized = normalizeBlocks(value)
+      setError(normalized.error ?? '')
+      if (normalized.blocks === null) return
+      const blocks = normalized.blocks
+      setDraft((previous) => {
+        const language: MissionTranslation = { ...(previous[activeLang] || {}) }
+        const ui: MissionTranslation['contentUi'] = {
+          ...(language.contentUi || {}),
+        }
+        ui.blocks = blocks
+        language.contentUi = ui
+        return { ...previous, [activeLang]: language }
+      })
+      return
+    }
+
     setDraft((previous) => {
       const language: MissionTranslation = { ...(previous[activeLang] || {}) }
       if (field === 'title') {
@@ -214,47 +208,67 @@ export function MissionsTranslationsModal({
   }
 
   function handlePaste(text: string) {
-    setPasteText(text)
     const parsed = parseNumbered(text, fields.length)
-    if (!parsed) {
+    if (!parsed || parsed.every((value) => value === '')) {
       return
     }
 
-    const blocksIncluded = fields.includes('blocks')
+    const blocksIndex = fields.indexOf('blocks')
+    const blocksValue = blocksIndex >= 0 ? parsed[blocksIndex] : ''
+    const normalizedBlocks =
+      blocksValue === '' ? { blocks: [], error: null } : normalizeBlocks(blocksValue)
+    if (normalizedBlocks.error !== null || normalizedBlocks.blocks === null) {
+      setError(normalizedBlocks.error ?? 'Не удалось разобрать blocks.')
+      return
+    }
+    const blocks = normalizedBlocks.blocks
     setDraft((previous) => {
-      const language: MissionTranslation = {}
-      const ui: MissionTranslation['contentUi'] = {}
-      fields.forEach((field, index) => {
-        if (field === 'title') {
-          language.title = parsed[index]
-        } else if (field === 'description') {
-          language.description = parsed[index]
-        } else {
-          ui[field] =
-            field === 'blocks' ? parseBlocks(parsed[index]) : parsed[index]
+      const base = previous[activeLang] || {}
+      const merged = mergeParsedFields(
+        base as Record<string, unknown>,
+        parsed,
+        fields,
+      )
+      if (merged === null) return previous
+
+      const language = merged as MissionTranslation
+      if (blocksValue !== '') {
+        const ui: MissionTranslation['contentUi'] = {
+          ...(language.contentUi || {}),
         }
-      })
-      language.contentUi = ui
+        ui.blocks = blocks
+        language.contentUi = ui
+      }
       return { ...previous, [activeLang]: language }
     })
 
-    if (blocksIncluded) {
-      setBlocksText(JSON.stringify(parseBlocks(parsed[fields.indexOf('blocks')])))
+    if (blocksValue !== '') {
+      setBlocksText(JSON.stringify(blocks))
     }
+    setPasteText('')
   }
 
   async function handleSave() {
+    const normalizedBlocks = fields.includes('blocks')
+      ? normalizeBlocks(blocksText)
+      : { blocks: [], error: null }
+    if (normalizedBlocks.error !== null || normalizedBlocks.blocks === null) {
+      setError(normalizedBlocks.error ?? 'Не удалось разобрать blocks.')
+      return
+    }
+    const blocks = normalizedBlocks.blocks
+
     setSaving(true)
     setError('')
 
-    // Применяем последний введённый JSON блоков к активному языку перед PUT.
+    // Применяем последний валидный JSON блоков к активному языку перед PUT.
     const finalDraft: Draft = { ...draft }
     if (fields.includes('blocks')) {
       const language: MissionTranslation = { ...(finalDraft[activeLang] || {}) }
       const ui: MissionTranslation['contentUi'] = {
         ...(language.contentUi || {}),
       }
-      ui.blocks = parseBlocks(blocksText)
+      ui.blocks = blocks
       language.contentUi = ui
       finalDraft[activeLang] = language
     }
@@ -343,9 +357,17 @@ export function MissionsTranslationsModal({
               <label>Вставьте перевод обратно ([1] текст, [2] текст, …):</label>
               <textarea
                 value={pasteText}
-                onChange={(event) => handlePaste(event.target.value)}
+                onChange={(event) => setPasteText(event.target.value)}
                 placeholder={`[1] Название\n[2] Описание\n[3] ${requiredUi[0] ?? 'label'}`}
               />
+              <button
+                type="button"
+                className="admin-secondary"
+                onClick={() => handlePaste(pasteText)}
+                disabled={pasteText.trim() === ''}
+              >
+                Применить
+              </button>
             </div>
 
             {fields.map((field) => {

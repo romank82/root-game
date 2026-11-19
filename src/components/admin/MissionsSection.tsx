@@ -713,6 +713,11 @@ function draftKeyFor(id: string): string {
   return `draft_mission_${id}`
 }
 
+// Ключ черновика ещё не созданной миссии (selectedId === null): стабильный,
+// чтобы введённые данные переживали переключение вкладок и перезагрузку
+// страницы до первого успешного создания.
+const NEW_MISSION_DRAFT_KEY = 'draft_mission_new'
+
 type MissionsSectionProps = {
   admin: AdminUser | null
   canWrite: boolean
@@ -987,29 +992,54 @@ export function MissionsSection({
   }
 
   function startNewMission() {
+    // Если в localStorage есть черновик новой миссии, отличающийся от пустой
+    // формы (игнорируя seasonId — он может различаться законно) — предупреждаем
+    // перед его удалением. При отказе выходим, не трогая форму.
+    const existing = loadDraft<MissionForm>(NEW_MISSION_DRAFT_KEY)
+    const hasUnsaved =
+      existing !== null &&
+      JSON.stringify({ ...existing, seasonId: '' }) !==
+        JSON.stringify({ ...emptyForm(), seasonId: '' })
+    if (
+      hasUnsaved &&
+      !window.confirm(
+        'Несохранённый черновик новой миссии будет удалён. Продолжить?',
+      )
+    ) {
+      return
+    }
     setSelectedId(null)
-    setForm(emptyForm())
+    setForm({ ...emptyForm(), seasonId: form.seasonId || initialSeasonId || '' })
     setIsDirty(false)
     isDraftRestoredRef.current = false
+    // «Новый черновик» начинает с чистого листа: старый черновик новой миссии
+    // удаляем, иначе восстановление тут же вернуло бы его обратно.
+    removeDraft(NEW_MISSION_DRAFT_KEY)
     onError('')
     onNotice('')
   }
 
   // Черновик: сохраняем форму в localStorage только после реальных правок
   // пользователя (isDirty). Чистая форма из базы при открытии/сохранении
-  // черновик НЕ перезаписывает.
+  // черновик НЕ перезаписывает. У новой миссии (selectedId === null) — свой
+  // стабильный ключ, чтобы режим создания переживал переключение вкладок
+  // и перезагрузку страницы.
   useEffect(() => {
-    if (selectedId === null || !isDirty) return
-    saveDraft(draftKeyFor(selectedId), form)
+    if (!isDirty) return
+    const key =
+      selectedId === null ? NEW_MISSION_DRAFT_KEY : draftKeyFor(selectedId)
+    saveDraft(key, form)
   }, [form, selectedId, isDirty])
 
-  // Восстановление черновика при открытии миссии: данные из localStorage
-  // накладываются поверх формы из базы (merge). Применяется один раз на
-  // выбранную миссию (isDraftRestoredRef); флаг сбрасывается в
-  // selectMission/startNewMission. form в зависимостях — чтобы эффект
-  // срабатывал и тогда, когда selectedId не менялся, но форма была заново
-  // собрана из базы (повторный selectMission той же миссии после обновления
-  // списка) — иначе база молча перезаписала бы восстановленный черновик.
+  // Восстановление черновика при открытии СУЩЕСТВУЮЩЕЙ миссии: данные из
+  // localStorage накладываются поверх формы из базы (merge). Для новой миссии
+  // (selectedId === null) восстановление делает эффект initialSeasonId ниже,
+  // чтобы базовая форма и черновик собирались в одном коммите (без гонки).
+  // Применяется один раз на выбранную миссию (isDraftRestoredRef); флаг
+  // сбрасывается в selectMission/startNewMission и в эффекте initialSeasonId.
+  // form в зависимостях — чтобы эффект срабатывал и тогда, когда selectedId
+  // не менялся, но форма была заново собрана из базы (повторный selectMission
+  // той же миссии после обновления списка).
   useEffect(() => {
     if (selectedId === null || isDraftRestoredRef.current) return
     // Черновик восстанавливаем только для миссии, выбранной в дереве.
@@ -1040,16 +1070,46 @@ export function MissionsSection({
   }, [editingId, missions])
 
   // Режим создания миссии на уровне сезона: editingId не задан, а
-  // initialSeasonId предвыбирает сезон для новой миссии.
+  // initialSeasonId предвыбирает сезон для новой миссии. Единственный эффект,
+  // который собирает форму новой миссии: базовая форма + черновик (если он
+  // относится к этому сезону) — в одном коммите, без второго setForm ниже.
   useEffect(() => {
     if (editingId !== null && editingId !== undefined) return
     if (initialSeasonId === null || initialSeasonId === undefined) return
     setSelectedId(null)
-    setForm({ ...emptyForm(), seasonId: initialSeasonId })
-    setIsDirty(false)
     isDraftRestoredRef.current = false
     onError('')
     onNotice('')
+
+    let nextForm: MissionForm = { ...emptyForm(), seasonId: initialSeasonId }
+    const restored = loadDraft<MissionForm>(NEW_MISSION_DRAFT_KEY)
+    // Пустой seasonId у черновика означает «без привязки к сезону» (название
+    // начали печатать до выбора сезона) — применяем такой черновик в любом
+    // сезоне, подставляя initialSeasonId. «Чужим» считаем только непустой и
+    // реально отличающийся seasonId.
+    const restoredSeasonId =
+      restored !== null && typeof restored.seasonId === 'string'
+        ? restored.seasonId
+        : ''
+    const matchesSeason =
+      restoredSeasonId === '' || restoredSeasonId === initialSeasonId
+    if (restored !== null && matchesSeason) {
+      // Черновик относится к этому сезону (или без привязки) — накладываем
+      // поверх базовой формы (seasonId оставляем из initialSeasonId).
+      nextForm = { ...nextForm, ...restored, seasonId: initialSeasonId }
+      setIsDirty(true)
+      isDraftRestoredRef.current = true
+    } else if (restored !== null) {
+      // Черновик относится к другому сезону — молча не применяем, но
+      // сообщаем админу, чтобы данные не попали в чужой сезон.
+      onNotice(
+        'Черновик новой миссии относится к другому сезону и не применён.',
+      )
+      setIsDirty(false)
+    } else {
+      setIsDirty(false)
+    }
+    setForm(nextForm)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, initialSeasonId])
 
@@ -1244,6 +1304,10 @@ export function MissionsSection({
       setSelectedId(mission.id)
       setForm(formFromMission(mission))
       removeDraft(draftKeyFor(mission.id))
+      if (!selectedMission) {
+        // Новая миссия создана — черновик «новой миссии» больше не нужен.
+        removeDraft(NEW_MISSION_DRAFT_KEY)
+      }
       onDraftClear?.(mission.id)
       setIsDirty(false)
       onNotice(

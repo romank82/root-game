@@ -30,6 +30,7 @@ type CreateContext = {
 
 const SELECTED_STORAGE_KEY = 'admin_tree_selected'
 const EXPANDED_STORAGE_KEY = 'admin_tree_expanded'
+const CREATE_CONTEXT_STORAGE_KEY = 'admin_tree_create_context'
 
 const SELECTED_TYPES: readonly SelectedType[] = ['season', 'mission']
 
@@ -122,7 +123,31 @@ export function AdminTree({
   })
   // Режим создания сущности (кнопки «+» в узлах дерева). Когда задан,
   // правая панель рендерит секцию создания вместо формы выбранного элемента.
-  const [createContext, setCreateContext] = useState<CreateContext>(null)
+  // Восстанавливается из localStorage, чтобы переключение вкладок и F5
+  // не теряли режим создания (черновик новой миссии — в draft_mission_new).
+  const [createContext, setCreateContext] = useState<CreateContext>(() => {
+    const saved = loadDraft<unknown>(CREATE_CONTEXT_STORAGE_KEY)
+    if (saved === null || typeof saved !== 'object') return null
+    const candidate = saved as {
+      type?: unknown
+      parentId?: unknown
+      parentKind?: unknown
+    }
+    if (
+      !isSelectedType(candidate.type) ||
+      typeof candidate.parentId !== 'string'
+    ) {
+      return null
+    }
+    if (candidate.type === 'mission' && candidate.parentId.length === 0) {
+      return null
+    }
+    return {
+      type: candidate.type,
+      parentId: candidate.parentId,
+      parentKind: candidate.parentKind === 'season' ? 'season' : undefined,
+    }
+  })
 
   // Sprint Admin-CSS-Fix-2: split-pane для дерева структуры. Ширина колонки
   // дерева в px, инициализация из localStorage, перетаскивание разделителя,
@@ -194,6 +219,16 @@ export function AdminTree({
   useEffect(() => {
     saveDraft(EXPANDED_STORAGE_KEY, Array.from(expanded))
   }, [expanded])
+
+  // Сохранение режима создания: возврат на вкладку «Структура» или перезагрузка
+  // страницы заново откроют панель создания (черновик формы — в MissionsSection).
+  useEffect(() => {
+    if (createContext === null) {
+      removeDraft(CREATE_CONTEXT_STORAGE_KEY)
+      return
+    }
+    saveDraft(CREATE_CONTEXT_STORAGE_KEY, createContext)
+  }, [createContext])
 
   function selectItem(type: SelectedType, id: string) {
     const next: SelectedItem = { type, id }
