@@ -1851,6 +1851,28 @@ def _submit_mission_once(
     with SessionLocal.begin() as session:
         _ensure_player(session, player_id)
 
+        submitted = answer is not None or sequence is not None
+
+        def _record_submit_failed(reason: str, attempt_count: int) -> None:
+            try:
+                from app.player_events import record_player_event
+
+                with session.begin_nested():
+                    record_player_event(
+                        session,
+                        player_id,
+                        "mission.submit_failed",
+                        payload={
+                            "missionId": mission_id,
+                            "reason": reason,
+                            "attemptCount": attempt_count,
+                            "submitted": submitted,
+                        },
+                        correlation_id=None,
+                    )
+            except Exception as error:  # noqa: BLE001 — лог не важнее submit
+                logger.warning("player_event mission.submit_failed failed: %s", error)
+
         mission = session.scalar(
             select(Mission).where(
                 Mission.id == mission_id,
@@ -1946,6 +1968,10 @@ def _submit_mission_once(
         # _consume_entry_resources не вызывается: attempt_deadline_at != NULL
         # бывает только после accept/reissue, а accept уже выставил entry_count >= 1.
         if attempt_overdue_in_sync:
+            _record_submit_failed(
+                "deadline_expired",
+                player_mission.attempt_count,
+            )
             return {
                 "accepted": False,
                 "alreadyCompleted": False,
@@ -1978,6 +2004,7 @@ def _submit_mission_once(
             # MissionEngineError откатывает транзакцию _submit_mission_once
             # целиком, поэтому expired-статус фиксируем ДО raise (иначе
             # перевод в expired не сохранился бы).
+            _record_submit_failed("attempts_exhausted", attempt_count_before)
             session.commit()
             raise MissionEngineError(
                 409,
@@ -2016,6 +2043,10 @@ def _submit_mission_once(
         if attempt_expired or not _validate_submission(
             mission, answer, sequence, player_mission=player_mission
         ):
+            _record_submit_failed(
+                "deadline_expired" if attempt_expired else "wrong_answer",
+                player_mission.attempt_count,
+            )
             # Шаг 4.3a: первый неверный ответ → персональный fallback-entitlement.
             # attempt_count_before == 0 => это первая попытка (V1 semantics,
             # docs/fallback-shop-contract.md): eligible независимо от paid policy,
