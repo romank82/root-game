@@ -177,15 +177,22 @@ class MemoryHandler:
         indices = _normalize_card_indices(sequence, len(pairs))
         if indices is None:
             return False
-        # Все карточки должны быть открыты ровно по одному разу.
-        if len(set(indices)) != len(pairs):
+        if len(indices) % 2 != 0:
             return False
+
+        found_cards: set[int] = set()
         for position in range(0, len(indices), 2):
             first = indices[position]
             second = indices[position + 1]
-            if pairs[first] != pairs[second]:
+
+            if first in found_cards or second in found_cards or first == second:
                 return False
-        return True
+
+            if pairs[first] == pairs[second]:
+                found_cards.add(first)
+                found_cards.add(second)
+
+        return len(found_cards) == len(pairs)
 
 
 # Реестр: game_type -> handler. Новая мини-игра = новый класс + одна строка здесь.
