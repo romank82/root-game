@@ -1857,6 +1857,15 @@ def _submit_mission_once(
             try:
                 from app.player_events import record_player_event
 
+                memory_session = (player_mission.progress or {}).get(
+                    "memory_session"
+                )
+                memory_pairs = (
+                    memory_session.get("pairs")
+                    if isinstance(memory_session, dict)
+                    else None
+                )
+
                 with session.begin_nested():
                     record_player_event(
                         session,
@@ -1867,6 +1876,8 @@ def _submit_mission_once(
                             "reason": reason,
                             "attemptCount": attempt_count,
                             "submitted": submitted,
+                            "sequence": sequence,
+                            "memory_pairs": memory_pairs,
                         },
                         correlation_id=None,
                     )
