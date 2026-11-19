@@ -43,24 +43,44 @@ BUILT_ASSET="$(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' dist/index.html | head 
 echo "собран бандл: $BUILT_ASSET"
 
 step "4/7 Выкладка фронтенда в $FRONTEND_ROOT"
-# Копируем содержимое, затем удаляем ассеты, которых нет в новой сборке,
-# чтобы каталог не разрастался старыми бандлами.
+# Копируем содержимое, затем удаляем ассеты, на которые больше не ссылается
+# index.html: каталог не должен разрастаться старыми бандлами.
 mkdir -p "$FRONTEND_ROOT"
 cp -a dist/. "$FRONTEND_ROOT"/
-# Удаляем старые хешированные бандлы: имя нового уже есть в index.html,
-# всё остальное в assets/index-* — мусор от прошлых сборок.
-NEW_ASSET_NAME="$(basename "$BUILT_ASSET")"
-find "$FRONTEND_ROOT/assets" -maxdepth 1 -type f -name 'index-*' 2>/dev/null | while read -r old; do
-    if [ "$(basename "$old")" != "$NEW_ASSET_NAME" ]; then
+# Собираем имена ВСЕХ ассетов, на которые ссылается свежий index.html —
+# не только .js, но и .css (иначе стили удаляются и интерфейс теряет
+# оформление). Всё остальное в assets/ — мусор от прошлых сборок.
+REFERENCED_ASSETS="$(grep -oE 'assets/[A-Za-z0-9_.-]+\.(js|css)' "$FRONTEND_ROOT/index.html" | sed 's|assets/||' | sort -u)"
+if [ -z "$REFERENCED_ASSETS" ]; then
+    echo "ОШИБКА: в index.html не найдено ни одного ассета"
+    exit 1
+fi
+echo "ассеты новой сборки:"
+echo "$REFERENCED_ASSETS" | sed 's/^/  - /'
+find "$FRONTEND_ROOT/assets" -maxdepth 1 -type f \( -name 'index-*' -o -name '*.css' \) 2>/dev/null | while read -r old; do
+    name="$(basename "$old")"
+    if ! printf '%s\n' "$REFERENCED_ASSETS" | grep -qxF "$name"; then
         rm -f "$old"
+        echo "  удалён старый: $name"
     fi
 done
+# Проверяем, что каждый ассет из index.html реально существует на диске.
+MISSING=0
+for name in $REFERENCED_ASSETS; do
+    if [ ! -f "$FRONTEND_ROOT/assets/$name" ]; then
+        echo "ОШИБКА: index.html ссылается на assets/$name, но файла нет"
+        MISSING=1
+    fi
+done
+if [ "$MISSING" -ne 0 ]; then
+    exit 1
+fi
 DEPLOYED_ASSET="$(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' "$FRONTEND_ROOT/index.html" | head -1)"
 if [ "$DEPLOYED_ASSET" != "$BUILT_ASSET" ]; then
     echo "ОШИБКА: index.html указывает на $DEPLOYED_ASSET, ожидался $BUILT_ASSET"
     exit 1
 fi
-echo "выложено: $DEPLOYED_ASSET"
+echo "выложено: $DEPLOYED_ASSET (+ CSS)"
 
 step "5/7 Миграции и зависимости бэкенда"
 "$VENV/bin/pip" install -q -r backend/requirements.txt
