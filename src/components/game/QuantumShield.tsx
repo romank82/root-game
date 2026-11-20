@@ -176,12 +176,13 @@ function ShieldComposition() {
 }
 
 export default function QuantumShield() {
+  // Прозрачный фон: объект накладывается на камеру (AR) — непрозрачный
+  // канвас дал бы чёрный квадрат вокруг щита.
   return (
     <Canvas
       camera={{ position: [0, 0.2, 5.4], fov: 55 }}
       dpr={[1, 1.5]}
-      gl={{ antialias: false }}
-      style={{ background: '#05070a' }}
+      gl={{ antialias: false, alpha: true }}
     >
       <ambientLight intensity={0.5} />
       <pointLight position={[3, 3, 3]} intensity={40} color="#00ff88" />

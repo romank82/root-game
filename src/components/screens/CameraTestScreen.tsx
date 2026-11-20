@@ -12,6 +12,7 @@ import {
 import { useActiveMission } from '../../hooks/useActiveMission'
 import { MissionTimer } from '../MissionTimer'
 import Game3DScene from '../Game3DScene'
+import QuantumShield from '../game/QuantumShield'
 import { getMissionLayerColor } from '../../constants/missionLayerColors'
 
 interface CameraTestScreenProps {
@@ -293,11 +294,19 @@ export function CameraTestScreen({
   const cubeColor = getMissionLayerColor(mission?.missionLayer)
 
   // Тип AR-объекта из админки (ARObjectsEditor): mission.content.arScene.object_type.
-  // Если не root_logo — рендерим старый CSS-куб (обратная совместимость).
+  // Если не задан — рендерим старый CSS-куб (обратная совместимость).
   const missionArScene = (mission?.content?.arScene ?? {}) as {
     object_type?: string
+    objectType?: string
   }
-  const isRootLogoScene = missionArScene.object_type === 'root_logo'
+  // Бэкенд (_inject_ar_object_type) пишет оба ключа; читаем каноничный
+  // admin-ключ с fallback на игровой, чтобы типы объектов не терялись.
+  const objectType =
+    missionArScene.objectType ?? missionArScene.object_type ?? null
+
+  // Типы, которые отрисовываются кодом (WebGL-сцена), а не CSS-кубом.
+  const is3DScene =
+    objectType === 'root_logo' || objectType === 'quantum_shield'
 
   // Тап по кубу открывает мини-игру миссии: cipher (кодовый замок) или
   // memory (пары карточек, Sprint Memory-2b). Остальные типы — без мини-игры.
@@ -323,6 +332,24 @@ export function CameraTestScreen({
           autoPlay
           className="camera-test-video"
         />
+
+        {/* ВРЕМЕННЫЙ отладочный индикатор — убрать после проверки на телефоне. */}
+        {objectType && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              zIndex: 9999,
+              padding: 4,
+              fontSize: 11,
+              color: '#fff',
+              background: 'red',
+            }}
+          >
+            objectType: {objectType}
+          </div>
+        )}
 
         {mission?.deadlineAt && (
           <div className="camera-timer-wrapper">
@@ -362,7 +389,7 @@ export function CameraTestScreen({
                 // Расширяем рамку только под 3D-сцену (WebGL-канвасу нужен
                 // реальный размер, .ar-cube-world по CSS — до 110px).
                 // Для CSS-куба размер берётся из CSS, здесь нужен исходный.
-                ...(isRootLogoScene
+                ...(is3DScene
                   ? {
                       width: 'min(44vmin, 220px)',
                       height: 'min(44vmin, 220px)',
@@ -374,9 +401,13 @@ export function CameraTestScreen({
               } as CSSProperties
             }
           >
-            {isRootLogoScene ? (
+            {is3DScene ? (
               <div style={{ width: '100%', height: '100%' }}>
-                <Game3DScene />
+                {objectType === 'quantum_shield' ? (
+                  <QuantumShield />
+                ) : (
+                  <Game3DScene />
+                )}
               </div>
             ) : (
               <div className="ar-cube-3d">
