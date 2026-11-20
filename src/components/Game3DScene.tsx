@@ -88,6 +88,10 @@ export default function Game3DScene() {
       camera={{ position: [0, 0.4, 5.2], fov: 55 }}
       dpr={[1, 1.5]}
       gl={{ antialias: false }}
+      // offsetSize: замер layout-размера вместо getBoundingClientRect —
+      // родитель .ar-cube-world масштабируется через transform: scale(),
+      // иначе канвас больше бокса и сцена обрезается.
+      resize={{ offsetSize: true }}
     >
       {/* Локальное окружение: куб-текстура из Lightformer'ов рендерится на
           клиенте (без HDRI/CDN) и даёт металлике яркие блики. */}

@@ -183,6 +183,11 @@ export default function QuantumShield() {
       camera={{ position: [0, 0.2, 5.4], fov: 55 }}
       dpr={[1, 1.5]}
       gl={{ antialias: false, alpha: true }}
+      // offsetSize: Canvas меряет layout-размер (offsetWidth/Height), а не
+      // getBoundingClientRect. Родитель .ar-cube-world масштабируется через
+      // transform: scale(), и замер по bounding-box создаёт канвас больше
+      // бокса — объект выводится обрезанным (верхняя левая четверть).
+      resize={{ offsetSize: true }}
     >
       <ambientLight intensity={0.5} />
       <pointLight position={[3, 3, 3]} intensity={40} color="#00ff88" />
