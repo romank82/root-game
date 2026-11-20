@@ -163,11 +163,12 @@ export function MemoryGame({
 
     const first = nextOpen[0]
     const second = nextOpen[1]
-    // История открытий для сервера: порядок кликов, по две карточки на ход.
-    const history = [...historyRef.current, first, second]
-    historyRef.current = history
 
     if (pairs[first] === pairs[second]) {
+      // История для сервера содержит только найденные пары.
+      const history = [...historyRef.current, first, second]
+      historyRef.current = history
+
       const nextMatched = new Set(matchedCards)
       nextMatched.add(first)
       nextMatched.add(second)
