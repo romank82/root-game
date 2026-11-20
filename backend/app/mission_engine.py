@@ -370,13 +370,28 @@ def _synchronize_player_missions(
             continue
 
         if player_mission.status == "completed":
-            # Sprint 8.14 (шаг 5): after_terminal для solo. Читаем
-            # repeatability_policy из published runtime policy.
+            # Sprint 8.14 (шаг 5): after_terminal для solo. Повтор управляется
+            # полем самой миссии reentry_cooldown_seconds (так трактует
+            # админ-поле «Повторное взятие»): 0 — одноразовая, >0 — снова
+            # доступна через N секунд.
+            #
+            # Раньше здесь стоял безусловный «policy is None → continue», из-за
+            # чего миссия с заданным перерывом и черновиком политики оставалась
+            # completed навсегда: карточка показывала «НА ПЕРЕРЫВЕ / Доступна
+            # снова через 00:00:00:00» и оживала только после перезапуска
+            # приложения (а точнее — не оживала вовсе).
             policy = _get_published_runtime_policy(session, mission.id)
-            if policy is None:
-                continue  # legacy без policy — остаётся completed
-            if policy.repeatability_policy != "after_terminal":
+            if (
+                policy is not None
+                and policy.repeatability_policy != "after_terminal"
+            ):
                 # one_time / after_failure_only — после успеха остаётся completed.
+                # Перерыв неактуален: снимаем, чтобы не висел нулевой счётчик.
+                player_mission.available_again_at = None
+                continue
+            # Политики нет и перерыва нет → одноразовая, остаётся completed.
+            if policy is None and not mission.reentry_cooldown_seconds:
+                player_mission.available_again_at = None
                 continue
             # Условие возврата в available:
             # - если reentry_cooldown_seconds > 0: только после
