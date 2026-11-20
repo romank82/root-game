@@ -109,12 +109,27 @@ function App() {
     }
   }, [authStatus, applyBootstrap])
 
-  // Синхронизация в момент истечения дедлайна.
-  // Бэкенд закрывает просроченную миссию лениво (_synchronize_player_missions
-  // внутри bootstrap), поэтому клиент сам запрашивает bootstrap в момент
-  // дедлайна — иначе таймер замирает на 00:00, а миссия остаётся in_progress
-  // до перезапуска приложения. Берём ближайший дедлайн по всем миссиям.
+  // Синхронизация в момент истечения любого клиентского дедлайна.
+  //
+  // Бэкенд закрывает просроченное ЛЕНИВО: _synchronize_player_missions
+  // переводит миссию в expired только внутри чужого запроса. Сам он ничего не
+  // делает по расписанию, поэтому клиент обязан разбудить его ровно в момент
+  // нуля — иначе счётчик замирает на 00:00, а миссия остаётся in_progress
+  // (кнопка «взять снова» не появляется) до перезапуска приложения.
+  //
+  // Клиентских дедлайнов ТРИ, и они разные:
+  //   deadlineAt         — общий лимит выполнения миссии (истинный дедлайн);
+  //   attemptDeadlineAt  — лимит текущей попытки в мини-игре;
+  //   cancel/cooldown    — окно отказа и availableAgainAt (считаются кнопками).
+  // Первая версия следила только за deadlineAt, поэтому таймер, который игрок
+  // реально видит (попытка/cooldown), продолжал стоять на нуле.
   const resyncTimerRef = useRef<number | null>(null)
+  // Подпись «залипшего» набора дедлайнов: защита от бесконечного опроса, если
+  // сервер продолжает отдавать миссию с уже прошедшим дедлайном. Пока набор не
+  // изменился, синхронизируемся по нему не больше STALE_RESYNC_MAX раз.
+  const staleSignatureRef = useRef('')
+  const staleRetryRef = useRef(0)
+  const STALE_RESYNC_MAX = 3
 
   useEffect(() => {
     if (authStatus !== 'authenticated') return
@@ -124,31 +139,83 @@ function App() {
       resyncTimerRef.current = null
     }
 
-    // Истёкшие дедлайны (в прошлом) не планируем — их закроет эффект
-    // visibilitychange или ближайшее действие игрока.
     const nowMs = Date.now()
-    const upcoming = missions
-      .map((mission) => mission.deadlineAt)
-      .filter((value): value is string => Boolean(value))
-      .map((value) => new Date(value).getTime())
-      .filter((value) => Number.isFinite(value) && value > nowMs)
-      .sort((a, b) => a - b)
+    const wakeups: number[] = []
+    // «Просрочено, но статус ещё не обновлён»: сервер узнает об истечении
+    // только от нас, поэтому такие миссии требуют немедленной синхронизации.
+    let staleCount = 0
 
-    if (upcoming.length === 0) return
+    for (const mission of missions) {
+      // Только СЕРВЕРНЫЕ дедлайны: окно отказа (startedAt + 3 мин) считается
+      // на клиенте и не меняет состояние на сервере — будить его ради него
+      // незачем.
+      for (const raw of [
+        mission.deadlineAt,
+        mission.attemptDeadlineAt,
+        mission.availableAgainAt,
+      ]) {
+        if (raw === null) continue
+        const at = new Date(raw).getTime()
+        if (!Number.isFinite(at)) continue
+        if (at > nowMs) {
+          wakeups.push(at)
+          continue
+        }
+        // В прошлом: миссия ещё выглядит незакрытой → сервер отстал.
+        if (
+          mission.status === 'in_progress' ||
+          mission.availableAgainAt !== null
+        ) {
+          staleCount += 1
+        }
+      }
+    }
 
-    // +1 c: даём серверу пройти собственную границу дедлайна.
-    const delay = Math.min(upcoming[0] - nowMs + 1_000, 2_147_483_647)
+    // Оставляем только будущие: прошедшие закроет немедленный resync ниже.
+    const upcoming = wakeups.sort((a, b) => a - b)
+
+    // Прошедшие дедлайны при «живой» миссии — синхронизируемся сразу. Набор
+    // подписываем, чтобы не опрашивать сервер вечно, если он отдаёт тот же
+    // просроченный статус: на одну и ту же подпись — не больше трёх попыток.
+    const staleSignature = missions
+      .filter(
+        (mission) =>
+          mission.status === 'in_progress' ||
+          mission.availableAgainAt !== null,
+      )
+      .map((mission) => `${mission.id}:${mission.status}`)
+      .sort()
+      .join('|')
+
+    if (staleSignature !== staleSignatureRef.current) {
+      staleSignatureRef.current = staleSignature
+      staleRetryRef.current = 0
+    }
+
+    const canResyncNow =
+      staleCount > 0 && staleRetryRef.current < STALE_RESYNC_MAX
+
+    if (upcoming.length === 0 && !canResyncNow) return
+
+    // +1 c к будущему дедлайну: даём серверу пройти свою границу времени.
+    const delay = canResyncNow
+      ? 0
+      : Math.min(upcoming[0] - nowMs + 1_000, 2_147_483_647)
     let isMounted = true
 
     resyncTimerRef.current = window.setTimeout(() => {
+      if (canResyncNow) staleRetryRef.current += 1
       getEngineBootstrap()
         .then((fresh) => {
           if (!isMounted) return
+          // Новый bootstrap пересоздаёт missions, эффект перезапускается и
+          // планирует следующую точку пробуждения — цепочка продолжается, пока
+          // у миссий остаются будущие дедлайны.
           applyBootstrap(fresh)
         })
         .catch(() => {
-          // Ошибку не показываем: таймер уже на 00:00, игрок увидит
-          // актуальный статус при следующем действии.
+          // Ошибку не показываем: таймер уже на нуле, актуальный статус
+          // придёт при следующем действии или возврате в приложение.
         })
     }, delay)
 
