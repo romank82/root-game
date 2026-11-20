@@ -185,7 +185,9 @@ class MemoryHandler:
             first = indices[position]
             second = indices[position + 1]
 
-            if first in found_cards or second in found_cards or first == second:
+            if first in found_cards or second in found_cards:
+                continue
+            if first == second:
                 return False
 
             if pairs[first] == pairs[second]:
