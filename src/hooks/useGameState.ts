@@ -44,12 +44,22 @@ export function useGameState() {
   const [echo, setEcho] = useState(0)
   const [inventory, setInventory] = useState<EngineInventoryItem[]>([])
   const [missions, setMissions] = useState<EngineMission[]>([])
+  // Sprint 11.8 NanoROOT: дробный баланс в nano (1 ROOT = 10^8). Держим здесь,
+  // а не в App: applyEngineBootstrap вызывается из всех путей обновления
+  // (submit/accept/expire/язык), и раньше nano обновлялся только при входе —
+  // шапка показывала старый баланс до перезапуска приложения.
+  const [rootBalanceNano, setRootBalanceNano] = useState<number | null>(null)
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking')
 
   const applyEngineBootstrap = useCallback((bootstrap: EngineBootstrap) => {
     setEcho(bootstrap.wallet.availableBalance)
     setInventory(bootstrap.inventory)
     setMissions(bootstrap.missions)
+    setRootBalanceNano(
+      bootstrap.player.rootBalanceNano
+        ?? bootstrap.wallet.availableBalanceNano
+        ?? null,
+    )
     setApiStatus('online')
   }, [])
 
@@ -186,6 +196,7 @@ export function useGameState() {
     echo,
     inventory,
     missions,
+    rootBalanceNano,
     apiStatus,
     setApiStatus,
     applyEngineBootstrap,

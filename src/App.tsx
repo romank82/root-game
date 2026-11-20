@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import './App.css'
 import { useAuth } from './hooks/useAuth'
@@ -32,6 +32,7 @@ function App() {
     echo,
     inventory,
     missions,
+    rootBalanceNano,
     apiStatus,
     
     applyEngineBootstrap,
@@ -41,19 +42,12 @@ function App() {
     resetProgress,
   } = useGameState()
 
-  // Sprint 11.8 NanoROOT (этап 2C): дробный баланс для шапки в nano.
-  // useGameState хранит только целый ROOT (echo) — nano берём здесь при
-  // каждом применении bootstrap и передаём в Topbar.
-  const [rootBalanceNano, setRootBalanceNano] = useState<number | null>(null)
-
+  // Единая точка применения bootstrap: useGameState обновляет всё состояние,
+  // включая nano-баланс. Раньше nano жил отдельным state в App и обновлялся
+  // только при входе — после победы в миссии шапка показывала старый баланс.
   const applyBootstrap = useCallback(
     (bootstrap: EngineBootstrap) => {
       applyEngineBootstrap(bootstrap)
-      setRootBalanceNano(
-        bootstrap.player.rootBalanceNano
-          ?? bootstrap.wallet.availableBalanceNano
-          ?? null,
-      )
     },
     [applyEngineBootstrap],
   )
@@ -75,6 +69,97 @@ function App() {
   useEffect(() => {
     localStorage.setItem('chimera-echo', String(echo))
   }, [echo])
+
+  // Синхронизация с сервером при возврате в приложение.
+  // Сервер закрывает просроченные миссии лениво — только при следующем
+  // запросе от клиента (_synchronize_player_missions в bootstrap). Без этого
+  // эффекта игрок, у которого истёк дедлайн, видел застывший таймер и старый
+  // статус миссии до полного перезапуска Mini App: фронт ничего не запрашивал.
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return
+
+    let isMounted = true
+
+    const resync = () => {
+      getEngineBootstrap()
+        .then((fresh) => {
+          if (!isMounted) return
+          applyBootstrap(fresh)
+        })
+        .catch(() => {
+          // Сеть недоступна — оставляем текущее состояние, повторим при
+          // следующем возврате в приложение.
+        })
+    }
+
+    // Мини-приложение снова на экране (вернулись из другого приложения или
+    // разблокировали телефон). В Telegram WebView visibilitychange работает,
+    // но на части Android-прошивок срабатывает только focus — слушаем оба.
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') resync()
+    }
+
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onVisibility)
+
+    return () => {
+      isMounted = false
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onVisibility)
+    }
+  }, [authStatus, applyBootstrap])
+
+  // Синхронизация в момент истечения дедлайна.
+  // Бэкенд закрывает просроченную миссию лениво (_synchronize_player_missions
+  // внутри bootstrap), поэтому клиент сам запрашивает bootstrap в момент
+  // дедлайна — иначе таймер замирает на 00:00, а миссия остаётся in_progress
+  // до перезапуска приложения. Берём ближайший дедлайн по всем миссиям.
+  const resyncTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return
+
+    if (resyncTimerRef.current !== null) {
+      window.clearTimeout(resyncTimerRef.current)
+      resyncTimerRef.current = null
+    }
+
+    // Истёкшие дедлайны (в прошлом) не планируем — их закроет эффект
+    // visibilitychange или ближайшее действие игрока.
+    const nowMs = Date.now()
+    const upcoming = missions
+      .map((mission) => mission.deadlineAt)
+      .filter((value): value is string => Boolean(value))
+      .map((value) => new Date(value).getTime())
+      .filter((value) => Number.isFinite(value) && value > nowMs)
+      .sort((a, b) => a - b)
+
+    if (upcoming.length === 0) return
+
+    // +1 c: даём серверу пройти собственную границу дедлайна.
+    const delay = Math.min(upcoming[0] - nowMs + 1_000, 2_147_483_647)
+    let isMounted = true
+
+    resyncTimerRef.current = window.setTimeout(() => {
+      getEngineBootstrap()
+        .then((fresh) => {
+          if (!isMounted) return
+          applyBootstrap(fresh)
+        })
+        .catch(() => {
+          // Ошибку не показываем: таймер уже на 00:00, игрок увидит
+          // актуальный статус при следующем действии.
+        })
+    }, delay)
+
+    return () => {
+      isMounted = false
+      if (resyncTimerRef.current !== null) {
+        window.clearTimeout(resyncTimerRef.current)
+        resyncTimerRef.current = null
+      }
+    }
+  }, [authStatus, applyBootstrap, missions])
 
   function activateProtocol() {
     setAccepted(true)
