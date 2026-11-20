@@ -12,6 +12,11 @@ interface MissionTimerProps {
   label?: string
   // Опциональный обработчик: если задан и время вышло — таймер кликабелен.
   onClick?: () => void
+  // Скрыть таймер после истечения вместо показа «ВРЕМЯ ВЫШЛО».
+  // Нужно для чисто клиентских счётчиков вроде окна отказа: когда оно закрыто,
+  // серверное состояние не меняется, и застывшее «истекло» только путает.
+  // Компонент тикает сам, поэтому скрытие происходит без ре-рендера родителя.
+  hideWhenExpired?: boolean
 }
 
 function formatRemaining(ms: number): string {
@@ -32,6 +37,7 @@ export function MissionTimer({
   mode = 'deadline',
   label,
   onClick,
+  hideWhenExpired = false,
 }: MissionTimerProps) {
   const { t } = useTranslation(['terminal'])
   const [now, setNow] = useState(() => Date.now())
@@ -58,6 +64,12 @@ export function MissionTimer({
   ].filter(Boolean).join(' ')
 
   const isClickable = isExpired && onClick !== undefined
+
+  // Чисто клиентский счётчик (окно отказа): после нуля просто исчезает —
+  // сервер о нём не знает и статус миссии не меняется.
+  if (isExpired && hideWhenExpired) {
+    return null
+  }
 
   // В режиме 'cancel' — отдельный текст: после истечения окна отказ
   // уже не возвращает плату.

@@ -119,15 +119,34 @@ export function TerminalScreen({
     accuracy: number | null
   } | null>(null)
 
+  // Автовыбор папки — ТОЛЬКО при первом показе и когда текущая папка опустела.
+  // Раньше эффект срабатывал на каждое обновление missions и принудительно
+  // возвращал 'story': любая синхронизация с сервером (мой resync по дедлайну,
+  // accept, submit) перебрасывала игрока из «Индивидуальных» в «Сюжетные».
+  const layerInitializedRef = useRef(false)
+
   useEffect(() => {
-    // Автовыбор: первая непустая папка (story → team → solo).
-    // Если у всех пусто — остаётся story.
     const order: Array<'story' | 'team' | 'solo'> = ['story', 'team', 'solo']
-    const firstNonEmpty = order.find(
-      (layer) => missionsByLayer[layer].length > 0,
-    )
-    if (firstNonEmpty !== undefined) {
-      setOpenLayer(firstNonEmpty)
+
+    // Первый показ: выбираем первую непустую папку.
+    if (!layerInitializedRef.current) {
+      const firstNonEmpty = order.find(
+        (layer) => missionsByLayer[layer].length > 0,
+      )
+      if (firstNonEmpty !== undefined) {
+        setOpenLayer(firstNonEmpty)
+      }
+      layerInitializedRef.current = true
+      return
+    }
+
+    // Дальше — не трогаем выбор игрока, пока в текущей папке есть миссии.
+    if (missionsByLayer[openLayer].length > 0) return
+
+    // Текущая папка опустела (миссии ушли в архив) — переключаемся на непустую.
+    const fallback = order.find((layer) => missionsByLayer[layer].length > 0)
+    if (fallback !== undefined) {
+      setOpenLayer(fallback)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missions])
@@ -490,6 +509,12 @@ export function TerminalScreen({
         ).toISOString()
       : null
 
+    // Окно отказа ещё открыто? После его конца таймер снимаем с экрана —
+    // иначе он навсегда показывает «ВРЕМЯ НА ОТКАЗ ИСТЕКЛО».
+    const cancelWindowOpen =
+      cancelDeadlineAt !== null &&
+      new Date(cancelDeadlineAt).getTime() > Date.now()
+
     // Окно отказа с возвратом для командной сессии считаем от accept/create —
     // sessionCreatedAt, как в solo от startedAt (accept = оплата).
     // Парсим строго как UTC: без суффикса таймзоны JS принял бы строку за
@@ -603,22 +628,30 @@ export function TerminalScreen({
               </>
             )}
 
-            {cancelDeadlineAt && (
-              <div className="terminal-action-row">
+            {/* Окно отказа с возвратом длится 3 минуты от взятия. После его
+                окончания таймер снимаем с экрана: иначе он навсегда показывает
+                «ВРЕМЯ НА ОТКАЗ ИСТЕКЛО», хотя окно давно закрыто и к состоянию
+                миссии отношения не имеет (это НЕ дедлайн миссии — его считает
+                сервер и отдаёт в deadlineAt). Кнопка отказа остаётся: отказ без
+                возврата платы сервер разрешает. Та же логика, что у командной
+                ветки (teamCancelWindowOpen). */}
+            <div className="terminal-action-row">
+              {cancelWindowOpen && (
                 <MissionTimer
                   mode="cancel"
                   deadlineAt={cancelDeadlineAt}
                   label={t('terminal:refundWindow.label')}
+                  hideWhenExpired
                 />
-                <button
-                  type="button"
-                  className="terminal-refuse"
-                  onClick={() => void onExpireMission(mission.id)}
-                >
-                  {t('terminal:buttons.refuse')}
-                </button>
-              </div>
-            )}
+              )}
+              <button
+                type="button"
+                className="terminal-refuse"
+                onClick={() => void onExpireMission(mission.id)}
+              >
+                {t('terminal:buttons.refuse')}
+              </button>
+            </div>
           </div>
         ) : mission.missionType === 'team' &&
           mission.sessionStatus &&
