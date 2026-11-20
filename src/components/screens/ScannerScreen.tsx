@@ -609,22 +609,6 @@ export function ScannerScreen({
               isScanFaceLocked ? 'face-locked' : ''
             }`}
           >
-            {content.objectType && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  background: 'red',
-                  color: 'white',
-                  padding: 4,
-                  zIndex: 9999,
-                  fontSize: 10,
-                }}
-              >
-                objectType: {content.objectType}
-              </div>
-            )}
             <div className="ar-cube">
               {content.objectType === 'root_logo' ? (
                 <div className="ar-3d-scene">

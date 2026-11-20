@@ -333,24 +333,6 @@ export function CameraTestScreen({
           className="camera-test-video"
         />
 
-        {/* ВРЕМЕННЫЙ отладочный индикатор — убрать после проверки на телефоне. */}
-        {objectType && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              zIndex: 9999,
-              padding: 4,
-              fontSize: 11,
-              color: '#fff',
-              background: 'red',
-            }}
-          >
-            objectType: {objectType}
-          </div>
-        )}
-
         {mission?.deadlineAt && (
           <div className="camera-timer-wrapper">
             <MissionTimer
