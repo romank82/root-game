@@ -485,13 +485,35 @@ def _synchronize_player_missions(
         # - after_terminal + cooldown=0 → immediately available.
         # - after_terminal + cooldown>0 → wait cooldown → available.
         if player_mission.status == "expired":
-            # Policy check (как в completed-ветке выше).
+            # Снятие перерыва НЕ требует published policy.
+            # reentry_cooldown_seconds живёт в самой миссии, и available_again_at
+            # выставляется в том числе БЕЗ политики (авто-expire по дедлайну,
+            # ветка attempt-limit в submit). Раньше здесь стоял безусловный
+            # «policy is None → continue», из-за чего такой перерыв никогда не
+            # снимался: карточка навсегда показывала «НА ПЕРЕРЫВЕ /
+            # Доступна снова через 00:00:00:00» до перезапуска приложения.
+            # Политика (когда она есть) сужает повтор: one_time /
+            # after_failure_only → остаётся архивом.
             policy = _get_published_runtime_policy(session, mission.id)
-            if policy is None:
-                continue  # legacy без policy — остаётся expired (как сейчас)
-            if policy.repeatability_policy != "after_terminal":
-                continue  # one_time / after_failure_only — остаётся expired (архив)
-            # after_terminal: проверяем cooldown.
+            if (
+                policy is not None
+                and policy.repeatability_policy != "after_terminal"
+            ):
+                # one_time / after_failure_only — остаётся expired (архив).
+                # Перерыв уже неактуален: снимаем его, чтобы карточка не
+                # висела с застывшим счётчиком.
+                player_mission.available_again_at = None
+                continue
+
+            # Политики нет → повтор разрешён ровно настолько, насколько его
+            # разрешает сама миссия: reentry_cooldown_seconds = 0 означает
+            # «одноразовая» (так трактует админ-поле «Повторное взятие»).
+            # Иначе миссия без политики и без перерыва воскресала бы бесконечно.
+            if policy is None and not mission.reentry_cooldown_seconds:
+                player_mission.available_again_at = None
+                continue
+
+            # after_terminal (или политики нет и перерыв задан): проверяем cooldown.
             if player_mission.available_again_at is not None:
                 if ensure_utc(player_mission.available_again_at) > now:
                     continue  # ещё в cooldown
