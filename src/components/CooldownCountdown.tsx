@@ -1,7 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface CooldownCountdownProps {
   availableAgainAt: string
+  // Вызывается один раз, когда счётчик дошёл до нуля. Сервер снимает перерыв
+  // ЛЕНИВО — только внутри запроса клиента, — поэтому без этого колбэка
+  // «00:00:00:00» висит на экране, пока игрок не перезапустит приложение.
+  onExpire?: () => void
 }
 
 function formatCountdown(ms: number): string {
@@ -17,13 +21,16 @@ function formatCountdown(ms: number): string {
 
 /**
  * Тикающий обратный отсчёт до момента, когда миссия снова станет доступна.
- * После истечения показывает «00:00:00:00» (bootstrap при следующем
- * обращении переведёт миссию в available).
+ * На нуле вызывает onExpire (если передан): сервер переводит миссию в
+ * available только по запросу клиента, поэтому счётчик обязан разбудить его
+ * сам. Повторно не вызывает — на каждый availableAgainAt ровно один раз.
  */
 export function CooldownCountdown({
   availableAgainAt,
+  onExpire,
 }: CooldownCountdownProps) {
   const [now, setNow] = useState(() => Date.now())
+  const firedForRef = useRef<string | null>(null)
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
@@ -31,6 +38,17 @@ export function CooldownCountdown({
   }, [])
 
   const targetMs = new Date(availableAgainAt).getTime()
+  const expired = Number.isFinite(targetMs) && targetMs - now <= 0
+
+  useEffect(() => {
+    if (!onExpire || !expired) return
+    // Один вызов на конкретный availableAgainAt: новый перерыв — новое время,
+    // значит счётчик снова имеет право сработать.
+    if (firedForRef.current === availableAgainAt) return
+    firedForRef.current = availableAgainAt
+    onExpire()
+  }, [expired, availableAgainAt, onExpire])
+
   if (!Number.isFinite(targetMs)) return null
 
   return (

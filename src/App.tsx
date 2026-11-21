@@ -124,12 +124,11 @@ function App() {
   // Первая версия следила только за deadlineAt, поэтому таймер, который игрок
   // реально видит (попытка/cooldown), продолжал стоять на нуле.
   const resyncTimerRef = useRef<number | null>(null)
-  // Подпись «залипшего» набора дедлайнов: защита от бесконечного опроса, если
-  // сервер продолжает отдавать миссию с уже прошедшим дедлайном. Пока набор не
-  // изменился, синхронизируемся по нему не больше STALE_RESYNC_MAX раз.
+  // Подпись «залипшего» набора дедлайнов. Сбрасывает счётчик повторов, когда
+  // состояние реально изменилось (сервер обновил статус) — иначе интервал
+  // оставался бы максимальным.
   const staleSignatureRef = useRef('')
   const staleRetryRef = useRef(0)
-  const STALE_RESYNC_MAX = 3
 
   useEffect(() => {
     if (authStatus !== 'authenticated') return
@@ -192,14 +191,24 @@ function App() {
       staleRetryRef.current = 0
     }
 
-    const canResyncNow =
-      staleCount > 0 && staleRetryRef.current < STALE_RESYNC_MAX
+    const canResyncNow = staleCount > 0
 
     if (upcoming.length === 0 && !canResyncNow) return
 
-    // +1 c к будущему дедлайну: даём серверу пройти свою границу времени.
+    // Задержка пробуждения.
+    //
+    // Будущий дедлайн — точно в его момент (+1 c на границу времени сервера).
+    //
+    // «Залипший» (дедлайн прошёл, а статус ещё живой) — с РАСТУЩИМ интервалом,
+    // а не с нулём. Первая версия ставила delay=0, и все STALE_RESYNC_MAX
+    // попытки уходили в одну миллисекунду: если сервер в этот момент ещё
+    // считал перерыв неистёкшим (расхождение часов телефона и сервера), клиент
+    // сжигал весь лимит мгновенно и замолкал навсегда — счётчик оставался на
+    // нуле до перезапуска приложения. Теперь повторы разнесены по времени и
+    // после лимита продолжается редкий опрос, пока вкладка видима.
+    const retryDelays = [5_000, 15_000, 45_000, 120_000]
     const delay = canResyncNow
-      ? 0
+      ? retryDelays[Math.min(staleRetryRef.current, retryDelays.length - 1)]
       : Math.min(upcoming[0] - nowMs + 1_000, 2_147_483_647)
     let isMounted = true
 
@@ -299,6 +308,15 @@ function App() {
           onSubmitMission={submitMission}
           onAcceptMission={acceptMission}
           onExpireMission={expireMission}
+          onSyncState={() => {
+            // Счётчик перерыва/дедлайна дошёл до нуля: сервер снимает перерыв
+            // только по запросу клиента, поэтому просим свежий bootstrap.
+            getEngineBootstrap()
+              .then((fresh) => applyBootstrap(fresh))
+              .catch(() => {
+                // Сеть недоступна — следующий визит к серверу подтянет статус.
+              })
+          }}
         />
       )}
 

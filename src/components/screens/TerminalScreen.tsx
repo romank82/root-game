@@ -66,6 +66,10 @@ interface TerminalScreenProps {
   onExpireMission: (
     missionId: string,
   ) => Promise<{ ok: boolean; error?: string }>
+  // Перезапросить состояние у сервера. Нужен счётчикам: сервер снимает
+  // перерыв/закрывает миссию только внутри запроса клиента, поэтому на нуле
+  // счётчик обязан разбудить его сам.
+  onSyncState?: () => void
 }
 
 function missionStatusLabel(
@@ -85,6 +89,7 @@ export function TerminalScreen({
   onScreenChange,
   onAcceptMission,
   onExpireMission,
+  onSyncState,
 }: TerminalScreenProps) {
   const { t } = useTranslation(['terminal', 'common'])
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
@@ -546,7 +551,10 @@ export function TerminalScreen({
             <p>{t('terminal:status.onBreak')}</p>
             <p className="expired-hint">
               {t('terminal:status.availableAgainIn')}{' '}
-              <CooldownCountdown availableAgainAt={mission.availableAgainAt} />
+              <CooldownCountdown
+                availableAgainAt={mission.availableAgainAt}
+                onExpire={onSyncState}
+              />
             </p>
           </div>
         ) : isCompleted ? (
