@@ -695,6 +695,7 @@ export function TerminalScreen({
                       mode="cancel"
                       deadlineAt={teamCancelDeadlineAt}
                       label={t('terminal:refundWindow.label')}
+                      hideWhenExpired
                     />
                   </div>
                 )}
