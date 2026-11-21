@@ -251,7 +251,32 @@ class MissionEngineAcceptTests(unittest.TestCase):
             longitude if longitude is not None else self.PLAYER_LONGITUDE,
             accuracy=accuracy,
         )
-# ---- 8.4.e: сценарии ------------------------------------------------
+
+    def _close_cancel_window(self, ids: dict[str, str]) -> None:
+        """Сдвинуть окно отказа в прошлое — «игрок отменяет уже после льготы».
+
+        С 8.x-player-cancel expire внутри окна ставит 'abandoned' (отмена
+        игроком, без перерыва), а после окна — 'expired' с cooldown.
+        Тесты провала должны явно закрыть окно, иначе проверяют отмену.
+        """
+        from datetime import timedelta
+
+        from app.models import PlayerMission
+        from sqlalchemy import select
+
+        with self.SessionLocal.begin() as session:
+            pm = session.scalars(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == ids["player"],
+                    PlayerMission.mission_id == ids["mission"],
+                )
+            ).first()
+            if pm.cancel_deadline_at is not None:
+                pm.cancel_deadline_at = pm.cancel_deadline_at - timedelta(
+                    seconds=3600
+                )
+
+    # ---- 8.4.e: сценарии ------------------------------------------------
     def test_accept_generates_spawn_point(self) -> None:
         ids = self._fixture(search_radius_meters=3000)
 
@@ -456,6 +481,8 @@ class MissionEngineAcceptTests(unittest.TestCase):
 
         ids = self._fixture(reentry_cooldown_seconds=3600)
         self._call_accept(ids)
+        # Провал, а не добровольная отмена: окно отказа уже закрыто.
+        self._close_cancel_window(ids)
 
         self.mission_engine.expire_mission(ids["player"], ids["mission"])
 
@@ -475,6 +502,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
 
         ids = self._fixture(reentry_cooldown_seconds=3600)
         self._call_accept(ids)
+        self._close_cancel_window(ids)
 
         self.mission_engine.expire_mission(ids["player"], ids["mission"])
         with self.SessionLocal() as session:
@@ -515,6 +543,8 @@ class MissionEngineAcceptTests(unittest.TestCase):
     def test_accept_on_cooldown_returns_429(self) -> None:
         ids = self._fixture(reentry_cooldown_seconds=3600)
         self._call_accept(ids)
+        # cooldown возникает только при провале (после окна отказа).
+        self._close_cancel_window(ids)
         self.mission_engine.expire_mission(ids["player"], ids["mission"])
 
         with self.assertRaises(MissionEngineError) as ctx:
@@ -549,6 +579,8 @@ class MissionEngineAcceptTests(unittest.TestCase):
                 )
             )
         self._call_accept(ids)
+        # Провал с cooldown (не добровольная отмена).
+        self._close_cancel_window(ids)
         self.mission_engine.expire_mission(ids["player"], ids["mission"])
 
         # Сдвигаем available_again_at в прошлое
@@ -597,6 +629,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
     def test_bootstrap_includes_available_again_at(self) -> None:
         ids = self._fixture(reentry_cooldown_seconds=3600)
         self._call_accept(ids)
+        self._close_cancel_window(ids)
         self.mission_engine.expire_mission(ids["player"], ids["mission"])
 
         from app.mission_engine import get_bootstrap
@@ -719,6 +752,7 @@ class MissionEngineAcceptTests(unittest.TestCase):
             self.PLAYER_LATITUDE,
             self.PLAYER_LONGITUDE,
         )
+        self._close_cancel_window(ids_b)
         self.mission_engine.expire_mission(ids_b["player"], ids_b["mission"])
 
         # Ломаем цепочку: A больше не completed. Если бы expired-миссии

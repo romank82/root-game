@@ -41,7 +41,9 @@
     "packageUnavailable": "包不可用",
     "serverWillOpen": "服务器将在满足必要条件后打开任务。",
     "onBreak": "休息中",
-    "availableAgainIn": "再次可用倒计时："
+    "availableAgainIn": "再次可用倒计时：",
+    "cancelledByPlayer": "您已取消任务",
+    "abandonedHint": "可以重新接取。"
   },
   "errors": {
     "takeMissionFailed": "未能领取任务。",
@@ -54,6 +56,7 @@
     "in_progress": "进行中",
     "expired": "失败",
     "cancelled": "已取消",
+    "abandoned": "玩家已取消",
     "available": "可用"
   },
   "missionCard": {

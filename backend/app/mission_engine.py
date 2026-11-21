@@ -543,6 +543,21 @@ def _synchronize_player_missions(
             player_mission.attempt_deadline_at = None
             continue
 
+        # Отмена игроком (abandoned) — терминальное только на вид: игрок
+        # отказался сам в льготном окне, поэтому сразу возвращаем в available,
+        # без кулдауна и без политики. Это выход из лобби, а не провал.
+        if player_mission.status == "abandoned":
+            player_mission.status = "available"
+            player_mission.available_again_at = None
+            player_mission.started_at = None
+            player_mission.deadline_at = None
+            player_mission.attempt_deadline_at = None
+            player_mission.cancel_deadline_at = None
+            player_mission.progress = {}
+            # attempt_count НЕ сбрасываем: отказ не должен обнулять историю
+            # попыток, иначе на платных миссиях это дыра для накрутки.
+            continue
+
         # Expired-миссия (на cooldown или одноразовая) — не пересчитываем через
         # requirements. Иначе при изменении требований админом она бы ушла в
         # 'locked' и потеряла cooldown-трекинг.
@@ -2276,6 +2291,16 @@ def _accept_mission_once(
                 409,
                 "Миссия отменена.",
             )
+        # Отмена игроком: синхронизация выше уже вернула в available, но если
+        # запись пришла в этом статусе (edge-case) — не блокируем взятие.
+        if player_mission.status == "abandoned":
+            player_mission.status = "available"
+            player_mission.available_again_at = None
+            player_mission.started_at = None
+            player_mission.deadline_at = None
+            player_mission.attempt_deadline_at = None
+            player_mission.cancel_deadline_at = None
+            player_mission.progress = {}
         if player_mission.status == "locked":
             raise MissionEngineError(
                 403,
@@ -3200,11 +3225,13 @@ def expire_mission(player_id: str, mission_id: str) -> dict[str, Any]:
 
             # Только для in_progress можно expire.
             if player_mission.status != "in_progress":
-                # Идемпотентность: если уже expired — вернуть как есть.
-                if player_mission.status == "expired":
+                # Идемпотентность: если уже закрыта отказом или провалом —
+                # вернуть как есть (повторный клик по «ОТКАЗАТЬСЯ»).
+                if player_mission.status in ("expired", "abandoned"):
                     return {
-                        "expired": True,
-                        "status": "expired",
+                        "expired": player_mission.status == "expired",
+                        "cancelled": player_mission.status == "abandoned",
+                        "status": player_mission.status,
                         "refunded": _has_entry_refund(session, player_mission),
                         "availableAgainAt": (
                             ensure_utc(player_mission.available_again_at).isoformat()
@@ -3231,18 +3258,32 @@ def expire_mission(player_id: str, mission_id: str) -> dict[str, Any]:
                     player_mission=player_mission,
                 )
 
-            player_mission.status = "expired"
-            if mission.reentry_cooldown_seconds and mission.reentry_cooldown_seconds > 0:
-                player_mission.available_again_at = now + timedelta(
-                    seconds=mission.reentry_cooldown_seconds,
-                )
+            # Отмена игроком внутри окна — НЕ поражение.
+            # Ставим 'abandoned' вместо 'expired': в UI это «ОТМЕНЕНО ИГРОКОМ»,
+            # перерыв не назначается, миссию можно взять сразу снова.
+            # Решаем по ВРЕМЕНИ, а не по факту возврата: у бесплатной миссии
+            # (entry_root = 0) возвращать нечего, refunded=False, но отказ всё
+            # равно добровольный.
+            is_player_cancel = cancel_deadline is not None and cancel_deadline > now
+
+            if is_player_cancel:
+                player_mission.status = "abandoned"
+                # Никакого cooldown: игрок отказался вовремя — ждать нечего.
+                player_mission.available_again_at = None
+            else:
+                player_mission.status = "expired"
+                if mission.reentry_cooldown_seconds and mission.reentry_cooldown_seconds > 0:
+                    player_mission.available_again_at = now + timedelta(
+                        seconds=mission.reentry_cooldown_seconds,
+                    )
             player_mission.deadline_at = None
             player_mission.attempt_deadline_at = None
             session.flush()
 
             return {
-                "expired": True,
-                "status": "expired",
+                "expired": not is_player_cancel,
+                "cancelled": is_player_cancel,
+                "status": player_mission.status,
                 "refunded": refunded,
                 "availableAgainAt": (
                     ensure_utc(player_mission.available_again_at).isoformat()

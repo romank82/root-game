@@ -469,6 +469,10 @@ export function TerminalScreen({
     const isExpired = mission.status === 'expired'
     const isLocked = mission.status === 'locked'
     const isInProgress = mission.status === 'in_progress'
+    // Игрок отказался сам в льготном окне — это не поражение. Сервер вернёт
+    // миссию в available на следующей синхронизации, поэтому карточка просто
+    // сообщает об отмене и не блокирует взятие.
+    const isAbandoned = mission.status === 'abandoned'
 
     // Sprint 8.x: цена входа (atomic ROOT) и требуемые ключи из runtime policy.
     // Sprint 11.8 NanoROOT (этап 2C): сравнение баланса — в nano; fallback на
@@ -573,6 +577,11 @@ export function TerminalScreen({
                 t('terminal:status.progressConfirmed'),
               )}
             </p>
+          </div>
+        ) : isAbandoned ? (
+          <div className="expired-file">
+            <p>{t('terminal:status.cancelledByPlayer')}</p>
+            <p className="expired-hint">{t('terminal:status.abandonedHint')}</p>
           </div>
         ) : isExpired ? (
           <div className="expired-file">

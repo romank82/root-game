@@ -41,7 +41,9 @@
     "packageUnavailable": "PACKAGE UNAVAILABLE",
     "serverWillOpen": "The server will open the task after the necessary conditions are met.",
     "onBreak": "ON BREAK",
-    "availableAgainIn": "Available again in:"
+    "availableAgainIn": "Available again in:",
+    "cancelledByPlayer": "You cancelled the mission",
+    "abandonedHint": "You can take it again."
   },
   "errors": {
     "takeMissionFailed": "Failed to take the mission.",
@@ -54,6 +56,7 @@
     "in_progress": "IN PROGRESS",
     "expired": "FAILED",
     "cancelled": "CANCELLED",
+    "abandoned": "CANCELLED BY PLAYER",
     "available": "AVAILABLE"
   },
   "missionCard": {

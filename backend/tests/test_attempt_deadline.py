@@ -143,6 +143,30 @@ class AttemptDeadlineTests(unittest.TestCase):
             self.assertIsNotNone(policy)
             policy.max_attempts = max_attempts
 
+    def _close_cancel_window(self, player_id: str, mission_id: str) -> None:
+        """Сдвинуть окно отказа в прошлое — «отмена уже после льготы».
+
+        С 8.x-player-cancel expire внутри окна ставит 'abandoned' (отмена
+        игроком, без перерыва), после окна — 'expired'. Этот тест проверяет
+        провал, поэтому окно нужно закрыть явно.
+        """
+        from datetime import timedelta
+
+        from app.models import PlayerMission
+
+        with self.SessionLocal.begin() as session:
+            pm = session.scalar(
+                select(PlayerMission).where(
+                    PlayerMission.player_id == player_id,
+                    PlayerMission.mission_id == mission_id,
+                )
+            )
+            self.assertIsNotNone(pm)
+            if pm.cancel_deadline_at is not None:
+                pm.cancel_deadline_at = pm.cancel_deadline_at - timedelta(
+                    seconds=3600
+                )
+
     def _expire_attempt_deadline(
         self,
         player_id: str,
@@ -487,6 +511,8 @@ class AttemptDeadlineTests(unittest.TestCase):
         self.assertTrue(
             self._accept(expired_ids["player"], expired_mission)["accepted"]
         )
+        # Провал (окно отказа закрыто), а не добровольная отмена.
+        self._close_cancel_window(expired_ids["player"], expired_mission)
         expired_result = self.mission_engine.expire_mission(
             expired_ids["player"], expired_mission
         )

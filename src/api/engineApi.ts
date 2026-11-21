@@ -8,6 +8,8 @@ export type EngineMissionStatus =
   | 'completed'
   | 'cancelled'
   | 'expired'
+  // Игрок сам отказался в льготном окне — НЕ поражение (см. expire).
+  | 'abandoned'
 
 export type EngineMissionSpawn = {
   latitude: number
@@ -381,6 +383,8 @@ export async function acceptEngineMission(
 
 export type EngineExpireMissionResponse = {
   expired: boolean
+  // true — отказ в льготном окне: не поражение, перерыва нет.
+  cancelled?: boolean
   status: string
   availableAgainAt: string | null
 }
