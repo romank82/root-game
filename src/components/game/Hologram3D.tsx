@@ -199,11 +199,21 @@ export default function Hologram3D({
 
     const depthAlpha = (z: number) => 0.22 + 0.78 * Math.max(0, Math.min(1, (z + 1) / 2))
 
+    // Ширины линий заданы в единицах сцены, но на маленьком AR-контейнере
+    // сцена сжимается и линии пропадают. Поэтому ширина переводится в
+    // пиксели устройства и снизу ограничивается минимумом.
+    let sceneScale = 1
+    const px = (units: number, minDevicePx: number) => {
+      const device = units * sceneScale * dpr
+      if (device >= minDevicePx) return units
+      return minDevicePx / (sceneScale * dpr)
+    }
+
     const stroke3 = (a: Vec3, b: Vec3, width: number, alpha: number) => {
       const A = project(a)
       const B = project(b)
       ctx.globalAlpha = alpha
-      ctx.lineWidth = width
+      ctx.lineWidth = px(width, 1.6)
       ctx.beginPath()
       ctx.moveTo(A[0], A[1])
       ctx.lineTo(B[0], B[1])
@@ -215,9 +225,17 @@ export default function Hologram3D({
       ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size)
     }
 
-    const strokePath = (pts: Array<[number, number]>, width: number, alpha: number, color: string) => {
+    const strokePath = (
+      pts: Array<[number, number]>,
+      width: number,
+      alpha: number,
+      color: string,
+      minDevicePx = 1.6,
+    ) => {
       ctx.strokeStyle = color
-      ctx.lineWidth = width
+      ctx.lineWidth = px(width, minDevicePx)
+      ctx.lineJoin = 'round'
+      ctx.lineCap = 'round'
       ctx.globalAlpha = alpha
       ctx.beginPath()
       ctx.moveTo(pts[0][0], pts[0][1])
@@ -373,14 +391,15 @@ export default function Hologram3D({
         const amp = 0.075 * (0.55 + 0.45 * hash(seed))
         const pts = boltPath(fromA, fromB, seed, amp)
 
-        strokePath(pts, 0.07, 0.1 * env, `rgba(${NEON.r},${NEON.g},${NEON.b},1)`)
-        strokePath(pts, 0.032, 0.22 * env, `rgba(${NEON_HOT.r},${NEON_HOT.g},${NEON_HOT.b},1)`)
-        strokePath(pts, 0.014, 0.45 * env, `rgba(${NEON_HOT.r},${NEON_HOT.g},${NEON_HOT.b},1)`)
+        strokePath(pts, 0.13, 0.14 * env, `rgba(${NEON.r},${NEON.g},${NEON.b},1)`)
+        strokePath(pts, 0.065, 0.3 * env, `rgba(${NEON_HOT.r},${NEON_HOT.g},${NEON_HOT.b},1)`)
+        strokePath(pts, 0.030, 0.6 * env, `rgba(${NEON_HOT.r},${NEON_HOT.g},${NEON_HOT.b},1)`)
         strokePath(
           pts,
-          0.0075,
-          (0.85 + 0.15 * hash(seed + 3.1)) * env,
+          0.020,
+          (0.9 + 0.1 * hash(seed + 3.1)) * env,
           `rgba(${CORE_COLOR.r},${CORE_COLOR.g},${CORE_COLOR.b},1)`,
+          2.2,
         )
 
         // ответвления-искры, тоже в тот же угол
@@ -389,8 +408,8 @@ export default function Hologram3D({
           const k = 2 + Math.floor(hash(seed + 1.3 + bIdx * 17) * 4)
           const from = pts[Math.min(k, pts.length - 2)]
           const branch = boltPath(from, fromB, seed + 55.5 + bIdx * 31, amp * 0.55)
-          strokePath(branch, 0.009, 0.3 * env, `rgba(${NEON_HOT.r},${NEON_HOT.g},${NEON_HOT.b},1)`)
-          strokePath(branch, 0.0045, 0.7 * env, `rgba(${CORE_COLOR.r},${CORE_COLOR.g},${CORE_COLOR.b},1)`)
+          strokePath(branch, 0.030, 0.4 * env, `rgba(${NEON_HOT.r},${NEON_HOT.g},${NEON_HOT.b},1)`)
+          strokePath(branch, 0.016, 0.85 * env, `rgba(${CORE_COLOR.r},${CORE_COLOR.g},${CORE_COLOR.b},1)`)
         }
 
         // вспышки контакта
@@ -414,10 +433,10 @@ export default function Hologram3D({
         const a = rot(seg[0], tiltOuter, spinOuter)
         const b = rot(seg[1], tiltOuter, spinOuter)
         const z = (a[2] + b[2]) / 2
-        ctx.globalAlpha = 0.2 * depthAlpha(z)
-        stroke3(a, b, 0.026, 0.16 * depthAlpha(z))
+        ctx.globalAlpha = 0.24 * depthAlpha(z)
+        stroke3(a, b, 0.075, 0.34 * depthAlpha(z))
         ctx.strokeStyle = outerCol
-        stroke3(a, b, 0.008, 0.85 * depthAlpha(z))
+        stroke3(a, b, 0.034, 1.0 * depthAlpha(z))
         ctx.globalAlpha = 1
       }
 
@@ -436,9 +455,9 @@ export default function Hologram3D({
         const a = coreVerts[i]
         const b = coreVerts[j]
         const z = (a[2] + b[2]) / 2
-        stroke3(a, b, 0.016, 0.14 * depthAlpha(z))
+        stroke3(a, b, 0.055, 0.34 * depthAlpha(z))
         ctx.strokeStyle = coreCol
-        stroke3(a, b, 0.0045, 0.95 * depthAlpha(z))
+        stroke3(a, b, 0.024, 1.0 * depthAlpha(z))
       }
 
       // разряды
@@ -462,6 +481,7 @@ export default function Hologram3D({
       const s = Math.min(W, H) / 4.4
       const cx = W / 2
       const cy = H / 2
+      sceneScale = s
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       drawBackground()
