@@ -339,8 +339,10 @@ TonConnect возвращает BOC подписанного сообщения
    совместимость с бэкенд-парсером закреплена тестом на реальном payload.
    Бэкенд: `jettonWallet` в ответе батча (`resolve_jetton_wallets`).
    Зависимости ставятся pnpm (`pnpm-lock.yaml`). — закрыто.
-7. **Документ** `docs/withdrawal-external-payout.md` + обновление
-   `economy-and-root-ledger.md` и road map.
+7. ✅ **Документ** `docs/withdrawal-external-payout.md` (209 строк: жизненный
+   цикл, пошаговая выплата, частичная оплата, откат, настройка, диагностика,
+   инварианты). Обновлены `economy-and-root-ledger.md` (проводки холда и
+   возврата, «confirmed не создаёт проводку») и `roadmap.md` (этап 10). — закрыто.
 
 ## 9. Риски и как закрываем
 
