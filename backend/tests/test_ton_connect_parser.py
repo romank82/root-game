@@ -374,5 +374,64 @@ class SignedBocTests(unittest.TestCase):
         self.assertTrue(same_address(sender, SENDER_WALLET))
 
 
+class OutMsgLookupParseTests(unittest.TestCase):
+    """Разбор исходящих сообщений из TonCenter (поиск выплаты в блокчейне).
+
+    Формат ответа TonCenter отличается от TON Connect BOC: тело лежит в
+    out_msgs[].msg_data.body. Проверяем, что парсер выплат его понимает.
+    """
+
+    def _out_msg(self, query_id: int, amount_nano: int, recipient: str) -> dict:
+        body = (
+            begin_cell()
+            .store_uint(JETTON_TRANSFER_OP, 32)
+            .store_uint(query_id, 64)
+            .store_coins(amount_nano)
+            .store_address(Address(recipient))
+            .store_address(None)
+            .store_bit(0)
+            .store_coins(0)
+            .store_bit(0)
+            .end_cell()
+        )
+        return {
+            "msg_data": {
+                "body": base64.b64encode(body.to_boc()).decode()
+            }
+        }
+
+    def test_parses_transfer_from_out_msg(self) -> None:
+        from app.ton_payout_lookup import _parse_transfer_from_out_msg
+
+        parsed = _parse_transfer_from_out_msg(
+            self._out_msg(555, 20 * NANO, RECIPIENT_A)
+        )
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["queryId"], "555")
+        self.assertEqual(parsed["amountNano"], 20 * NANO)
+        self.assertTrue(same_address(parsed["recipient"], RECIPIENT_A))
+
+    def test_non_transfer_out_msg_returns_none(self) -> None:
+        from app.ton_payout_lookup import _parse_transfer_from_out_msg
+
+        other = {
+            "msg_data": {
+                "body": base64.b64encode(
+                    begin_cell().store_uint(0, 32).store_string("hi").end_cell().to_boc()
+                ).decode()
+            }
+        }
+        self.assertIsNone(_parse_transfer_from_out_msg(other))
+
+    def test_empty_or_garbage_out_msg_returns_none(self) -> None:
+        from app.ton_payout_lookup import _parse_transfer_from_out_msg
+
+        self.assertIsNone(_parse_transfer_from_out_msg({}))
+        self.assertIsNone(
+            _parse_transfer_from_out_msg({"msg_data": {"body": "не base64!"}})
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

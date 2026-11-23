@@ -173,6 +173,19 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         description="Адрес «спец» кошелька для выплат ROOT → TON.",
         is_sensitive=True,
     ),
+    "ton.payout_wallet_public_key": SystemSettingDefinition(
+        key="ton.payout_wallet_public_key",
+        value_type="string",
+        default_value="",
+        category="ton",
+        title="Публичный ключ кошелька выплат",
+        description=(
+            "Ed25519 публичный ключ кошелька выплат (hex, 32 байта). "
+            "По нему проверяется подпись BOC от TON Connect: без него "
+            "подтверждение выплат невозможно."
+        ),
+        is_sensitive=True,
+    ),
     "ton.min_amount_root": SystemSettingDefinition(
         key="ton.min_amount_root",
         value_type="integer",

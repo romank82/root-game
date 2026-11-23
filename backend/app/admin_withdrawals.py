@@ -308,6 +308,61 @@ def create_payout_batch_route(
     return result
 
 
+@router.post("/payout-batches/{batch_id}/confirm")
+def confirm_payout_batch_route(
+    batch_id: str,
+    payload: dict[str, Any],
+    request: Request,
+    admin: AdminUser = Depends(require_permission(PLAYERS_MANAGE_PERMISSION)),
+) -> dict[str, Any]:
+    """Подтвердить батч по подписанному BOC от TON Connect.
+
+    Тело: {"boc": "<base64 BOC>"}. BOC — то, что вернул кошелёк после
+    подписи. Сервер проверяет подпись, отправителя, соответствие переводам
+    батча, затем ищет каждый перевод в блокчейне и подтверждает ТОЛЬКО
+    найденные заявки: частичная оплата — штатный сценарий TON.
+    """
+    from app.payout_confirm_service import confirm_payout_batch
+    from app.ton_payout_lookup import lookup_transfer_by_query_id
+
+    boc = payload.get("boc") if isinstance(payload, dict) else None
+    if not isinstance(boc, str) or not boc.strip():
+        raise HTTPException(status_code=422, detail="Поле boc обязательно.")
+
+    try:
+        result = confirm_payout_batch(
+            batch_id,
+            boc.strip(),
+            admin_id=admin.id,
+            blockchain_lookup=lookup_transfer_by_query_id,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code, detail=error.detail
+        ) from error
+
+    with SessionLocal.begin() as session:
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="withdrawal.batch_confirmed",
+            entity_type="payout_batch",
+            entity_id=batch_id,
+            request=request,
+            permission_code=PLAYERS_MANAGE_PERMISSION,
+            before=None,
+            after={
+                "batchId": batch_id,
+                "status": result["status"],
+                "confirmedCount": result["confirmedCount"],
+                "pendingCount": result["pendingCount"],
+            },
+        )
+        session.flush()
+
+    return result
+
+
 @router.get("/payout-batches")
 def list_payout_batches_route(
     status: str | None = None,

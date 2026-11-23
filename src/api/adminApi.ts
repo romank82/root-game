@@ -1938,6 +1938,33 @@ export async function listPayoutBatches(
   return response.json() as Promise<PayoutBatchesListResponse>
 }
 
+export type PayoutBatchConfirmResult = {
+  batchId: string
+  status: 'confirmed' | 'submitted' | string
+  confirmedCount: number
+  pendingCount: number
+  totalCount: number
+  confirmed: { withdrawalId: string; queryId: string; txHash: string }[]
+  pending: { withdrawalId: string; queryId: string; reason: string }[]
+}
+
+/** Подтвердить батч подписанным BOC от TON Connect. */
+export async function confirmPayoutBatch(
+  batchId: string,
+  boc: string,
+): Promise<PayoutBatchConfirmResult> {
+  const response = await adminFetch(
+    `/api/v1/admin/withdrawals/payout-batches/${encodeURIComponent(batchId)}/confirm`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ boc }),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<PayoutBatchConfirmResult>
+}
+
 export async function getPayoutBatch(batchId: string): Promise<PayoutBatch> {
   const response = await adminFetch(
     `/api/v1/admin/withdrawals/payout-batches/${encodeURIComponent(batchId)}`,
