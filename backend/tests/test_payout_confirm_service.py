@@ -260,6 +260,13 @@ class PayoutConfirmServiceTests(unittest.TestCase):
         }
         return result["batchId"], mapping
 
+    def _wid_by_amount(self, mapping: dict[str, str], amount: int) -> str:
+        """id заявки с заданной суммой (порядок в батче не гарантирован)."""
+        for wid in mapping:
+            if self._read_withdrawal(wid).amount_root == amount:
+                return wid
+        raise AssertionError(f"Нет заявки на {amount} ROOT в батче")
+
     def _read_withdrawal(self, withdrawal_id: str):
         from app.models import WithdrawalRequest
 
@@ -299,7 +306,10 @@ class PayoutConfirmServiceTests(unittest.TestCase):
 
     def test_partial_payment_leaves_batch_submitted(self) -> None:
         batch_id, mapping = self._batch_with([(10, RECIPIENT_A), (20, RECIPIENT_B)])
-        first, second = list(mapping)
+        # Привязываемся к сумме, а не к порядку dict: у двух заявок может
+        # совпасть created_at, и порядок в батче определяется id (uuid).
+        first = self._wid_by_amount(mapping, 10)
+        second = self._wid_by_amount(mapping, 20)
         boc = build_signed_boc(
             [(mapping[first], 10 * NANO, RECIPIENT_A)], self.signing_key
         )
