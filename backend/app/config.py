@@ -52,6 +52,10 @@ class Settings:
     # API-ключ TonCenter: без него анонимный лимит ~1 запрос/сек, а батч
     # выплат делает по запросу на каждого получателя (адрес jetton-кошелька).
     ton_api_key: str = ""
+    # Индексер для поиска транзакций: TonCenter v2 getTransactions на тестнете
+    # возвращает 500 (lite server «cannot locate transaction»), а tonapi.io
+    # отдаёт историю стабильно. Пусто — выводится из TON_NETWORK.
+    ton_indexer_endpoint: str = ""
     # Адрес минтера ROOT (Jetton master) — для Jetton transfer.
     ton_root_jetton_master: str = ""
     # Sentry/GlitchTip (Sprint 13.6): DSN пустой = no-op.
@@ -92,6 +96,7 @@ settings = Settings(
     ton_network=os.getenv("TON_NETWORK", "testnet"),
     ton_api_endpoint=os.getenv("TON_API_ENDPOINT", ""),
     ton_api_key=os.getenv("TON_API_KEY", ""),
+    ton_indexer_endpoint=os.getenv("TON_INDEXER_ENDPOINT", ""),
     ton_root_jetton_master=os.getenv("TON_ROOT_JETTON_MASTER", ""),
     sentry_dsn=os.getenv("SENTRY_DSN", ""),
     sentry_environment=os.getenv(

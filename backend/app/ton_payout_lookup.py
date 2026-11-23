@@ -12,6 +12,14 @@ query_id сервер сам выдал при формировании батч
 владельца (OP 0xf8a7ea5), затем jetton-wallet -> jetton-wallet получателя
 (OP 0x178d4519, internal_transfer) с ТЕМ ЖЕ query_id. Поэтому смотрим
 исходящие сообщения с адреса кошелька выплат и ищем transfer с нашим query_id.
+
+Транспорт: tonapi.io, а НЕ TonCenter. Причина проверена на живом testnet:
+TonCenter v2 getTransactions отдаёт 500 «LITE_SERVER_UNKNOWN: cannot locate
+transaction in block with specified logical time» (и для кошелька выплат, и
+для jetton-кошельков), а с archival=True — 542 «no workers available».
+tonapi.io ту же историю отдаёт стабильно. Если бы поиск остался на TonCenter,
+подтверждение выплат никогда бы ничего не находило: владелец заплатил бы,
+а заявки висели бы в processing до авто-откката.
 """
 from __future__ import annotations
 
@@ -19,6 +27,7 @@ import asyncio
 import logging
 from typing import Any
 
+import httpx
 from pytoniq_core import Cell
 
 from app.config import settings
@@ -27,12 +36,11 @@ from app.ton_connect_parser import JETTON_TRANSFER_OP
 
 logger = logging.getLogger(__name__)
 
-# Сколько последних транзакций кошелька смотреть. Пакет на 200 заявок —
-# это ~200 транзакций плюс запас на служебные.
-LOOKUP_LIMIT = 400
+# Сколько транзакций за один запрос к индексеру (максимум у tonapi — 100).
+LOOKUP_LIMIT = 100
 
 # Сколько страниц истории пролистывать (по LOOKUP_LIMIT за страницу).
-MAX_PAGES = 3
+MAX_PAGES = 5
 
 
 def _parse_transfer_from_out_msg(out_msg: dict) -> dict[str, Any] | None:
@@ -68,26 +76,46 @@ def _parse_transfer_from_out_msg(out_msg: dict) -> dict[str, Any] | None:
     }
 
 
+def _indexer_endpoint() -> str:
+    """Адрес индексера tonapi: явная настройка или по сети."""
+    configured = (settings.ton_indexer_endpoint or "").strip().rstrip("/")
+    if configured:
+        return configured
+    if (settings.ton_network or "testnet").lower() == "mainnet":
+        return "https://tonapi.io/v2"
+    return "https://testnet.tonapi.io/v2"
+
+
 async def _lookup_async(query_id: str, amount_nano: int) -> dict[str, Any] | None:
-    """Найти перевод по query_id среди исходящих транзакций кошелька выплат."""
-    endpoint = settings.ton_api_endpoint
+    """Найти перевод по query_id среди исходящих транзакций кошелька выплат.
+
+    Транспорт — tonapi: TonCenter getTransactions на тестнете отдаёт 500.
+    """
     wallet = _read_payout_wallet()
-    if not endpoint:
-        raise RuntimeError("TON_API_ENDPOINT не настроен.")
     if not wallet:
         raise RuntimeError("ton.payout_wallet не настроен.")
 
-    provider = _TonCenterProvider(endpoint)
-    try:
-        cursor_lt: int | None = None
-        cursor_hash: str | None = None
+    endpoint = _indexer_endpoint()
+    # tonapi ждёт адрес в url-encoded raw-форме (0%3Aabc…).
+    from pytoniq_core import Address
+
+    raw_address = Address(wallet).to_str(is_user_friendly=False).replace(":", "%3A")
+    url = f"{endpoint}/blockchain/accounts/{raw_address}/transactions"
+
+    timeout = httpx.Timeout(20.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        before_lt: str | None = None
         for _page in range(MAX_PAGES):
-            transactions = await provider.get_transactions(
-                wallet, limit=LOOKUP_LIMIT,
-                lt=cursor_lt, l_hash=cursor_hash,
-            )
+            params: dict[str, Any] = {"limit": LOOKUP_LIMIT}
+            if before_lt:
+                params["before_lt"] = before_lt
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            payload = response.json()
+            transactions = payload.get("transactions") or []
             if not transactions:
                 break
+
             for tx in transactions:
                 for out_msg in tx.get("out_msgs") or []:
                     parsed = _parse_transfer_from_out_msg(out_msg)
@@ -110,12 +138,10 @@ async def _lookup_async(query_id: str, amount_nano: int) -> dict[str, Any] | Non
                         "amountNano": parsed["amountNano"],
                     }
             last = transactions[-1]
-            if last.get("lt") is None:
+            next_lt = last.get("lt")
+            if next_lt is None:
                 break
-            cursor_lt = int(last["lt"])
-            cursor_hash = last.get("hash")
-    finally:
-        await provider.aclose()
+            before_lt = str(next_lt)
     return None
 
 

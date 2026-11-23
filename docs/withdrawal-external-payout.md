@@ -165,7 +165,9 @@ print(public_key.hex())   # 64 hex-символа — это и есть зна�
 
 | Переменная | Зачем |
 |---|---|
-| `TON_API_ENDPOINT` | TonCenter с ключом: сверка блокчейна и адреса jetton-кошельков |
+| `TON_API_ENDPOINT` | TonCenter с ключом: адреса jetton-кошельков (runGetMethod) |
+| `TON_API_KEY` | ключ TonCenter: снимает лимит анонимных запросов |
+| `TON_INDEXER_ENDPOINT` | индексер истории (tonapi); пусто — по `TON_NETWORK` |
 | `TON_ROOT_JETTON_MASTER` | адрес jetton-мастера ROOT |
 | `TON_NETWORK` | `testnet` или `mainnet` |
 
@@ -173,11 +175,18 @@ print(public_key.hex())   # 64 hex-символа — это и есть зна�
 jetton-кошелёк получателя, а переводить на обычный адрес нельзя — деньги
 потеряются.
 
+**Почему два разных источника.** TonCenter нужен для `runGetMethod`
+(вычисление jetton-адресов) — там он работает. А `getTransactions` в
+TonCenter на тестнете отдаёт 500 «cannot locate transaction» (с
+`archival=true` — 542 «no workers available»), поэтому историю для сверки
+выплат берём из tonapi.io. Оба факта проверены на живом testnet.
+
 ## 7. Диагностика
 
 | Симптом | Причина | Что делать |
 |---|---|---|
 | «Оплата невозможна» у заявок | не настроен `TON_API_ENDPOINT` или `TON_ROOT_JETTON_MASTER` | проверить `.env`, перезапустить бэкенд |
+| «Подтверждено 0 из N» при оплаченном батче | неверный `TON_INDEXER_ENDPOINT` / сеть | проверить настройку, повторить confirm |
 | 422 «Подпись BOC не подтверждена» | не тот `payout_wallet_public_key` или кошелёк не тот | сверить ключ с кошельком |
 | 403 «BOC подписан другим кошельком» | платили не с `ton.payout_wallet` | подключить правильный кошелёк |
 | 422 «Сумма по заявке не совпадает» | подписан BOC от другого батча | сформировать батч заново и оплатить текущий |

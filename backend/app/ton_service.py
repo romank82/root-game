@@ -167,16 +167,23 @@ class _TonCenterProvider:
 
     @staticmethod
     def _encode_stack(stack: list) -> list:
-        """Стек pytoniq -> JSON-стек TonCenter runGetMethod."""
+        """Стек pytoniq -> JSON-стек TonCenter runGetMethod.
+
+        Формат TonCenter v2 — пары [тип, значение]:
+          ["slice", {"bytes": "<base64 BOC>"}]
+          ["num", "<int или 0x-строка>"]
+        Старый формат {"type": ..., "value": ...} отдаёт 422
+        «Wrong type. Expected: kArrayValue, actual: kObjectValue».
+        """
         encoded = []
         for entry in stack:
             if isinstance(entry, Address):
                 cell = begin_cell().store_address(entry).end_cell()
                 encoded.append(
-                    {"type": "slice", "value": base64.b64encode(cell.to_boc()).decode()}
+                    ["slice", {"bytes": base64.b64encode(cell.to_boc()).decode()}]
                 )
             elif isinstance(entry, int):
-                encoded.append({"type": "num", "value": str(entry)})
+                encoded.append(["num", str(entry)])
             else:
                 raise _TonCenterError(
                     f"unsupported stack entry: {type(entry).__name__}"
@@ -185,16 +192,30 @@ class _TonCenterProvider:
 
     @staticmethod
     def _decode_stack(entries: list) -> list:
-        """JSON-стек TonCenter -> список; slice/cell трактуем как адрес."""
+        """JSON-стек TonCenter -> список; slice/cell трактуем как адрес.
+
+        Поддерживает оба варианта ответа:
+          ["num", "0x…"]                          — новый формат (пары);
+          ["cell", {"bytes": "<base64 BOC>", …}]  — новый формат для ячеек;
+          {"type": "num", "value": "…"}           — старый формат.
+        """
         decoded = []
         for entry in entries:
-            entry_type = entry.get("type")
-            value = entry.get("value")
+            if isinstance(entry, list) and len(entry) >= 2:
+                entry_type, value = entry[0], entry[1]
+            elif isinstance(entry, dict):
+                entry_type, value = entry.get("type"), entry.get("value")
+            else:
+                raise _TonCenterError(f"unsupported result entry: {entry!r}")
+
             if entry_type in ("num", "int"):
                 raw = str(value)
-                decoded.append(int(raw, 16) if raw.lower().startswith("0x") else int(raw))
+                decoded.append(
+                    int(raw, 16) if raw.lower().startswith("0x") else int(raw)
+                )
             elif entry_type in ("slice", "cell"):
-                cell = Cell.one_from_boc(_boc_bytes(value))
+                payload = value.get("bytes") if isinstance(value, dict) else value
+                cell = Cell.one_from_boc(_boc_bytes(payload))
                 decoded.append(cell.begin_parse().load_address())
             else:
                 raise _TonCenterError(f"unsupported result entry: {entry_type!r}")
