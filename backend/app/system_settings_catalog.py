@@ -186,6 +186,19 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         ),
         is_sensitive=True,
     ),
+    "ton.payout_processing_timeout_hours": SystemSettingDefinition(
+        key="ton.payout_processing_timeout_hours",
+        value_type="integer",
+        default_value=24,
+        category="ton",
+        title="Таймаут обработки батча выплат",
+        description=(
+            "Сколько часов батч может висеть неподтверждённым, прежде чем "
+            "фоновый джоб вернёт его заявки в pending. Защита от забытого "
+            "батча, который держит деньги игроков."
+        ),
+        is_sensitive=False,
+    ),
     "ton.min_amount_root": SystemSettingDefinition(
         key="ton.min_amount_root",
         value_type="integer",

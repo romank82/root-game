@@ -1949,6 +1949,48 @@ export type PayoutBatchConfirmResult = {
 }
 
 /** Подтвердить батч подписанным BOC от TON Connect. */
+export type PayoutBatchRollbackResult = {
+  batchId: string
+  status: 'rolled_back' | string
+  mode: 'return_to_pending' | 'fail_and_refund' | string
+  returned: string[]
+  failed: string[]
+  skippedConfirmed: string[]
+  reason: string
+}
+
+/**
+ * Откатить батч выплат.
+ *
+ * return_to_pending — заявки ждут нового батча, холд не возвращается.
+ * fail_and_refund — заявка failed, ROOT возвращается игроку.
+ * Подтверждённые заявки не откатываются никогда; для частично
+ * подтверждённого батча нужен force.
+ */
+export async function rollbackPayoutBatch(
+  batchId: string,
+  options: {
+    reason: string
+    mode?: 'return_to_pending' | 'fail_and_refund'
+    force?: boolean
+  },
+): Promise<PayoutBatchRollbackResult> {
+  const response = await adminFetch(
+    `/api/v1/admin/withdrawals/payout-batches/${encodeURIComponent(batchId)}/rollback`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reason: options.reason,
+        mode: options.mode ?? 'return_to_pending',
+        force: options.force ?? false,
+      }),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<PayoutBatchRollbackResult>
+}
+
 export async function confirmPayoutBatch(
   batchId: string,
   boc: string,

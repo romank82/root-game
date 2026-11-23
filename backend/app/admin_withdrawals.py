@@ -308,6 +308,72 @@ def create_payout_batch_route(
     return result
 
 
+@router.post("/payout-batches/{batch_id}/rollback")
+def rollback_payout_batch_route(
+    batch_id: str,
+    payload: dict[str, Any],
+    request: Request,
+    admin: AdminUser = Depends(require_permission(PLAYERS_MANAGE_PERMISSION)),
+) -> dict[str, Any]:
+    """Откатить батч: processing-заявки вернуть в pending или провалить.
+
+    Тело: {"reason": "...", "mode": "return_to_pending" | "fail_and_refund",
+    "force": false}.
+
+    mode=return_to_pending — заявки ждут следующего батча, холд остаётся
+    (деньги всё ещё зарезервированы). mode=fail_and_refund — заявка failed
+    и холд возвращается игроку.
+
+    Подтверждённые заявки не откатываются никогда: деньги уже в блокчейне.
+    Частично подтверждённый батч требует force=true.
+    """
+    from app.payout_rollback_service import (
+        MODE_RETURN_TO_PENDING,
+        rollback_payout_batch,
+    )
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Ожидается JSON-объект.")
+    reason = payload.get("reason")
+    mode = payload.get("mode") or MODE_RETURN_TO_PENDING
+    force = bool(payload.get("force", False))
+
+    try:
+        result = rollback_payout_batch(
+            batch_id,
+            reason=str(reason or ""),
+            mode=str(mode),
+            admin_id=admin.id,
+            force=force,
+        )
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code, detail=error.detail
+        ) from error
+
+    with SessionLocal.begin() as session:
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="withdrawal.batch_rolled_back",
+            entity_type="payout_batch",
+            entity_id=batch_id,
+            request=request,
+            permission_code=PLAYERS_MANAGE_PERMISSION,
+            before=None,
+            after={
+                "batchId": batch_id,
+                "mode": result["mode"],
+                "returned": len(result["returned"]),
+                "failed": len(result["failed"]),
+                "reason": result["reason"],
+            },
+        )
+        session.flush()
+
+    return result
+
+
 @router.post("/payout-batches/{batch_id}/confirm")
 def confirm_payout_batch_route(
     batch_id: str,

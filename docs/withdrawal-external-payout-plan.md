@@ -319,7 +319,17 @@ TonConnect возвращает BOC подписанного сообщения
    батч `submitted`, неоплаченные остаются `processing` до отката.
    Новый CMS-ключ `ton.payout_wallet_public_key` (hex, 32 байта).
    Тесты: 16 (13 сервиса + 3 парсера out_msgs). — закрыто.
-5. **Откат** (`POST /{batch_id}/rollback` + таймаут `processing`). Тесты.
+5. ✅ **Откат** (`POST /payout-batches/{batch_id}/rollback` + авто-откат по
+   таймауту): `app/payout_rollback_service.py`. Два режима —
+   `return_to_pending` (заявки ждут нового батча, холд сохраняется) и
+   `fail_and_refund` (заявка `failed` + возврат холда с credit-проводкой).
+   CONFIRMED-заявки не откатываются никогда; частично подтверждённый батч
+   требует `force=true`. При возврате в pending попытка закрывается
+   `failed` — иначе `uq_payout_attempts_no_second_send` не дал бы создать
+   новую попытку и заявка застряла бы навсегда.
+   Авто-откат: ключ CMS `ton.payout_processing_timeout_hours` (24 ч) + джоб
+   `payout-timeout-rollback` в планировщике `retention.py` (ежечасно в :15).
+   Тесты: 15. — закрыто.
 6. **Фронтенд**: `@tonconnect/ui-react`, manifest, кнопка «Оплатить батч»,
    список батчей с сортировкой и фильтрами, результат сверки по заявкам.
 7. **Документ** `docs/withdrawal-external-payout.md` + обновление

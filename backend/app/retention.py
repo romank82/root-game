@@ -122,9 +122,39 @@ def start_scheduler() -> None:
         coalesce=True,
         misfire_grace_time=3600,
     )
+    # Авто-откат просроченных батчей выплат (шаг 5 внешних выплат): забытый
+    # батч держал бы деньги игроков в processing бесконечно.
+    scheduler.add_job(
+        run_payout_timeout_job,
+        trigger=CronTrigger(hour="*/1", minute=15),
+        id="payout-timeout-rollback",
+        name="Payout batch processing timeout rollback",
+        replace_existing=True,
+        coalesce=True,
+        misfire_grace_time=1800,
+    )
     scheduler.start()
     _scheduler = scheduler
     logger.info("Retention scheduler started (daily at 03:00 UTC)")
+
+
+def run_payout_timeout_job() -> None:
+    """Авто-откат батчей, которые висят в processing дольше таймаута.
+
+    Ошибки не пробрасываем: падение джоба не должно ронять планировщик,
+    а следующий запуск через час повторит попытку.
+    """
+    from app.payout_rollback_service import rollback_all_stale_batches
+
+    try:
+        rolled_back = rollback_all_stale_batches()
+    except Exception:  # noqa: BLE001 — джоб не должен падать
+        logger.exception("Payout timeout job failed")
+        return
+    if rolled_back:
+        logger.warning(
+            "Payout timeout job: откачено батчей — %d", len(rolled_back)
+        )
 
 
 def stop_scheduler() -> None:
