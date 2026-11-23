@@ -186,6 +186,20 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         ),
         is_sensitive=True,
     ),
+    "ton.legacy_autopayout_enabled": SystemSettingDefinition(
+        key="ton.legacy_autopayout_enabled",
+        value_type="boolean",
+        default_value=False,
+        category="ton",
+        title="Старая автовыплата (аварийно)",
+        description=(
+            "УСТАРЕЛО. Включает автоматическую отправку ROOT с сервера по "
+            "мнемонике TON_PAYOUT_MNEMONIC из .env. Это возвращает риск "
+            "утечки ключа: используйте вкладку «Батчи выплат» с подписью в "
+            "кошельке. Держать выключенным, кроме аварийной ситуации."
+        ),
+        is_sensitive=True,
+    ),
     "ton.payout_processing_timeout_hours": SystemSettingDefinition(
         key="ton.payout_processing_timeout_hours",
         value_type="integer",

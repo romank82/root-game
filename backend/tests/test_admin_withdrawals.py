@@ -298,13 +298,57 @@ class AdminWithdrawalsTests(unittest.TestCase):
         self.assertEqual(ctx.exception.__class__.__name__, "HTTPException")
         self.assertEqual(ctx.exception.status_code, 422)
 
-    def test_batch(self) -> None:
-        """POST /batch: pending -> confirmed + ton_tx_hash + аудит."""
+    def test_batch_disabled_by_default(self) -> None:
+        """POST /batch отдаёт 410: старый путь с мнемоникой выключен.
+
+        Автооплата требует TON_PAYOUT_MNEMONIC на сервере — риск, ради
+        устранения которого сделаны внешние выплаты. Включается только
+        осознанно через CMS-ключ ton.legacy_autopayout_enabled.
+        """
         with self.SessionLocal.begin() as session:
             admin = self._make_admin(session)
             player_id = self._make_player(session)
             self._seed_withdrawal_settings(session)
             self._seed_wallet(session, player_id, 1000)
+
+        withdrawal_id = self.withdrawal_service.create_withdrawal_request(
+            player_id, 100, VALID_TON_ADDRESS
+        )["withdrawalId"]
+
+        with patch.object(
+            self.withdrawal_service,
+            "send_jetton_transfer_sync",
+            return_value="mock-tx-hash",
+        ) as mock_transfer:
+            with self.assertRaises(Exception) as ctx:
+                self.admin_withdrawals.run_admin_withdrawal_batch(
+                    request=None, admin=admin, limit=50
+                )
+
+        self.assertEqual(ctx.exception.status_code, 410)
+        self.assertIn("legacy_autopayout_enabled", ctx.exception.detail)
+        mock_transfer.assert_not_called()
+        # Заявка не тронута: деньги остаются в холде, ничего не ушло.
+        with self.SessionLocal() as session:
+            self.assertEqual(
+                session.get(WithdrawalRequest, withdrawal_id).status, "pending"
+            )
+
+    def test_batch(self) -> None:
+        """POST /batch при включённом флаге: pending -> confirmed + аудит."""
+        with self.SessionLocal.begin() as session:
+            admin = self._make_admin(session)
+            player_id = self._make_player(session)
+            self._seed_withdrawal_settings(session)
+            self._seed_wallet(session, player_id, 1000)
+            # Ключ посеян миграцией (false) — включаем его для этого теста.
+            legacy_flag = session.scalar(
+                select(SystemSetting).where(
+                    SystemSetting.key == "ton.legacy_autopayout_enabled"
+                )
+            )
+            legacy_flag.value_json = True
+            session.flush()
 
         withdrawal_id = self.withdrawal_service.create_withdrawal_request(
             player_id, 100, VALID_TON_ADDRESS

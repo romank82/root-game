@@ -2,7 +2,6 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import {
   listWithdrawals,
   rejectWithdrawal,
-  runWithdrawalBatch,
   type Withdrawal,
 } from '../../api/adminApi'
 import { formatRootFromNano } from '../../utils/formatRoot'
@@ -23,7 +22,6 @@ type StatusFilter =
 type PeriodFilter = 'day' | 'week' | 'month' | 'all'
 
 const PAGE_SIZE = 50
-const BATCH_SIZE = 50
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: '', label: 'Все статусы' },
@@ -163,27 +161,6 @@ export function WithdrawalsSection() {
     }
   }
 
-  const handleBatch = async () => {
-    setActing(true)
-    setError('')
-    setActionMsg('')
-    try {
-      const result = await runWithdrawalBatch(BATCH_SIZE)
-      setActionMsg(
-        `Батч ${result.batchId}: выплачено ${result.confirmed}, ошибок ${result.failed}.`,
-      )
-      setReload((tick) => tick + 1)
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : 'Не удалось выполнить батч-выплату.',
-      )
-    } finally {
-      setActing(false)
-    }
-  }
-
   const shownFrom = total === 0 ? 0 : offset + 1
   const shownTo = total === 0 ? 0 : Math.min(offset + PAGE_SIZE, total)
 
@@ -197,13 +174,13 @@ export function WithdrawalsSection() {
             Вывод ROOT → TON: список, батч-выплата, отклонение.
           </p>
         </div>
-        <button
-          className="admin-primary"
-          onClick={handleBatch}
-          disabled={acting || loading}
+        <span
+          className="admin-muted"
+          style={{ fontSize: 11, maxWidth: 320, textAlign: 'right' }}
         >
-          Выплатить батч ({BATCH_SIZE})
-        </button>
+          Выплата — во вкладке «Батчи выплат»: там батч оплачивается из
+          кошелька, ключ остаётся у вас.
+        </span>
       </div>
 
       <section className="admin-editor" style={{ marginTop: '24px' }}>

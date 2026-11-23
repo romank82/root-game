@@ -228,11 +228,40 @@ def run_admin_withdrawal_batch(
     limit: int = DEFAULT_LIMIT,
     admin: AdminUser = Depends(require_permission(PLAYERS_MANAGE_PERMISSION)),
 ) -> dict[str, Any]:
-    """Батч-выплата pending-заявок (11.6): confirmed/failed + аудит.
+    """⚠️ УСТАРЕЛО: автоматическая отправка с мнемоникой из `.env`.
 
-    Лимит — операционная страховка (не более MAX_LIMIT за один вызов).
-    Возвращает результат сервиса {batchId, confirmed, failed}.
+    Заменено внешними выплатами (см. docs/withdrawal-external-payout.md):
+    там сервер готовит батч, а подписывает владелец на своём устройстве.
+    Этот путь требует TON_PAYOUT_MNEMONIC НА СЕРВЕРЕ — то есть возвращает
+    риск, ради устранения которого делались внешние выплаты.
+
+    Оставлен как аварийный и выключен по умолчанию. Включается осознанно:
+    CMS-ключ `ton.legacy_autopayout_enabled` = true.
     """
+    from sqlalchemy import select as _select
+
+    from app.models import SystemSetting as _SystemSetting
+
+    with SessionLocal() as _session:
+        _flag = _session.scalar(
+            _select(_SystemSetting).where(
+                _SystemSetting.key == "ton.legacy_autopayout_enabled",
+                _SystemSetting.status == "active",
+            )
+        )
+        _enabled = getattr(_flag, "value_json", False) is True
+
+    if not _enabled:
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Автоматическая выплата с мнемоникой отключена. Используйте "
+                "вкладку «Батчи выплат»: сервер готовит батч, вы подписываете "
+                "перевод в кошельке. Для аварийного включения старого пути "
+                "выставьте CMS-ключ ton.legacy_autopayout_enabled = true."
+            ),
+        )
+
     safe_limit = max(1, min(limit, MAX_LIMIT))
 
     with SessionLocal.begin() as session:
