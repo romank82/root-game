@@ -140,7 +140,12 @@ class _TonCenterProvider:
         if not endpoint or not endpoint.strip():
             raise ValueError("TON_API_ENDPOINT must not be empty")
         self._endpoint = endpoint.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=timeout)
+        # Ключ TonCenter поднимает лимит с ~1 запроса/сек до 10/сек. Без него
+        # батч на 50 получателей (по запросу на jetton-адрес) упирается в 429.
+        headers = {}
+        if settings.ton_api_key:
+            headers["X-API-KEY"] = settings.ton_api_key
+        self._client = httpx.AsyncClient(timeout=timeout, headers=headers)
 
     async def aclose(self) -> None:
         await self._client.aclose()

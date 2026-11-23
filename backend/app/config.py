@@ -49,6 +49,9 @@ class Settings:
     ton_payout_mnemonic: str = ""
     ton_network: str = "testnet"
     ton_api_endpoint: str = ""
+    # API-ключ TonCenter: без него анонимный лимит ~1 запрос/сек, а батч
+    # выплат делает по запросу на каждого получателя (адрес jetton-кошелька).
+    ton_api_key: str = ""
     # Адрес минтера ROOT (Jetton master) — для Jetton transfer.
     ton_root_jetton_master: str = ""
     # Sentry/GlitchTip (Sprint 13.6): DSN пустой = no-op.
@@ -88,6 +91,7 @@ settings = Settings(
     ton_payout_mnemonic=os.getenv("TON_PAYOUT_MNEMONIC", ""),
     ton_network=os.getenv("TON_NETWORK", "testnet"),
     ton_api_endpoint=os.getenv("TON_API_ENDPOINT", ""),
+    ton_api_key=os.getenv("TON_API_KEY", ""),
     ton_root_jetton_master=os.getenv("TON_ROOT_JETTON_MASTER", ""),
     sentry_dsn=os.getenv("SENTRY_DSN", ""),
     sentry_environment=os.getenv(
