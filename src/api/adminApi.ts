@@ -1867,6 +1867,86 @@ export async function listWithdrawals(
   return response.json() as Promise<WithdrawalsListResponse>
 }
 
+// --- Батчи для внешней оплаты (TON Connect, 11.x-external-payout) ----------
+
+export type PayoutBatchItem = {
+  withdrawalId: string
+  playerId: string
+  toAddress: string
+  amountRoot: number
+  amountRootNano: number
+  // Ключ сверки в блокчейне: по нему подтверждается конкретная заявка.
+  queryId: string | null
+  status: string
+}
+
+export type PayoutBatch = {
+  batchId: string
+  status: 'ready' | 'submitted' | 'confirmed' | 'rolled_back' | string
+  totalNano: number
+  totalRoot: number
+  itemCount: number | null
+  openedAt: string | null
+  txHash: string | null
+  payloadText: string | null
+  items: PayoutBatchItem[] | null
+}
+
+export type PayoutBatchRow = {
+  batchId: string
+  status: string
+  totalNano: number
+  totalRoot: number
+  itemCount: number
+  openedAt: string | null
+  // Сколько дней батч висит открытым (для подсветки «залежался»).
+  ageDays: number | null
+  stale: boolean
+  txHash: string | null
+  rollbackReason: string | null
+}
+
+export type PayoutBatchesListResponse = {
+  batches: PayoutBatchRow[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/** Сформировать батч из pending-заявок (или вернуть уже открытый). */
+export async function createPayoutBatch(limit = 50): Promise<PayoutBatch> {
+  const response = await adminFetch(
+    `/api/v1/admin/withdrawals/payout-batches?limit=${limit}`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<PayoutBatch>
+}
+
+export async function listPayoutBatches(
+  options: { status?: string; limit?: number; offset?: number } = {},
+): Promise<PayoutBatchesListResponse> {
+  const params = new URLSearchParams()
+  if (options.status) params.set('status', options.status)
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.offset !== undefined) params.set('offset', String(options.offset))
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const response = await adminFetch(
+    `/api/v1/admin/withdrawals/payout-batches${query}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<PayoutBatchesListResponse>
+}
+
+export async function getPayoutBatch(batchId: string): Promise<PayoutBatch> {
+  const response = await adminFetch(
+    `/api/v1/admin/withdrawals/payout-batches/${encodeURIComponent(batchId)}`,
+  )
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<PayoutBatch>
+}
+
+
 export async function runWithdrawalBatch(
   limit = 50,
 ): Promise<{ batchId: string; confirmed: number; failed: number }> {

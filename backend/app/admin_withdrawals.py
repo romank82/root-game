@@ -23,13 +23,18 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
 from app.mission_engine import MissionEngineError
-from app.models import AdminUser, PayoutAttempt, WithdrawalRequest
+from app.models import (
+    AdminUser,
+    PayoutAttempt,
+    PayoutBatch,
+    WithdrawalRequest,
+)
 from app.withdrawal_service import (
     NANO_PER_ROOT,
     process_withdrawal_batch,
@@ -250,6 +255,147 @@ def run_admin_withdrawal_batch(
         session.flush()
 
     return result
+
+
+# --- Батчи для внешней оплаты (TON Connect, 11.x-external-payout) ----------
+#
+# Схема: сервер формирует батч и выдаёт каждой заявке свой query_id; владелец
+# игры подписывает пачку jetton-переводов на своём устройстве; сервер сверяет
+# блокчейн. Приватный ключ на сервере не нужен.
+
+
+@router.post("/payout-batches")
+def create_payout_batch_route(
+    request: Request,
+    limit: int = DEFAULT_LIMIT,
+    admin: AdminUser = Depends(require_permission(PLAYERS_MANAGE_PERMISSION)),
+) -> dict[str, Any]:
+    """Сформировать батч из накопленных pending-заявок (или вернуть открытый).
+
+    Идемпотентно: при уже открытом батче возвращается он же, второй не
+    создаётся (барьер — частичный unique-индекс в БД, см. PayoutBatch).
+    Заявки переходят в processing и получают по одному query_id.
+    """
+    from app.payout_batch_service import create_payout_batch
+
+    safe_limit = max(1, min(limit, MAX_LIMIT))
+    try:
+        result = create_payout_batch(admin_id=admin.id, limit=safe_limit)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code, detail=error.detail
+        ) from error
+
+    with SessionLocal.begin() as session:
+        write_admin_audit(
+            session,
+            actor=admin,
+            action="withdrawal.batch_created",
+            entity_type="payout_batch",
+            entity_id=result["batchId"],
+            request=request,
+            permission_code=PLAYERS_MANAGE_PERMISSION,
+            before=None,
+            after={
+                "batchId": result["batchId"],
+                "status": result["status"],
+                "itemCount": result["itemCount"],
+                "totalRoot": result["totalRoot"],
+            },
+        )
+        session.flush()
+
+    return result
+
+
+@router.get("/payout-batches")
+def list_payout_batches_route(
+    status: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    _admin: AdminUser = Depends(require_permission(PLAYERS_READ_PERMISSION)),
+) -> dict[str, Any]:
+    """Список батчей: «требует действия» первыми, внутри — старые сверху.
+
+    Порядок отражает рабочую очередь: ready (надо платить) -> submitted
+    (надо сверить) -> остальные (история, новые первыми).
+    """
+    from app.payout_batch_service import BATCH_STATUSES, serialize_batch_row
+
+    if status is not None and status not in BATCH_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "status должен быть одним из: "
+                + ", ".join(BATCH_STATUSES)
+            ),
+        )
+    safe_limit = max(1, min(limit, MAX_LIMIT))
+    safe_offset = max(0, offset)
+
+    with SessionLocal() as session:
+        filters = []
+        if status is not None:
+            filters.append(PayoutBatch.status == status)
+        total = (
+            session.scalar(
+                select(func.count()).select_from(PayoutBatch).where(*filters)
+            )
+            or 0
+        )
+        rows = session.scalars(
+            select(PayoutBatch)
+            .where(*filters)
+            .order_by(
+                # 0 — ready, 1 — submitted, 2 — закрытые.
+                case(
+                    (PayoutBatch.status == "ready", 0),
+                    (PayoutBatch.status == "submitted", 1),
+                    else_=2,
+                ),
+                # Внутри «требует действия» — старые сверху (дольше ждут).
+                PayoutBatch.opened_at.asc(),
+                PayoutBatch.id.desc(),
+            )
+            .offset(safe_offset)
+            .limit(safe_limit)
+        ).all()
+
+        items_by_batch = {
+            row.id: session.scalar(
+                select(func.count())
+                .select_from(WithdrawalRequest)
+                .where(WithdrawalRequest.batch_id == row.id)
+            )
+            or 0
+            for row in rows
+        }
+
+    return {
+        "batches": [
+            serialize_batch_row(row, items_by_batch.get(row.id, 0))
+            for row in rows
+        ],
+        "total": total,
+        "limit": safe_limit,
+        "offset": safe_offset,
+    }
+
+
+@router.get("/payout-batches/{batch_id}")
+def get_payout_batch_route(
+    batch_id: str,
+    _admin: AdminUser = Depends(require_permission(PLAYERS_READ_PERMISSION)),
+) -> dict[str, Any]:
+    """Детали батча: заявки с их query_id для сборки TON Connect-запроса."""
+    from app.payout_batch_service import get_payout_batch
+
+    try:
+        return get_payout_batch(batch_id)
+    except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code, detail=error.detail
+        ) from error
 
 
 @router.post("/{withdrawal_id}/reject")
