@@ -20,7 +20,7 @@ step() { printf '\n=== %s ===\n' "$1"; }
 step "1/7 Проверка окружения"
 cd "$APP_ROOT"
 test -d .git || { echo "ОШИБКА: $APP_ROOT не git-репозиторий"; exit 1; }
-test -d node_modules || { echo "ОШИБКА: нет node_modules, выполните npm ci"; exit 1; }
+test -d node_modules || { echo "ОШИБКА: нет node_modules, выполните pnpm install --frozen-lockfile"; exit 1; }
 test -x "$VENV/bin/python" || { echo "ОШИБКА: нет venv в $VENV"; exit 1; }
 echo "репозиторий : $APP_ROOT"
 echo "фронт dist  : $FRONTEND_ROOT"
@@ -37,7 +37,12 @@ fi
 
 step "3/7 Сборка фронтенда"
 # VITE_API_BASE_URL НЕ задаём: пути в коде уже содержат /api.
-npm run build
+# Проект использует pnpm (pnpm-lock.yaml); package-lock.json в .gitignore.
+if command -v pnpm >/dev/null 2>&1; then
+    pnpm run build
+else
+    npm run build
+fi
 test -f dist/index.html || { echo "ОШИБКА: dist/index.html не создан"; exit 1; }
 BUILT_ASSET="$(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' dist/index.html | head -1)"
 echo "собран бандл: $BUILT_ASSET"

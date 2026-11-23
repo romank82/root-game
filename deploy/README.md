@@ -84,8 +84,10 @@ alembic upgrade head
 
 ```bash
 cd /opt/root-game
-npm ci
-npm run build
+# Проект на pnpm: package-lock.json в .gitignore, lock-файл — pnpm-lock.yaml.
+# `npm ci` здесь не сработает: нет package-lock.json.
+pnpm install --frozen-lockfile
+pnpm run build
 ```
 
 > ⚠️ `VITE_API_BASE_URL` задавать НЕЛЬЗЯ: все пути в коде уже содержат `/api`
