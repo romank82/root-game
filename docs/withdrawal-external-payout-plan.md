@@ -330,8 +330,15 @@ TonConnect возвращает BOC подписанного сообщения
    Авто-откат: ключ CMS `ton.payout_processing_timeout_hours` (24 ч) + джоб
    `payout-timeout-rollback` в планировщике `retention.py` (ежечасно в :15).
    Тесты: 15. — закрыто.
-6. **Фронтенд**: `@tonconnect/ui-react`, manifest, кнопка «Оплатить батч»,
-   список батчей с сортировкой и фильтрами, результат сверки по заявкам.
+6. ✅ **Фронтенд**: `@tonconnect/ui-react` + `@ton/core`, manifest
+   `public/tonconnect-manifest.json`, вкладка «Батчи выплат» в админке
+   (`PayoutBatchesSection.tsx`): список батчей с подсветкой «висит N дней»,
+   раскрытие заявок с `queryId` и jetton-wallet, кнопка «Оплатить батч»
+   через кошелёк, показ результата сверки по каждой заявке, «Откатить».
+   Payload TEP-74 строится `@ton/core` (`src/utils/jettonTransfer.ts`);
+   совместимость с бэкенд-парсером закреплена тестом на реальном payload.
+   Бэкенд: `jettonWallet` в ответе батча (`resolve_jetton_wallets`).
+   Зависимости ставятся pnpm (`pnpm-lock.yaml`). — закрыто.
 7. **Документ** `docs/withdrawal-external-payout.md` + обновление
    `economy-and-root-ledger.md` и road map.
 

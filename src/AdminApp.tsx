@@ -28,6 +28,8 @@ import { PlayersSection } from './components/admin/PlayersSection'
 import { AdminTree } from './components/admin/AdminTree'
 import { MonitoringSection } from './components/admin/MonitoringSection'
 import { WithdrawalsSection } from './components/admin/WithdrawalsSection'
+import { PayoutBatchesSection } from './components/admin/PayoutBatchesSection'
+import { PayoutTonConnectProvider } from './components/admin/PayoutTonConnect'
 import { StarsPaymentsSection } from './components/admin/StarsPaymentsSection'
 import { GeoAuditSection } from './components/admin/GeoAuditSection'
 
@@ -47,6 +49,7 @@ const ADMIN_SECTIONS = [
   'players',
   'monitoring',
   'withdrawals',
+  'payout-batches',
   'stars-payments',
   'geo-audit',
 ] as const
@@ -495,6 +498,7 @@ function AdminApp() {
             {section === 'players' && 'Игроки'}
             {section === 'monitoring' && 'Мониторинг'}
             {section === 'withdrawals' && 'Заявки на вывод'}
+            {section === 'payout-batches' && 'Батчи выплат'}
             {section === 'stars-payments' && 'Журнал Stars-платежей'}
             {section === 'geo-audit' && 'Гео-аудит'}
           </h1>
@@ -559,6 +563,13 @@ function AdminApp() {
               onClick={() => setSection('withdrawals')}
             >
               Заявки на вывод
+            </button>
+
+            <button
+              className={section === 'payout-batches' ? 'is-active' : ''}
+              onClick={() => setSection('payout-batches')}
+            >
+              Батчи выплат
             </button>
 
             <button
@@ -654,6 +665,13 @@ function AdminApp() {
       )}
 
       {section === 'withdrawals' && <WithdrawalsSection />}
+      {/* Батчи выплат живут в провайдере TON Connect: он нужен для
+          подключения кошелька и подписи переводов. */}
+      {section === 'payout-batches' && (
+        <PayoutTonConnectProvider>
+          <PayoutBatchesSection />
+        </PayoutTonConnectProvider>
+      )}
 
       {section === 'stars-payments' && <StarsPaymentsSection />}
 

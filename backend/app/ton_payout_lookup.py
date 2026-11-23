@@ -142,3 +142,56 @@ def lookup_transfer_by_query_id(
 ) -> dict[str, Any] | None:
     """Синхронная обёртка для HTTP-слоя: есть ли перевод в блокчейне."""
     return asyncio.run(_lookup_async(query_id, amount_nano))
+
+
+async def _resolve_many_async(addresses: list[str]) -> dict[str, str | None]:
+    """Адреса jetton-кошельков ROOT для списка владельцев.
+
+    Нужно для оплаты: переводить надо на jetton-wallet получателя, а не на
+    его обычный адрес. Адрес считает сам контракт минтера (get_wallet_address),
+    поэтому без TON API его не получить — тогда возвращаем None, и фронт
+    блокирует оплату с понятным сообщением.
+    """
+    from pytoniq_core import Address
+
+    from app.ton_service import get_jetton_wallet_address
+
+    if not addresses:
+        return {}
+    endpoint = settings.ton_api_endpoint
+    master = settings.ton_root_jetton_master
+    if not endpoint or not master:
+        logger.warning(
+            "Jetton wallet resolution skipped: TON_API_ENDPOINT/мастер не настроены"
+        )
+        return {address: None for address in addresses}
+
+    try:
+        minter = Address(master)
+    except Exception:  # noqa: BLE001
+        logger.warning("Некорректный TON_ROOT_JETTON_MASTER: %s", master)
+        return {address: None for address in addresses}
+
+    result: dict[str, str | None] = {}
+    provider = _TonCenterProvider(endpoint)
+    try:
+        for address in addresses:
+            try:
+                jetton_wallet = await get_jetton_wallet_address(
+                    minter, Address(address), provider
+                )
+                result[address] = jetton_wallet.to_str(is_user_friendly=True)
+            except Exception as error:  # noqa: BLE001 — один адрес не должен
+                # ронять весь список
+                logger.warning(
+                    "Jetton wallet lookup failed for %s: %s", address, error
+                )
+                result[address] = None
+    finally:
+        await provider.aclose()
+    return result
+
+
+def resolve_jetton_wallets(addresses: list[str]) -> dict[str, str | None]:
+    """Синхронная обёртка: владелец -> адрес его jetton-кошелька ROOT."""
+    return asyncio.run(_resolve_many_async(addresses))

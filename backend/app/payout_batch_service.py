@@ -107,9 +107,16 @@ def _build_payload_text(
 
 
 def _serialize_item(
-    withdrawal: WithdrawalRequest, query_id: str | None
+    withdrawal: WithdrawalRequest,
+    query_id: str | None,
+    jetton_wallet: str | None = None,
 ) -> dict[str, Any]:
-    """Заявка в ответе админке: всё, что нужно фронту для TON Connect."""
+    """Заявка в ответе админке: всё, что нужно фронту для TON Connect.
+
+    jettonWallet — адрес jetton-кошелька получателя: переводить ROOT нужно
+    на него, а не на обычный адрес игрока. None означает «не удалось
+    определить» (нет TON API) — фронт в этом случае блокирует оплату.
+    """
     amount_nano = withdrawal.amount_root_nano or (
         withdrawal.amount_root * NANO_PER_ROOT
     )
@@ -117,6 +124,7 @@ def _serialize_item(
         "withdrawalId": withdrawal.id,
         "playerId": withdrawal.player_id,
         "toAddress": withdrawal.to_address,
+        "jettonWallet": jetton_wallet,
         "amountRoot": withdrawal.amount_root,
         "amountRootNano": amount_nano,
         "queryId": query_id,
@@ -164,18 +172,51 @@ def serialize_batch_row(batch: PayoutBatch, item_count: int) -> dict[str, Any]:
     }
 
 
-def get_payout_batch(batch_id: str) -> dict[str, Any]:
-    """Детали одного батча: заявки с query_id для TON Connect."""
+def get_payout_batch(
+    batch_id: str, resolve_wallets: bool = True
+) -> dict[str, Any]:
+    """Детали одного батча: заявки с query_id и jetton-wallet для оплаты.
+
+    resolve_wallets=False — не ходить в TON API (для тестов и для случаев,
+    когда нужен только список заявок без оплаты).
+    """
     with SessionLocal() as session:
         batch = session.get(PayoutBatch, batch_id)
         if batch is None:
             raise MissionEngineError(404, "Батч не найден.")
-        items = _load_batch_items(session, batch_id)
+        rows = session.execute(
+            select(WithdrawalRequest)
+            .where(WithdrawalRequest.batch_id == batch_id)
+            .order_by(WithdrawalRequest.created_at, WithdrawalRequest.id)
+        ).scalars().all()
+        addresses = sorted({row.to_address for row in rows})
+
+    wallets: dict[str, str | None] = {}
+    if resolve_wallets and addresses:
+        # Импорт локальный: модуль тянет TON-клиент, а он нужен не всегда.
+        from app.ton_payout_lookup import resolve_jetton_wallets
+
+        try:
+            wallets = resolve_jetton_wallets(addresses)
+        except Exception as error:  # noqa: BLE001 — батч важнее адресов
+            logger.warning(
+                "Jetton wallet resolution failed for batch %s: %s",
+                batch_id,
+                error,
+            )
+
+    with SessionLocal() as session:
+        batch = session.get(PayoutBatch, batch_id)
+        if batch is None:  # pragma: no cover
+            raise MissionEngineError(404, "Батч не найден.")
+        items = _load_batch_items(session, batch_id, wallets)
         return _serialize_batch(batch, items)
 
 
 def _load_batch_items(
-    session: Session, batch_id: str
+    session: Session,
+    batch_id: str,
+    jetton_wallets: dict[str, str | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Заявки батча с их query_id (для отдачи фронту и для истории)."""
     rows = session.execute(
@@ -187,8 +228,13 @@ def _load_batch_items(
         .where(WithdrawalRequest.batch_id == batch_id)
         .order_by(WithdrawalRequest.created_at, WithdrawalRequest.id)
     ).all()
+    wallets = jetton_wallets or {}
     return [
-        _serialize_item(withdrawal, attempt.query_id if attempt else None)
+        _serialize_item(
+            withdrawal,
+            attempt.query_id if attempt else None,
+            wallets.get(withdrawal.to_address),
+        )
         for withdrawal, attempt in rows
     ]
 

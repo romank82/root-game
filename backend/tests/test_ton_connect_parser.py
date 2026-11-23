@@ -433,5 +433,62 @@ class OutMsgLookupParseTests(unittest.TestCase):
         )
 
 
+class FrontendPayloadCompatTests(unittest.TestCase):
+    """Payload, собранный фронтом (@ton/core), читается боевым парсером.
+
+    Фронт строит TEP-74 transfer в TypeScript, бэкенд разбирает его в Python.
+    Если порядок полей или кодирование coins разойдутся, подтверждение выплат
+    молча перестанет работать — этот тест ловит именно такой рассинхрон.
+    """
+
+    # Тот же payload, что выдаёт @ton/core в браузере для этих входных данных.
+    FRONTEND_PAYLOAD_B64 = (
+        "te6cckEBAQEANQAAZQ+KfqURIhD0femBFUlQL5AIACd8093dPEybOv551G4CDaTlKvvl"
+        "97bsEX+Q8QCFGwCGAdmGCx8="
+    )
+
+    def test_frontend_payload_parses(self) -> None:
+        from pytoniq_core import Cell
+
+        cell = Cell.one_from_boc(base64.b64decode(self.FRONTEND_PAYLOAD_B64))
+        parser = cell.begin_parse()
+
+        self.assertEqual(parser.load_uint(32), JETTON_TRANSFER_OP)
+        self.assertEqual(parser.load_uint(64), 1234567890123456789)
+        self.assertEqual(parser.load_coins(), 25 * 100_000_000)
+        recipient = parser.load_address()
+        self.assertIsNotNone(recipient)
+        # response_destination пуст: фронт шлёт storeAddress(null).
+        self.assertIsNone(parser.load_address())
+
+    def test_build_transfer_payload_matches_parser(self) -> None:
+        """Сборка в Python и разбор тем же кодом — замкнутый круг."""
+        from pytoniq_core import Address, Cell, begin_cell
+
+        amount = 25 * 100_000_000
+        query_id = 1234567890123456789
+        wallet = "kQATvmnu7p4mTZ1_POo3AQbScpV98vvbdgi_yHiAQo2AQx-X"
+
+        built = (
+            begin_cell()
+            .store_uint(JETTON_TRANSFER_OP, 32)
+            .store_uint(query_id, 64)
+            .store_coins(amount)
+            .store_address(Address(wallet))
+            .store_address(None)
+            .store_maybe_ref(None)
+            .store_coins(0)
+            .store_maybe_ref(None)
+            .end_cell()
+        )
+
+        parser = Cell.one_from_boc(built.to_boc()).begin_parse()
+        self.assertEqual(parser.load_uint(32), JETTON_TRANSFER_OP)
+        self.assertEqual(parser.load_uint(64), query_id)
+        self.assertEqual(parser.load_coins(), amount)
+        self.assertIsNotNone(parser.load_address())
+        self.assertIsNone(parser.load_address())
+
+
 if __name__ == "__main__":
     unittest.main()

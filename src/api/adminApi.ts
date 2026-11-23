@@ -1873,6 +1873,9 @@ export type PayoutBatchItem = {
   withdrawalId: string
   playerId: string
   toAddress: string
+  // Адрес jetton-кошелька получателя: переводить ROOT нужно на него,
+  // а не на обычный адрес игрока. null — не удалось определить (нет TON API).
+  jettonWallet: string | null
   amountRoot: number
   amountRootNano: number
   // Ключ сверки в блокчейне: по нему подтверждается конкретная заявка.
