@@ -1,3 +1,6 @@
+// ПЕРВЫМ: полифилл Buffer для @ton/core/@ton/crypto. Без него падает весь
+// бандл (Uncaught ReferenceError: Buffer is not defined) и админка пустая.
+import './polyfills'
 import { StrictMode } from 'react'
 import './i18n'
 import { createRoot } from 'react-dom/client'
