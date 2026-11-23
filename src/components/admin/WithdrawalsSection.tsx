@@ -308,7 +308,25 @@ export function WithdrawalsSection() {
                       )}
                     </td>
                     <td style={tdStyle}>{shorten(withdrawal.toAddress)}</td>
-                    <td style={tdStyle}>{withdrawal.status}</td>
+                    <td style={tdStyle}>
+                      {withdrawal.status}
+                      {/* Причина отказа выплаты: без неё failed + пустой хеш
+                          не отличить по конфигу, сети и балансу. */}
+                      {withdrawal.payoutError && (
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 11,
+                            maxWidth: 260,
+                            color: '#ff9d9d',
+                            wordBreak: 'break-word',
+                          }}
+                          title={withdrawal.payoutError}
+                        >
+                          {withdrawal.payoutError}
+                        </div>
+                      )}
+                    </td>
                     <td style={tdStyle}>
                       {withdrawal.tonTxHash ? shorten(withdrawal.tonTxHash) : '—'}
                     </td>

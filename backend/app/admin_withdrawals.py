@@ -29,7 +29,7 @@ from app.admin_access import require_permission
 from app.admin_audit import write_admin_audit
 from app.db import SessionLocal
 from app.mission_engine import MissionEngineError
-from app.models import AdminUser, WithdrawalRequest
+from app.models import AdminUser, PayoutAttempt, WithdrawalRequest
 from app.withdrawal_service import (
     NANO_PER_ROOT,
     process_withdrawal_batch,
@@ -69,8 +69,16 @@ class WithdrawalRejectPayload(BaseModel):
     reason: str = Field(..., min_length=1, max_length=255)
 
 
-def _serialize_withdrawal(withdrawal: WithdrawalRequest) -> dict[str, Any]:
-    """WithdrawalRequest -> безопасный JSON (адрес получателя — не секрет)."""
+def _serialize_withdrawal(
+    withdrawal: WithdrawalRequest,
+    attempt: PayoutAttempt | None = None,
+) -> dict[str, Any]:
+    """WithdrawalRequest -> безопасный JSON (адрес получателя — не секрет).
+
+    attempt — последняя попытка выплаты (PayoutAttempt). По ней админка
+    показывает, ПОЧЕМУ выплата не прошла: без этого `failed` + пустой tx-hash
+    не отличить от сети, конфига или баланса, и причину искать только в логах.
+    """
     return {
         "id": withdrawal.id,
         "playerId": withdrawal.player_id,
@@ -87,6 +95,14 @@ def _serialize_withdrawal(withdrawal: WithdrawalRequest) -> dict[str, Any]:
         "batchId": withdrawal.batch_id,
         "adminId": withdrawal.admin_id,
         "reason": withdrawal.reason,
+        # Причина отказа выплаты (не путать с reason — это отклонение админом).
+        "payoutError": attempt.error if attempt is not None else None,
+        "payoutAttemptStatus": attempt.status if attempt is not None else None,
+        "payoutAttemptedAt": (
+            attempt.created_at.isoformat()
+            if attempt is not None and attempt.created_at
+            else None
+        ),
         "createdAt": (
             withdrawal.created_at.isoformat() if withdrawal.created_at else None
         ),
@@ -164,8 +180,37 @@ def list_admin_withdrawals(
             .limit(safe_limit)
         ).all()
 
+        # Последняя попытка выплаты по каждой заявке — одним запросом.
+        # Без этого причина отказа невидима: админка получает только
+        # status='failed' и пустой tx-hash, а текст ошибки лежит в
+        # PayoutAttempt.error и теряется.
+        attempts_by_withdrawal: dict[str, PayoutAttempt] = {}
+        if rows:
+            attempt_rows = session.scalars(
+                select(PayoutAttempt)
+                .where(
+                    PayoutAttempt.withdrawal_id.in_(
+                        [row.id for row in rows]
+                    )
+                )
+                .order_by(
+                    PayoutAttempt.created_at.desc(),
+                    PayoutAttempt.id.desc(),
+                )
+            ).all()
+            for attempt in attempt_rows:
+                # Первая в порядке desc — самая свежая; остальные игнорируем.
+                attempts_by_withdrawal.setdefault(
+                    attempt.withdrawal_id, attempt
+                )
+
     return {
-        "withdrawals": [_serialize_withdrawal(row) for row in rows],
+        "withdrawals": [
+            _serialize_withdrawal(
+                row, attempts_by_withdrawal.get(row.id)
+            )
+            for row in rows
+        ],
         "total": total,
         "limit": safe_limit,
         "offset": safe_offset,

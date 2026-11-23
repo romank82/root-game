@@ -1829,6 +1829,11 @@ export type Withdrawal = {
   batchId: string | null
   adminId: string | null
   reason: string | null
+  // Причина отказа ВЫПЛАТЫ (не путать с reason — это отклонение админом).
+  // Заполняется из последнего PayoutAttempt: сеть, конфиг, баланс.
+  payoutError?: string | null
+  payoutAttemptStatus?: string | null
+  payoutAttemptedAt?: string | null
   createdAt: string | null
   updatedAt: string | null
 }

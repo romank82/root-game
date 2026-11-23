@@ -276,6 +276,11 @@ class AdminWithdrawalsTests(unittest.TestCase):
         self.assertIn("reason", first)
         self.assertIn("createdAt", first)
         self.assertIn("updatedAt", first)
+        # Причина отказа выплаты — часть контракта (пусто, если попыток не было).
+        self.assertIn("payoutError", first)
+        self.assertIn("payoutAttemptStatus", first)
+        self.assertIn("payoutAttemptedAt", first)
+        self.assertIsNone(first["payoutError"])
 
         pending_only = self.admin_withdrawals.list_admin_withdrawals(
             status="pending", _admin=admin
@@ -403,4 +408,53 @@ class AdminWithdrawalsTests(unittest.TestCase):
             audit.after_json,
             {"status": "rejected", "reason": "Адрес не подтверждён."},
         )
+
+    def test_failed_payout_error_is_visible_in_list(self) -> None:
+        """Провал выплаты: причина из PayoutAttempt.error видна в списке.
+
+        Без этого админка показывает только status='failed' и пустой
+        ton_tx_hash — конфиг, сеть и баланс неотличимы, причину искать в логах.
+        """
+        with self.SessionLocal.begin() as session:
+            admin = self._make_admin(session)
+            player_id = self._make_player(session)
+            self._seed_withdrawal_settings(session)
+            self._seed_wallet(session, player_id, 1000)
+
+        withdrawal_id = self.withdrawal_service.create_withdrawal_request(
+            player_id, 100, VALID_TON_ADDRESS
+        )["withdrawalId"]
+
+        # Сеть недоступна — send_jetton_transfer_sync бросает.
+        with patch.object(
+            self.withdrawal_service,
+            "send_jetton_transfer_sync",
+            side_effect=RuntimeError("TON_API_ENDPOINT не настроен."),
+        ):
+            batch = self.withdrawal_service.process_withdrawal_batch(admin.id)
+
+        self.assertEqual(batch["confirmed"], 0)
+        self.assertEqual(batch["failed"], 1)
+
+        result = self.admin_withdrawals.list_admin_withdrawals(
+            status="failed", _admin=admin
+        )
+        self.assertEqual(result["total"], 1)
+        row = result["withdrawals"][0]
+        self.assertEqual(row["id"], withdrawal_id)
+        self.assertEqual(row["status"], "failed")
+        self.assertIsNone(row["tonTxHash"])
+        # Главное: причина видна и не пустая.
+        self.assertEqual(
+            row["payoutError"], "TON_API_ENDPOINT не настроен."
+        )
+        self.assertEqual(row["payoutAttemptStatus"], "failed")
+        self.assertIsNotNone(row["payoutAttemptedAt"])
+
+        # Холд возвращён игроку — провал не съедает ROOT.
+        with self.SessionLocal() as session:
+            wallet = session.scalar(
+                select(Wallet).where(Wallet.player_id == player_id)
+            )
+            self.assertEqual(wallet.available_balance, 1000)
 
