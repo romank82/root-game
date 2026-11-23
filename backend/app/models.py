@@ -2058,6 +2058,72 @@ class PayoutAttempt(TimestampMixin, Base):
 
 
 
+class PayoutBatch(TimestampMixin, Base):
+    """Батч выплат для оплаты внешним кошельком (Tonkeeper Multisend).
+
+    Заменяет автоматическую отправку: сервер готовит список, владелец игры
+    платит со своего устройства, сервер сверяет факт оплаты с блокчейном.
+
+    Жизненный цикл:
+      ready -> submitted -> confirmed
+        \\-> rolled_back (отказ, холды заявок возвращаются)
+
+    Инвариант «один открытый батч» держит ЧАСТИЧНЫЙ UNIQUE ИНДЕКС в БД, а не
+    логика приложения: планировщик APScheduler живёт в каждом из 3 воркеров
+    gunicorn, поэтому «создать батч» вызывается трижды одновременно. Второй и
+    третий запуск упрутся в ограничение и не создадут дублей.
+
+    Физическое удаление запрещено: append-only история выплат.
+    """
+
+    __tablename__ = "payout_batches"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # Кто сформировал/оплатил. NULL — создан автоматическим джобом.
+    admin_id: Mapped[str | None] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="ready", index=True
+    )
+    # Сумма батча в наноROOT на момент формирования (снимок, не пересчёт).
+    total_nano: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    # Готовый текст для Multisend: история + возможность повторить оплату.
+    payload_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Хеш транзакции из блокчейна (после успешной сверки).
+    tx_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # Момент открытия: для контроля «висит N дней без оплаты».
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    # Комментарий отката (причина, по которой батч снят).
+    rollback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    terminal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('ready', 'submitted', 'confirmed', 'rolled_back')",
+            name="ck_payout_batches_status",
+        ),
+        # Один открытый батч на всю систему. Тот самый барьер против
+        # трёх воркеров: второй INSERT падает с IntegrityError.
+        Index(
+            "uq_payout_batches_one_open",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text("status IN ('ready', 'submitted')"),
+            sqlite_where=text("status IN ('ready', 'submitted')"),
+        ),
+    )
+
+
 class TonPollCursor(TimestampMixin, Base):
     """Курсор поллинга входящих ROOT-jetton (Sprint 1.x).
 
