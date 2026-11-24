@@ -85,6 +85,39 @@ def _decode_boc(boc_base64: str) -> Cell:
         raise BocParseError(f"BOC не является ячейкой TON: {error}") from error
 
 
+def _unwrap_external_envelope(cell: Cell) -> Cell:
+    """Снять обёртку внешнего сообщения, если она есть.
+
+    TON Connect возвращает не «голое» тело кошелька, а внешнее сообщение:
+      ext_in_msg_info$10 src:MsgAddress import_fee:Grams body:^Cell
+    Первые биты там — служебные (magic 0b10 + адрес), а не op-код кошелька.
+    Если разбирать такую ячейку как тело, всё съезжает: детектор версии видит
+    не 0x7369676e, решает «V4», берёт мусор как подпись и выдаёт
+    «подпись не совпадает» — хотя подпись верна.
+
+    Распознаём по первым двум битам: 0b10 = ext_in_msg_info.
+    Тело лежит в ref; биты самой обёртки — только служебные поля.
+    """
+    total = cell.bits.__len__()
+    if total < 2 or not cell.refs:
+        return cell
+
+    peek = cell.begin_parse()
+    if peek.load_uint(2) != 0b10:
+        return cell
+
+    # Признак обёртки: в битах только служебные поля (magic 2 бита + адрес
+    # + import_fee), а всё содержимое — в теле-ref. У настоящего тела
+    # кошелька бит много (op + поля + подпись 512).
+    #
+    # Без этой проверки короткое тело (маленький тестовый BOC) ошибочно
+    # принималось за обёртку, и разбор съезжал.
+    if total > 40:
+        return cell
+
+    return cell.refs[0]
+
+
 def _detect_wallet_version(slice_: Any) -> str:
     """Версия кошелька по первым 32 битам: "v5" или "v4".
 
@@ -172,7 +205,7 @@ def verify_boc_signature(boc_base64: str, public_key: bytes) -> str:
     if not isinstance(public_key, (bytes, bytearray)) or len(public_key) != 32:
         raise BocParseError("Публичный ключ кошелька должен быть 32 байта.")
 
-    cell = _decode_boc(boc_base64)
+    cell = _unwrap_external_envelope(_decode_boc(boc_base64))
     version = _detect_wallet_version(cell.begin_parse())
 
     if version == "v5":
@@ -325,7 +358,7 @@ def parse_jetton_transfers(boc_base64: str) -> list[dict[str, Any]]:
 
     Порядок переводов сохраняется тем же, что в BOC.
     """
-    cell = _decode_boc(boc_base64)
+    cell = _unwrap_external_envelope(_decode_boc(boc_base64))
     version = _detect_wallet_version(cell.begin_parse())
 
     if version == "v5":
@@ -385,7 +418,7 @@ def extract_sender_address(boc_base64: str) -> str:
     Нужен, чтобы сверить с ton.payout_wallet: платить должен только он.
     Работает для V4 и V5R1.
     """
-    cell = _decode_boc(boc_base64)
+    cell = _unwrap_external_envelope(_decode_boc(boc_base64))
     version = _detect_wallet_version(cell.begin_parse())
 
     try:

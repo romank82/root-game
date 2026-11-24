@@ -300,5 +300,68 @@ class WalletV4StillWorksTests(unittest.TestCase):
         self.assertTrue(same_address(extract_sender_address(boc), SENDER))
 
 
+def build_v5_envelope(messages, private_key: bytes) -> str:
+    """BOC в том виде, как его возвращает TON Connect: внешнее сообщение.
+
+    ext_in_msg_info$10 src:MsgAddress import_fee:Grams body:^Cell
+    Тело (подписанное V5-сообщение) лежит в ref, а не в битах обёртки.
+    """
+    import base64 as _b64
+
+    signed_body = Cell.one_from_boc(_b64.b64decode(build_v5_boc(messages, private_key)))
+    envelope = (
+        begin_cell()
+        .store_uint(2, 2)      # ext_in_msg_info$10
+        .store_address(None)   # src: addr_none
+        .store_coins(0)        # import_fee
+        .store_ref(signed_body)
+        .end_cell()
+    )
+    return _b64.b64encode(envelope.to_boc()).decode()
+
+
+class ExternalEnvelopeTests(unittest.TestCase):
+    """TON Connect отдаёт BOC с обёрткой внешнего сообщения.
+
+    Без снятия обёртки парсер читал служебные биты (0b10 + адрес) вместо
+    op-кода 0x7369676e, считал сообщение V4, брал мусор как подпись и отвечал
+    «Подпись BOC не совпадает с ключом кошелька выплат» — при ВЕРНОЙ подписи.
+    Именно это видел заказчик при первой реальной оплате.
+    """
+
+    def setUp(self) -> None:
+        self.words = mnemonic_new(24)
+        self.public_key, self.private_key = mnemonic_to_wallet_key(self.words)
+
+    def test_enveloped_signature_verifies(self) -> None:
+        boc = build_v5_envelope([_message(QUERY_A, AMOUNT_A)], self.private_key)
+        self.assertEqual(verify_boc_signature(boc, self.public_key), "ok")
+
+    def test_enveloped_transfers_parsed(self) -> None:
+        boc = build_v5_envelope(
+            [_message(QUERY_A, AMOUNT_A), _message(QUERY_B, AMOUNT_B)],
+            self.private_key,
+        )
+
+        transfers = parse_jetton_transfers(boc)
+
+        self.assertEqual(
+            [(t["queryId"], t["amountNano"]) for t in transfers],
+            [(str(QUERY_A), AMOUNT_A), (str(QUERY_B), AMOUNT_B)],
+        )
+
+    def test_enveloped_sender_extracted(self) -> None:
+        boc = build_v5_envelope([_message(QUERY_A, AMOUNT_A)], self.private_key)
+        self.assertTrue(same_address(extract_sender_address(boc), SENDER))
+
+    def test_enveloped_foreign_key_rejected(self) -> None:
+        """Обёртка не должна ослаблять проверку подписи."""
+        boc = build_v5_envelope([_message(QUERY_A, AMOUNT_A)], self.private_key)
+        other_public, _ = mnemonic_to_wallet_key(mnemonic_new(24))
+
+        with self.assertRaises(BocParseError):
+            verify_boc_signature(boc, other_public)
+
+
 if __name__ == "__main__":
     unittest.main()
