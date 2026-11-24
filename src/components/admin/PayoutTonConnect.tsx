@@ -14,10 +14,10 @@ import { buildTransferPayload } from '../../utils/jettonTransfer'
 //
 // В dev домен другой (localhost), а Tonkeeper обязан скачать манифест,
 // поэтому в разработке берём прод-адрес.
-const MANIFEST_URL =
-  typeof window !== 'undefined' && window.location.hostname === 'localhost'
-    ? 'https://himeraprotocol.pro/tonconnect-manifest.json'
-    : '/tonconnect-manifest.json'
+// Абсолютный URL обязателен: кошелёк загружает манифест из своего вебвью, и
+// относительный путь он резолвит в СВОЙ домен — отсюда «Failed to load
+// Manifest: 404». Домен берём текущий (prod — himeraprotocol.pro).
+const MANIFEST_URL = `${window.location.origin}/tonconnect-manifest.json`
 
 // Газ на один перевод: 0.05 TON уходит на jetton-wallet, чтобы он смог
 // выполнить transfer. Реальная стоимость ~0.037 TON, остальное — запас.
