@@ -88,36 +88,45 @@ def _decode_boc(boc_base64: str) -> Cell:
 def _unwrap_external_envelope(cell: Cell) -> Cell:
     """Снять обёртку внешнего сообщения, если она есть.
 
-    TON Connect возвращает не «голое» тело кошелька, а внешнее сообщение:
-      ext_in_msg_info$10 src:MsgAddress import_fee:Grams body:^Cell
-    Первые биты там — служебные (magic 0b10 + адрес), а не op-код кошелька.
-    Если разбирать такую ячейку как тело, всё съезжает: детектор версии видит
-    не 0x7369676e, решает «V4», берёт мусор как подпись и выдаёт
-    «подпись не совпадает» — хотя подпись верна.
+    TON Connect возвращает внешнее сообщение:
+      ext_in_msg_info$10 src:MsgAddressExt import_fee:Grams body:(Either X ^X)
 
-    Распознаём по первым двум битам: 0b10 = ext_in_msg_info.
-    Тело лежит в ref; биты самой обёртки — только служебные поля.
+    Тело лежит ЛИБО inline в битах (Either=0), ЛИБО в ref (Either=1) — оба
+    варианта встречаются, и угадать по структуре нельзя. Поэтому разбираем
+    штатным MessageAny: он знает раскладку и корректно разделяет служебные
+    поля и тело.
+
+    Реальный BOC с прода: корень 919 бит, тело inline (Either=1 → ref),
+    и после MessageAny тело выходит 642 бита с op 0x7369676e. Ручной проход
+    по битам давал мусор в import_fee и не находил op.
     """
     total = cell.bits.__len__()
-    if total < 2 or not cell.refs:
+    if total < 2:
         return cell
 
     peek = cell.begin_parse()
-    if peek.load_uint(2) != 0b10:
+    if peek.load_uint(2) != 0b10:  # не ext_in_msg_info — это уже тело
         return cell
 
-    # Точный признак: в ref лежит подписанное V5-тело, то есть первые 32 бита
-    # этого ref — op-код 0x7369676e. Проверка по битам самой ячейки ненадёжна:
-    # у ext_in с реальным адресом отправителя бит много (адрес = 267 бит), и
-    # порог «мало бит» не срабатывал — обёртка оставалась неснятой.
-    body_candidate = cell.refs[0]
-    if body_candidate.bits.__len__() < 32:
-        return cell
-    body_peek = body_candidate.begin_parse()
-    if body_peek.load_uint(32) != WALLET_V5_SIGNED_OP:
+    try:
+        message = MessageAny.deserialize(cell.begin_parse())
+    except Exception:  # noqa: BLE001 — не наше сообщение, пробуем как есть
         return cell
 
-    return body_candidate
+    if not message.is_external:
+        return cell
+
+    body = message.body
+    # Распаковка имеет смысл, только если в теле действительно op-код
+    # кошелька (V5) или оно само по себе похоже на подписанное сообщение.
+    # Иначе это не обёртка, а обычная ячейка, случайно начавшаяся с 0b10
+    # (например, короткое тестовое тело) — её нельзя подменять.
+    if body.bits.__len__() < 32:
+        return cell
+    if body.begin_parse().load_uint(32) != WALLET_V5_SIGNED_OP:
+        return cell
+
+    return body
 
 
 def _detect_wallet_version(slice_: Any) -> str:
@@ -259,51 +268,52 @@ def _iter_v4_message_cells(slice_: Any) -> list[Cell]:
     return message_cells
 
 
-def _v5_actions_from_packed(packed_cell: Cell) -> Cell:
-    """Достать дерево actions из обёртки packed.
-
-    V5 кладёт действия в обёртку:
-      packed = [signed:1][ref actions][ref external:1]
-    Поэтому первый ref — это уже дерево действий, а не сами действия.
-    Если refs нет — структура не та, сообщаем понятно.
-    """
-    if not packed_cell.refs:
-        raise BocParseError(
-            "В V5-сообщении нет ссылки на список действий."
-        )
-    return packed_cell.refs[0]
-
-
 def _collect_v5_message_cells(actions_cell: Cell) -> list[Cell]:
-    """Ячейки MessageAny из V5-дерева actions.
+    """Ячейки MessageAny из V5-списка действий.
 
-    Каждый узел: ref на предыдущий узел + ref на action. Обход идёт от
-    последнего к первому, поэтому результат переворачиваем — нужен исходный
-    порядок переводов.
+    Реальная структура (снята с прод-BOC, подтверждена дампом):
+      узел = биты: op_action(32) + send_mode(8), refs: [prev, message]
+      action_send_msg#0ec3c86d mode:(## 8) out_msg:^MessageRelaxed
+
+    То есть OP действия и режим лежат В БИТАХ узла, а сообщение — во ВТОРОМ
+    ref. Раньше код искал action в refs[1] как отдельную ячейку и читал оттуда
+    op — получался мусор (0x620061d3 вместо 0x0ec3c86d), и переводы «не
+    находились», хотя они есть.
+
+    Список — связный: refs[0] указывает на предыдущий узел (или пустую ячейку).
     """
     message_cells: list[Cell] = []
     node: Cell | None = actions_cell
     guard = 0
-    while node is not None and len(node.refs) >= 2:
+    while node is not None:
         guard += 1
         if guard > MAX_MESSAGES_PER_BOC:
             raise BocParseError(
                 f"Слишком много действий в BOC (> {MAX_MESSAGES_PER_BOC})."
             )
-        prev_node = node.refs[0]
-        action = node.refs[1]
 
-        parser = action.begin_parse()
+        # Конец списка: пустая ячейка (prev последнего узла).
+        if node.bits.__len__() == 0 and not node.refs:
+            break
+        if node.bits.__len__() < 32 or not node.refs:
+            break
+
+        parser = node.begin_parse()
         try:
             op = parser.load_uint(32)
             parser.load_uint(8)  # send_mode
-            if op == ACTION_SEND_MSG_OP and parser.remaining_refs:
-                message_cells.append(parser.load_ref())
         except Exception as error:  # noqa: BLE001
             raise BocParseError(f"Действие V5 не разобралось: {error}") from error
 
+        prev_node = node.refs[0]
+        message_cell = node.refs[1] if len(node.refs) > 1 else None
+
+        if op == ACTION_SEND_MSG_OP and message_cell is not None:
+            message_cells.append(message_cell)
+
         node = prev_node
 
+    # Обход шёл от последнего к первому — восстанавливаем исходный порядок.
     message_cells.reverse()
     return message_cells
 
@@ -379,9 +389,7 @@ def parse_jetton_transfers(boc_base64: str) -> list[dict[str, Any]]:
             raise BocParseError(f"Неожидаемая операция V5-кошелька: 0x{op:x}.")
         if body.remaining_refs == 0:
             raise BocParseError("В V5-сообщении нет действий.")
-        message_cells = _collect_v5_message_cells(
-            _v5_actions_from_packed(body.load_ref())
-        )
+        message_cells = _collect_v5_message_cells(body.load_ref())
     else:
         slice_ = cell.begin_parse()
         signature, slice_ = _split_signature_v4(slice_)
@@ -415,25 +423,47 @@ def parse_jetton_transfers(boc_base64: str) -> list[dict[str, Any]]:
 
 
 def extract_sender_address(boc_base64: str) -> str:
-    """Адрес кошелька-отправителя из BOC (src первого внутреннего сообщения).
+    """Адрес кошелька, который подписал сообщение.
 
-    Нужен, чтобы сверить с ton.payout_wallet: платить должен только он.
+    Как определяем: у внешнего сообщения `src` пуст (внешние сообщения не
+    имеют отправителя в блокчейне), а `dest` — это адрес кошелька, КОТОРОМУ
+    адресовано сообщение. Для подписанного перевода это кошелёк-владелец,
+    то есть тот, кто платит. Проверено на реальном BOC с прода:
+      dest внешнего = EQAqDpRY…4R3 = 0QAqDp…z2I4 (кошелёк выплат)
+      src внутренних сообщений = None
+
+    Раньше функция брала `src` первого внутреннего сообщения и падала с
+    «У сообщения нет отправителя».
+
     Работает для V4 и V5R1.
     """
-    cell = _unwrap_external_envelope(_decode_boc(boc_base64))
-    version = _detect_wallet_version(cell.begin_parse())
+    cell = _decode_boc(boc_base64)
+
+    # 1. Внешнее сообщение: dest — кошелёк-отправитель.
+    peek = cell.begin_parse()
+    if peek.remaining_bits >= 2 and peek.load_uint(2) == 0b10:
+        try:
+            outer = MessageAny.deserialize(cell.begin_parse())
+            if outer.is_external:
+                dest = outer.info.dest
+                if dest is not None:
+                    return dest.to_str(is_user_friendly=True)
+        except Exception:  # noqa: BLE001 — пробуем прежний путь
+            logger.debug("Не удалось прочитать внешнее сообщение целиком")
+
+    # 2. Фолбэк: src первого внутреннего сообщения (старое поведение).
+    inner = _unwrap_external_envelope(cell)
+    version = _detect_wallet_version(inner.begin_parse())
 
     try:
         if version == "v5":
-            _signature, body_cell = _split_signature_v5(cell)
+            _signature, body_cell = _split_signature_v5(inner)
             body = body_cell.begin_parse()
             for _ in range(4):  # op, wallet_id, valid_until, seqno
                 body.load_uint(32)
-            message_cells = _collect_v5_message_cells(
-            _v5_actions_from_packed(body.load_ref())
-        )
+            message_cells = _collect_v5_message_cells(body.load_ref())
         else:
-            slice_ = cell.begin_parse()
+            slice_ = inner.begin_parse()
             _signature, slice_ = _split_signature_v4(slice_)
             for _ in range(3):  # wallet_id, valid_until, seqno
                 slice_.load_uint(32)
@@ -445,7 +475,9 @@ def extract_sender_address(boc_base64: str) -> str:
         message = MessageAny.deserialize(message_cells[0].begin_parse())
         src = message.info.src
         if src is None:
-            raise BocParseError("У сообщения нет отправителя.")
+            raise BocParseError(
+                "У сообщения нет отправителя: укажите dest внешнего сообщения."
+            )
         return src.to_str(is_user_friendly=True)
     except BocParseError:
         raise
