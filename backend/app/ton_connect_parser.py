@@ -106,16 +106,18 @@ def _unwrap_external_envelope(cell: Cell) -> Cell:
     if peek.load_uint(2) != 0b10:
         return cell
 
-    # Признак обёртки: в битах только служебные поля (magic 2 бита + адрес
-    # + import_fee), а всё содержимое — в теле-ref. У настоящего тела
-    # кошелька бит много (op + поля + подпись 512).
-    #
-    # Без этой проверки короткое тело (маленький тестовый BOC) ошибочно
-    # принималось за обёртку, и разбор съезжал.
-    if total > 40:
+    # Точный признак: в ref лежит подписанное V5-тело, то есть первые 32 бита
+    # этого ref — op-код 0x7369676e. Проверка по битам самой ячейки ненадёжна:
+    # у ext_in с реальным адресом отправителя бит много (адрес = 267 бит), и
+    # порог «мало бит» не срабатывал — обёртка оставалась неснятой.
+    body_candidate = cell.refs[0]
+    if body_candidate.bits.__len__() < 32:
+        return cell
+    body_peek = body_candidate.begin_parse()
+    if body_peek.load_uint(32) != WALLET_V5_SIGNED_OP:
         return cell
 
-    return cell.refs[0]
+    return body_candidate
 
 
 def _detect_wallet_version(slice_: Any) -> str:

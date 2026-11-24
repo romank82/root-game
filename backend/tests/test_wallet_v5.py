@@ -320,6 +320,22 @@ def build_v5_envelope(messages, private_key: bytes) -> str:
     return _b64.b64encode(envelope.to_boc()).decode()
 
 
+def build_v5_envelope_with_src(messages, private_key: bytes) -> str:
+    """Обёртка ext_in с УКАЗАННЫМ src: адрес добавляет 267 бит."""
+    import base64 as _b64
+
+    signed_body = Cell.one_from_boc(_b64.b64decode(build_v5_boc(messages, private_key)))
+    envelope = (
+        begin_cell()
+        .store_uint(2, 2)
+        .store_address(Address(SENDER))  # src указан
+        .store_coins(0)
+        .store_ref(signed_body)
+        .end_cell()
+    )
+    return _b64.b64encode(envelope.to_boc()).decode()
+
+
 class ExternalEnvelopeTests(unittest.TestCase):
     """TON Connect отдаёт BOC с обёрткой внешнего сообщения.
 
@@ -353,6 +369,22 @@ class ExternalEnvelopeTests(unittest.TestCase):
     def test_enveloped_sender_extracted(self) -> None:
         boc = build_v5_envelope([_message(QUERY_A, AMOUNT_A)], self.private_key)
         self.assertTrue(same_address(extract_sender_address(boc), SENDER))
+
+    def test_envelope_with_sender_address(self) -> None:
+        """Обёртка с указанным src (273 бита) — реальный ext_in из сети.
+
+        Первая версия снятия обёртки проверяла «мало бит в ячейке» (порог 40),
+        и такой случай не срабатывал: адрес добавляет 267 бит. Признак
+        исправлен на op-код 0x7369676e в ref.
+        """
+        boc = build_v5_envelope_with_src(
+            [_message(QUERY_A, AMOUNT_A)], self.private_key
+        )
+
+        self.assertEqual(verify_boc_signature(boc, self.public_key), "ok")
+        transfers = parse_jetton_transfers(boc)
+        self.assertEqual(len(transfers), 1)
+        self.assertEqual(transfers[0]["queryId"], str(QUERY_A))
 
     def test_enveloped_foreign_key_rejected(self) -> None:
         """Обёртка не должна ослаблять проверку подписи."""

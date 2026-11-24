@@ -121,6 +121,24 @@ def _batch_items(session: Session, batch_id: str) -> list[tuple]:
     return [(w, by_withdrawal.get(w.id)) for w in withdrawals]
 
 
+def _save_failed_boc(boc_base64: str) -> None:
+    """Сохранить BOC, на котором не сошлась подпись, для разбора.
+
+    Пишем в /tmp (на сервере есть всегда, не требует прав в каталоге проекта)
+    и дублируем структуру в лог. Файл перезаписывается — нужен последний
+    случай, а не история.
+    """
+    from pathlib import Path
+
+    path = Path("/tmp/payout_failed_boc.b64")
+    path.write_text(boc_base64, encoding="ascii")
+    logger.error(
+        "BOC не прошёл проверку подписи; сохранён в %s (длина base64: %d)",
+        path,
+        len(boc_base64),
+    )
+
+
 def _verify_local_checks(
     session: Session,
     batch_id: str,
@@ -157,6 +175,12 @@ def _verify_local_checks(
     try:
         verify_boc_signature(boc_base64, public_key)
     except BocParseError as error:
+        # Сохраняем реальный BOC: без него причину несовпадения не установить,
+        # а гадать по коду бессмысленно (ключ в CMS сверен с блокчейном).
+        try:
+            _save_failed_boc(boc_base64)
+        except Exception:  # noqa: BLE001 — диагностика не должна мешать ответу
+            logger.exception("Не удалось сохранить BOC для разбора")
         raise BatchConfirmError(422, f"Подпись BOC не подтверждена: {error}") from error
 
     # 3. Отправитель — наш кошелёк выплат.
