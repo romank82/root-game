@@ -37,6 +37,7 @@ from app.ton_connect_parser import (
 )
 from app.withdrawal_service import (
     NANO_PER_ROOT,
+    PAYOUT_ATTEMPT_ACTIVE_STATUSES,
     PAYOUT_ATTEMPT_SENDING,
     PAYOUT_ATTEMPT_SENT,
     _utcnow,
@@ -86,18 +87,38 @@ def _load_batch(session: Session, batch_id: str) -> PayoutBatch:
 
 
 def _batch_items(session: Session, batch_id: str) -> list[tuple]:
-    """Пары (заявка, попытка) по заявкам батча."""
-    return list(
-        session.execute(
-            select(WithdrawalRequest, PayoutAttempt)
-            .join(
-                PayoutAttempt,
-                PayoutAttempt.withdrawal_id == WithdrawalRequest.id,
-            )
+    """Пары (заявка, АКТУАЛЬНАЯ попытка) по заявкам батча.
+
+    У заявки может быть несколько попыток за историю (после отката прежняя
+    становится 'failed', новый батч создаёт свежую 'sending'). Простой join
+    на withdrawal_id вернул бы заявку дважды, и подтверждение увидело бы
+    лишний query_id. Берём только активную попытку.
+    """
+    withdrawals = list(
+        session.scalars(
+            select(WithdrawalRequest)
             .where(WithdrawalRequest.batch_id == batch_id)
             .order_by(WithdrawalRequest.created_at, WithdrawalRequest.id)
         ).all()
     )
+    if not withdrawals:
+        return []
+
+    attempts = list(
+        session.scalars(
+            select(PayoutAttempt)
+            .where(
+                PayoutAttempt.withdrawal_id.in_([w.id for w in withdrawals]),
+                PayoutAttempt.status.in_(PAYOUT_ATTEMPT_ACTIVE_STATUSES),
+            )
+            .order_by(PayoutAttempt.created_at.desc())
+        ).all()
+    )
+    by_withdrawal: dict[str, PayoutAttempt] = {}
+    for attempt in attempts:
+        by_withdrawal.setdefault(attempt.withdrawal_id, attempt)
+
+    return [(w, by_withdrawal.get(w.id)) for w in withdrawals]
 
 
 def _verify_local_checks(

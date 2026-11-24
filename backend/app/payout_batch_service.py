@@ -28,6 +28,7 @@ from app.mission_engine import MissionEngineError
 from app.models import PayoutAttempt, PayoutBatch, PlayerRestriction, WithdrawalRequest
 from app.withdrawal_service import (
     NANO_PER_ROOT,
+    PAYOUT_ATTEMPT_ACTIVE_STATUSES,
     PAYOUT_ATTEMPT_SENDING,
     _new_id,
     _new_payout_query_id,
@@ -219,23 +220,47 @@ def _load_batch_items(
     jetton_wallets: dict[str, str | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Заявки батча с их query_id (для отдачи фронту и для истории)."""
-    rows = session.execute(
-        select(WithdrawalRequest, PayoutAttempt)
-        .outerjoin(
-            PayoutAttempt,
-            PayoutAttempt.withdrawal_id == WithdrawalRequest.id,
-        )
-        .where(WithdrawalRequest.batch_id == batch_id)
-        .order_by(WithdrawalRequest.created_at, WithdrawalRequest.id)
-    ).all()
+    # Два запроса вместо JOIN: у заявки может быть несколько попыток за
+    # историю (после отката прежняя помечается 'failed', новый батч создаёт
+    # свежую 'sending'). JOIN на withdrawal_id возвращал заявку ДВАЖДЫ —
+    # интерфейс показывал «2 заявки · 310 ROOT» вместо «1 заявка · 155 ROOT»,
+    # а кнопка оплаты собирала два перевода на одну заявку с разными
+    # query_id, то есть владелец подписал бы двойную выплату.
+    withdrawals = list(
+        session.scalars(
+            select(WithdrawalRequest)
+            .where(WithdrawalRequest.batch_id == batch_id)
+            .order_by(WithdrawalRequest.created_at, WithdrawalRequest.id)
+        ).all()
+    )
+    if not withdrawals:
+        return []
+
+    attempts = list(
+        session.scalars(
+            select(PayoutAttempt)
+            .where(
+                PayoutAttempt.withdrawal_id.in_([w.id for w in withdrawals]),
+                PayoutAttempt.status.in_(PAYOUT_ATTEMPT_ACTIVE_STATUSES),
+            )
+            .order_by(PayoutAttempt.created_at.desc())
+        ).all()
+    )
+    # На заявку — первая (самая свежая) активная попытка.
+    by_withdrawal: dict[str, PayoutAttempt] = {}
+    for attempt in attempts:
+        by_withdrawal.setdefault(attempt.withdrawal_id, attempt)
+
     wallets = jetton_wallets or {}
     return [
         _serialize_item(
             withdrawal,
-            attempt.query_id if attempt else None,
+            by_withdrawal[withdrawal.id].query_id
+            if withdrawal.id in by_withdrawal
+            else None,
             wallets.get(withdrawal.to_address),
         )
-        for withdrawal, attempt in rows
+        for withdrawal in withdrawals
     ]
 
 
