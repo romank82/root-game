@@ -33,8 +33,8 @@ from app.db import SessionLocal
 from app.mission_engine import MissionEngineError
 from app.models import PayoutAttempt, PayoutBatch, WithdrawalRequest
 from app.withdrawal_service import (
+    PAYOUT_ATTEMPT_ACTIVE_STATUSES,
     PAYOUT_ATTEMPT_FAILED,
-    PAYOUT_ATTEMPT_SENDING,
     _refund_withdrawal_hold,
     _utcnow,
 )
@@ -170,10 +170,16 @@ def rollback_payout_batch(
             if admin_id is not None:
                 withdrawal.admin_id = admin_id
 
-            # Попытка закрывается 'failed' в обоих режимах: 'sending' держит
-            # unique-индекс и не дал бы создать новую попытку в следующем
-            # батче.
-            if attempt is not None and attempt.status == PAYOUT_ATTEMPT_SENDING:
+            # Попытка закрывается 'failed' в обоих режимах: АКТИВНАЯ попытка
+            # (sending ИЛИ sent) держит частичный unique-индекс
+            # uq_payout_attempts_no_second_send и не дала бы создать новую
+            # попытку в следующем батче.
+            #
+            # Раньше закрывалась только 'sending'. На проде это дало 500 при
+            # сборке нового батча: после неудачной оплаты попытка была 'sent',
+            # откат её не тронул, и INSERT новой попытки падал с
+            # UniqueViolation по uq_payout_attempts_no_second_send.
+            if attempt is not None and attempt.status in PAYOUT_ATTEMPT_ACTIVE_STATUSES:
                 attempt.status = PAYOUT_ATTEMPT_FAILED
                 attempt.error = f"Rollback: {clean_reason}"[:1000]
 

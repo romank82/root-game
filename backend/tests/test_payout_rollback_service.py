@@ -361,6 +361,47 @@ class PayoutRollbackServiceTests(unittest.TestCase):
         self.assertEqual(self._read_withdrawal(confirmed_wid).status, "confirmed")
         self.assertEqual(self._read_withdrawal(other_wid).status, "pending")
 
+    def test_rollback_closes_sent_attempt(self) -> None:
+        """Откат закрывает попытку в статусе 'sent', не только 'sending'.
+
+        Реальный случай на проде: оплата прошла, попытка стала 'sent', но
+        токены не дошли (ошибка destination). Откат вернул заявку в pending,
+        а попытку оставил 'sent'. Следующий батч упал с 500:
+        UniqueViolation по uq_payout_attempts_no_second_send, потому что
+        частичный индекс покрывает и 'sending', и 'sent'.
+
+        Проверяем, что после отката новый батч собирается и заявка в нём.
+        """
+        from sqlalchemy import select
+
+        from app.models import PayoutAttempt
+
+        batch_id, mapping = self._batch([10])
+        wid = list(mapping)[0]
+
+        # Переводим попытку в 'sent' — как после успешной отправки.
+        with self.SessionLocal.begin() as session:
+            attempt = session.scalar(
+                select(PayoutAttempt).where(PayoutAttempt.withdrawal_id == wid)
+            )
+            self.assertIsNotNone(attempt)
+            assert attempt is not None
+            attempt.status = "sent"
+
+        result = self.rollback(batch_id, "токены не дошли")
+        self.assertIn(wid, result["returned"])
+
+        with self.SessionLocal() as session:
+            attempt = session.scalar(
+                select(PayoutAttempt).where(PayoutAttempt.withdrawal_id == wid)
+            )
+            self.assertEqual(attempt.status, "failed")
+
+        # Главное: новый батч не падает на unique-индексе.
+        second = self.create_batch()
+        second_ids = {item["withdrawalId"] for item in second["items"]}
+        self.assertIn(wid, second_ids)
+
     def test_empty_reason_rejected(self) -> None:
         batch_id, _ = self._batch([10])
         with self.assertRaises(MissionEngineError) as ctx:
