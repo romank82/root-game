@@ -217,6 +217,23 @@ def _verify_local_checks(
             )
         by_query[attempt.query_id] = (withdrawal, attempt)
 
+    # jetton-кошельки получателей: в TEP-74 перевод идёт на jetton-кошелёк
+    # игрока, а НЕ на его обычный адрес. Это разные адреса, и сравнивать
+    # recipient из тела перевода с withdrawal.to_address нельзя — проверка
+    # не пройдёт никогда, хотя перевод верный (подтверждено на реальном BOC:
+    # to_address = kQDDTasL…, recipient = EQDDpvK-… = jetton-кошелёк).
+    addresses = sorted({withdrawal.to_address for withdrawal, _ in items})
+    try:
+        from app.ton_payout_lookup import resolve_jetton_wallets
+
+        jetton_wallets = resolve_jetton_wallets(addresses)
+    except Exception as error:  # noqa: BLE001 — TON API может быть недоступен
+        logger.warning(
+            "Не удалось вычислить jetton-кошельки для сверки получателей: %s",
+            error,
+        )
+        jetton_wallets = {}
+
     # Переводы в BOC обязаны соответствовать заявкам: иначе админ мог
     # подписать не тот список (например, старый батч).
     seen: set[str] = set()
@@ -247,11 +264,25 @@ def _verify_local_checks(
                 f"Сумма по заявке {withdrawal.id} не совпадает: в BOC "
                 f"{transfer['amountNano']}, ожидалось {expected_nano}.",
             )
-        if not same_address(transfer["recipient"], withdrawal.to_address):
-            raise BatchConfirmError(
-                422,
-                f"Получатель по заявке {withdrawal.id} не совпадает с адресом "
-                "заявки.",
+
+        # Получатель: сверяем с jetton-кошельком игрока. Если адрес вычислить
+        # не удалось (TON API недоступен), не блокируем выплату: сумма и
+        # query_id уже сошлись, а query_id уникален для заявки.
+        expected_jetton = jetton_wallets.get(withdrawal.to_address)
+        if expected_jetton:
+            if not same_address(transfer["recipient"], expected_jetton):
+                raise BatchConfirmError(
+                    422,
+                    f"Получатель по заявке {withdrawal.id} не совпадает: в BOC "
+                    f"{transfer['recipient']}, ожидался jetton-кошелёк "
+                    f"{expected_jetton}.",
+                )
+        else:
+            logger.warning(
+                "Заявка %s: jetton-кошелёк не вычислен, проверка получателя "
+                "пропущена (в BOC %s)",
+                withdrawal.id,
+                transfer["recipient"],
             )
 
         matched.append(

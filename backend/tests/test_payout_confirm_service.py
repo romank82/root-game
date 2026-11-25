@@ -392,16 +392,75 @@ class PayoutConfirmServiceTests(unittest.TestCase):
         self.assertEqual(self._read_withdrawal(wid).status, "processing")
 
     def test_wrong_recipient_rejected(self) -> None:
+        """Перевод на чужой jetton-кошелёк отклоняется.
+
+        Получатель в TEP-74 — это jetton-кошелёк игрока, поэтому сверяем с
+        ним, а не с обычным адресом заявки. Подменяем резолвер адресов,
+        чтобы не ходить в TON API: для адреса заявки ожидается свой
+        jetton-кошелёк, а в BOC подставлен другой.
+        """
         batch_id, mapping = self._batch_with([(10, RECIPIENT_A)])
         wid = list(mapping)[0]
+
+        expected_jetton = "EQDDpvK-wo5TZqTY0-1hFjUaUt0K8DkZ5Qw-dsD75yeIF1tN"
+        wrong_jetton = "EQAqRaBA0S-aZywDDORH_yHICbcmPFzopntYj-w9JobPzi5U"
+
+        boc = build_signed_boc(
+            [(mapping[wid], 10 * NANO, wrong_jetton)], self.signing_key
+        )
+
+        with patch(
+            "app.ton_payout_lookup.resolve_jetton_wallets",
+            return_value={RECIPIENT_A: expected_jetton},
+        ):
+            with self.assertRaises(MissionEngineError) as ctx:
+                self.confirm(batch_id, boc, blockchain_lookup=self._lookup_all)
+
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertIn("Получатель", str(ctx.exception.detail))
+
+    def test_matching_jetton_wallet_accepted(self) -> None:
+        """Перевод на правильный jetton-кошелёк проходит сверку получателя."""
+        batch_id, mapping = self._batch_with([(10, RECIPIENT_A)])
+        wid = list(mapping)[0]
+
+        jetton_wallet = "EQDDpvK-wo5TZqTY0-1hFjUaUt0K8DkZ5Qw-dsD75yeIF1tN"
+        boc = build_signed_boc(
+            [(mapping[wid], 10 * NANO, jetton_wallet)], self.signing_key
+        )
+
+        with patch(
+            "app.ton_payout_lookup.resolve_jetton_wallets",
+            return_value={RECIPIENT_A: jetton_wallet},
+        ):
+            result = self.confirm(
+                batch_id, boc, blockchain_lookup=self._lookup_all
+            )
+
+        self.assertEqual(result["confirmedCount"], 1)
+
+    def test_unknown_jetton_wallet_does_not_block(self) -> None:
+        """Если адрес не вычислен, выплата не блокируется.
+
+        Сумма и query_id уже сошлись, а query_id уникален для заявки;
+        недоступность TON API не должна мешать подтверждению.
+        """
+        batch_id, mapping = self._batch_with([(10, RECIPIENT_A)])
+        wid = list(mapping)[0]
+
         boc = build_signed_boc(
             [(mapping[wid], 10 * NANO, RECIPIENT_B)], self.signing_key
         )
 
-        with self.assertRaises(MissionEngineError) as ctx:
-            self.confirm(batch_id, boc, blockchain_lookup=self._lookup_all)
-        self.assertEqual(ctx.exception.status_code, 422)
-        self.assertIn("Получатель", str(ctx.exception.detail))
+        with patch(
+            "app.ton_payout_lookup.resolve_jetton_wallets",
+            return_value={RECIPIENT_A: None},
+        ):
+            result = self.confirm(
+                batch_id, boc, blockchain_lookup=self._lookup_all
+            )
+
+        self.assertEqual(result["confirmedCount"], 1)
 
     def test_unknown_query_id_rejected(self) -> None:
         batch_id, mapping = self._batch_with([(10, RECIPIENT_A)])
