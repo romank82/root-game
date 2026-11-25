@@ -325,6 +325,41 @@ class AdminStarsPaymentsTests(unittest.TestCase):
         )
         self.assertEqual(newest["playerDisplayName"], "Stars player player-a")
 
+    def test_list_stars_payments_includes_player_nickname(self) -> None:
+        """В журнале Stars есть читаемый ник игрока.
+
+        playerId админу ничего не говорит — по нему игрока в интерфейсе не
+        найти. Показывается ник вида «roman#491-773-811» со ссылкой на
+        карточку.
+        """
+        admin = self._make_admin()
+        self._grant(admin.id, ECONOMY_READ_PERMISSION)
+        self._seed_three()
+
+        from sqlalchemy import update
+
+        from app.models import GamePlayer
+
+        nickname = "roman#491-773-811"
+        with self.SessionLocal.begin() as session:
+            session.execute(
+                update(GamePlayer)
+                .where(GamePlayer.id == "player-a")
+                .values(nickname=nickname, nickname_lower=nickname.lower())
+            )
+
+        result = list_stars_payments(admin=admin)
+
+        by_player = [i for i in result["items"] if i["playerId"] == "player-a"]
+        self.assertTrue(by_player)
+        for item in by_player:
+            self.assertEqual(item["playerNickname"], nickname)
+
+        # player-b ник не задавали -> поле есть и равно null, не падает.
+        other = [i for i in result["items"] if i["playerId"] == "player-b"]
+        self.assertTrue(other)
+        self.assertIsNone(other[0]["playerNickname"])
+
     def test_list_stars_payments_filter_status(self) -> None:
         """status=completed -> только completed, total=1."""
         admin = self._make_admin()

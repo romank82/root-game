@@ -298,6 +298,45 @@ class AdminWithdrawalsTests(unittest.TestCase):
         self.assertEqual(ctx.exception.__class__.__name__, "HTTPException")
         self.assertEqual(ctx.exception.status_code, 422)
 
+    def test_list_withdrawals_includes_player_nickname(self) -> None:
+        """В списке заявок есть читаемый ник игрока.
+
+        playerId админу ничего не говорит — по нему игрока в интерфейсе не
+        найти. В таблице показывается ник вида «roman#491-773-811» и ведёт
+        в карточку игрока.
+        """
+        nickname = "roman#491-773-811"
+        with self.SessionLocal.begin() as session:
+            admin = self._make_admin(session)
+            player = self._make_player(session)
+            player_row = session.get(GamePlayer, player)
+            player_row.nickname = nickname
+            player_row.nickname_lower = nickname.lower()
+            withdrawal_id = self._seed_withdrawal(
+                session, player, status="pending"
+            )
+
+        result = self.admin_withdrawals.list_admin_withdrawals(_admin=admin)
+        row = next(
+            r for r in result["withdrawals"] if r["id"] == withdrawal_id
+        )
+        self.assertEqual(row["playerNickname"], nickname)
+
+    def test_list_withdrawals_nickname_null_when_missing(self) -> None:
+        """Игрок без ника не роняет список: поле остаётся null."""
+        with self.SessionLocal.begin() as session:
+            admin = self._make_admin(session)
+            player = self._make_player(session)
+            withdrawal_id = self._seed_withdrawal(
+                session, player, status="pending"
+            )
+
+        result = self.admin_withdrawals.list_admin_withdrawals(_admin=admin)
+        row = next(
+            r for r in result["withdrawals"] if r["id"] == withdrawal_id
+        )
+        self.assertIsNone(row["playerNickname"])
+
     def test_batch_disabled_by_default(self) -> None:
         """POST /batch отдаёт 410: старый путь с мнемоникой выключен.
 

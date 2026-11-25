@@ -70,6 +70,20 @@ function formatDate(value: string | null): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ru-RU')
 }
 
+// Ник игрока как ссылка: текст с пунктирным подчёркиванием, ведёт в
+// карточку игрока. Оформление совпадает с таблицей батчей.
+const playerLinkStyle: CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  color: '#8affc1',
+  textDecoration: 'underline',
+  textDecorationStyle: 'dotted',
+  textUnderlineOffset: '3px',
+  cursor: 'pointer',
+}
+
 function shorten(value: string | null | undefined, head = 9, tail = 6): string {
   if (!value) return '—'
   return value.length > head + tail + 1
@@ -81,7 +95,13 @@ function shorten(value: string | null | undefined, head = 9, tail = 6): string {
 // Список + батч-выплата + отклонение. Ошибки и результаты действий
 // показываются ЛОКАЛЬНО (error/actionMsg) и не роняют админку.
 // Permission: players.read (чтение) / players.manage (batch/reject) — на бэке.
-export function WithdrawalsSection() {
+export function WithdrawalsSection({
+  onOpenPlayer,
+}: {
+  // Переход в карточку игрока: из списка заявок админ должен попадать
+  // к тому, кто выводит средства.
+  onOpenPlayer?: (playerId: string) => void
+} = {}) {
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -264,7 +284,7 @@ export function WithdrawalsSection() {
               <thead>
                 <tr>
                   <th style={thStyle}>ID</th>
-                  <th style={thStyle}>PlayerId</th>
+                  <th style={thStyle}>Игрок</th>
                   <th style={thStyle}>Amount</th>
                   <th style={thStyle}>ToAddress</th>
                   <th style={thStyle}>Статус</th>
@@ -277,7 +297,17 @@ export function WithdrawalsSection() {
                 {withdrawals.map((withdrawal) => (
                   <tr key={withdrawal.id}>
                     <td style={tdStyle}>{shorten(withdrawal.id)}</td>
-                    <td style={tdStyle}>{shorten(withdrawal.playerId)}</td>
+                    <td style={tdStyle}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenPlayer?.(withdrawal.playerId)}
+                        title={withdrawal.playerId}
+                        style={playerLinkStyle}
+                      >
+                        {withdrawal.playerNickname ??
+                          shorten(withdrawal.playerId)}
+                      </button>
+                    </td>
                     <td style={tdStyle}>
                       {formatRootFromNano(
                         withdrawal.amountRootNano ??

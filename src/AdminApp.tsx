@@ -673,7 +673,14 @@ function AdminApp() {
         />
       )}
 
-      {section === 'withdrawals' && <WithdrawalsSection />}
+      {section === 'withdrawals' && (
+        <WithdrawalsSection
+          onOpenPlayer={(playerId) => {
+            setPendingPlayerId(playerId)
+            setSection('players')
+          }}
+        />
+      )}
       {/* Батчи выплат живут в провайдере TON Connect: он нужен для
           подключения кошелька и подписи переводов. */}
       {section === 'payout-batches' && (
@@ -687,7 +694,14 @@ function AdminApp() {
         </PayoutTonConnectProvider>
       )}
 
-      {section === 'stars-payments' && <StarsPaymentsSection />}
+      {section === 'stars-payments' && (
+        <StarsPaymentsSection
+          onOpenPlayer={(playerId) => {
+            setPendingPlayerId(playerId)
+            setSection('players')
+          }}
+        />
+      )}
 
       {section === 'minigame-profiles' && (
         <div className="admin-layout">

@@ -77,6 +77,7 @@ class WithdrawalRejectPayload(BaseModel):
 def _serialize_withdrawal(
     withdrawal: WithdrawalRequest,
     attempt: PayoutAttempt | None = None,
+    nickname: str | None = None,
 ) -> dict[str, Any]:
     """WithdrawalRequest -> безопасный JSON (адрес получателя — не секрет).
 
@@ -87,6 +88,9 @@ def _serialize_withdrawal(
     return {
         "id": withdrawal.id,
         "playerId": withdrawal.player_id,
+        # Читаемый логин «roman#491-773-811»: playerId админу ничего не
+        # говорит, по нему игрока в интерфейсе не найти.
+        "playerNickname": nickname,
         "amountRoot": withdrawal.amount_root,
         # Sprint 11.8 NanoROOT: параллельное дробное значение (nano).
         "amountRootNano": (
@@ -209,10 +213,25 @@ def list_admin_withdrawals(
                     attempt.withdrawal_id, attempt
                 )
 
+        # Ники игроков одним запросом: в таблице нужен логин, а не id.
+        nicknames: dict[str, str | None] = {}
+        player_ids = {row.player_id for row in rows if row.player_id}
+        if player_ids:
+            from app.models import GamePlayer
+
+            nickname_rows = session.execute(
+                select(GamePlayer.id, GamePlayer.nickname).where(
+                    GamePlayer.id.in_(player_ids)
+                )
+            ).all()
+            nicknames = {row[0]: row[1] for row in nickname_rows}
+
     return {
         "withdrawals": [
             _serialize_withdrawal(
-                row, attempts_by_withdrawal.get(row.id)
+                row,
+                attempts_by_withdrawal.get(row.id),
+                nicknames.get(row.player_id),
             )
             for row in rows
         ],

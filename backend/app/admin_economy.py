@@ -287,7 +287,9 @@ def _parse_iso_datetime(value: str, param_name: str) -> datetime:
 
 
 def _serialize_stars_payment(
-    payment: StarsPayment, player_display_name: str | None = None
+    payment: StarsPayment,
+    player_display_name: str | None = None,
+    player_nickname: str | None = None,
 ) -> dict:
     """StarsPayment -> безопасный JSON журнала (Sprint 12.2).
 
@@ -304,6 +306,7 @@ def _serialize_stars_payment(
         "id": payment.id,
         "playerId": payment.player_id,
         "playerDisplayName": player_display_name,
+        "playerNickname": player_nickname,
         "gasAmount": str(payment.gas_amount),
         "amountStars": payment.amount_stars,
         "status": payment.status,
@@ -350,9 +353,9 @@ def list_stars_payments(
         # display_name нужен в ответе для каждой строки (playerDisplayName).
         # INNER JOIN безопасен: stars_payments.player_id NOT NULL + FK
         # RESTRICT -> строка всегда находит игрока, дублей нет (join по PK).
-        query = select(StarsPayment, GamePlayer.display_name).join(
-            GamePlayer, GamePlayer.id == StarsPayment.player_id
-        )
+        query = select(
+            StarsPayment, GamePlayer.display_name, GamePlayer.nickname
+        ).join(GamePlayer, GamePlayer.id == StarsPayment.player_id)
 
         if status is not None:
             if status not in STARS_PAYMENT_STATUSES:
@@ -423,8 +426,8 @@ def list_stars_payments(
 
         return {
             "items": [
-                _serialize_stars_payment(payment, display_name)
-                for payment, display_name in rows
+                _serialize_stars_payment(payment, display_name, nickname)
+                for payment, display_name, nickname in rows
             ],
             "total": total,
             "limit": limit,

@@ -369,6 +369,52 @@ class SignedBocTests(unittest.TestCase):
         self.assertEqual(transfers[0]["queryId"], "777")
         self.assertEqual(transfers[0]["amountNano"], 15 * NANO)
 
+    def test_signature_starting_with_0b10_is_not_envelope(self) -> None:
+        """Подпись, начинающаяся с 0b10, не должна считаться обёрткой.
+
+        Подпись — 512 случайных бит, поэтому примерно в 1/4 случаев она
+        начинается с 0b10 и выглядит как ext_in_msg_info$. Часть таких
+        подписей pytoniq ещё и успешно разбирает как внешнее сообщение —
+        тогда старая проверка (одни лишь первые два бита) возвращала МУСОРНЫЙ
+        адрес из середины подписи. Проверка выплаты падала с «BOC подписан
+        другим кошельком» при верном ключе, примерно раз в несколько
+        прогонов.
+
+        Замер на 300 ключах: 84 подписи с префиксом 0b10, из них 8 давали
+        мусорный адрес. Поэтому тест перебирает ключи, пока не найдёт
+        именно такой случай — иначе он проходил бы «по удаче».
+        """
+        checked = 0
+        for _ in range(600):
+            key = SigningKey.generate()
+            boc = build_signed_boc(
+                [jetton_body(777, 15 * NANO, RECIPIENT_A)], key
+            )
+            cell = Cell.one_from_boc(base64.b64decode(boc))
+            first_byte = cell.begin_parse().load_uint(8)
+            # Первые два бита 0b10 -> байт 0b10xxxxxx (0x80..0xBF).
+            if not (0x80 <= first_byte <= 0xBF):
+                continue
+            # Интересен только случай, где pytoniq действительно видит
+            # внешнее сообщение — именно там старое условие давало мусор.
+            try:
+                outer = MessageAny.deserialize(cell.begin_parse())
+            except Exception:
+                continue
+            if not (outer.is_external and outer.info.dest is not None):
+                continue
+
+            checked += 1
+            sender = extract_sender_address(boc)
+            self.assertTrue(
+                same_address(sender, SENDER_WALLET),
+                "подпись разобрана как обёртка внешнего сообщения, получен "
+                f"мусорный адрес {sender}",
+            )
+            if checked >= 3:
+                return
+        self.skipTest("не удалось собрать подходящий BOC")
+
     def test_signed_boc_sender_extracted(self) -> None:
         sender = extract_sender_address(self._boc())
         self.assertTrue(same_address(sender, SENDER_WALLET))

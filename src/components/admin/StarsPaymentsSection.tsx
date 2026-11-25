@@ -57,6 +57,20 @@ function formatDate(value: string | null): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ru-RU')
 }
 
+// Ник игрока как ссылка: текст с пунктирным подчёркиванием, ведёт в
+// карточку игрока. Оформление совпадает с таблицами батчей и заявок.
+const playerLinkStyle: CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  color: '#8affc1',
+  textDecoration: 'underline',
+  textDecorationStyle: 'dotted',
+  textUnderlineOffset: '3px',
+  cursor: 'pointer',
+}
+
 function shorten(value: string | null | undefined, head = 9, tail = 6): string {
   if (!value) return '—'
   return value.length > head + tail + 1
@@ -69,7 +83,13 @@ function shorten(value: string | null | undefined, head = 9, tail = 6): string {
 // stars_service (createInvoiceLink + webhook successful_payment), админка
 // только читает GET /api/v1/admin/economy/stars-payments.
 // Право economy.read проверяется на бэке (require_permission).
-export function StarsPaymentsSection() {
+export function StarsPaymentsSection({
+  onOpenPlayer,
+}: {
+  // Переход в карточку игрока: в журнале платежей видно, кто платил, но
+  // без ссылки не перейти к его карточке.
+  onOpenPlayer?: (playerId: string) => void
+} = {}) {
   const [payments, setPayments] = useState<AdminStarsPayment[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -291,7 +311,7 @@ export function StarsPaymentsSection() {
               <thead>
                 <tr>
                   <th style={thStyle}>ID</th>
-                  <th style={thStyle}>PlayerId</th>
+                  <th style={thStyle}>Игрок</th>
                   <th style={thStyle}>Имя</th>
                   <th style={thStyle}>Stars</th>
                   <th style={thStyle}>Gas</th>
@@ -305,7 +325,18 @@ export function StarsPaymentsSection() {
                 {payments.map((payment) => (
                   <tr key={payment.id}>
                     <td style={tdStyle}>{shorten(payment.id)}</td>
-                    <td style={tdStyle}>{shorten(payment.playerId)}</td>
+                    <td style={tdStyle}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenPlayer?.(payment.playerId)}
+                        title={payment.playerId}
+                        style={playerLinkStyle}
+                      >
+                        {payment.playerNickname ??
+                          payment.playerDisplayName ??
+                          shorten(payment.playerId)}
+                      </button>
+                    </td>
                     <td style={tdStyle}>{payment.playerDisplayName ?? '—'}</td>
                     <td style={tdStyle}>{payment.amountStars}</td>
                     <td style={tdStyle}>{payment.gasAmount}</td>

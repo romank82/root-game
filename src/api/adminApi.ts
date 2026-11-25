@@ -1260,6 +1260,8 @@ export type AdminStarsPaymentStatus = 'pending' | 'completed' | 'refunded'
 export type AdminStarsPayment = {
   id: string
   playerId: string
+  // Читаемый логин: основной идентификатор игрока в журнале.
+  playerNickname?: string | null
   playerDisplayName: string | null
   gasAmount: string
   amountStars: number
@@ -1820,6 +1822,9 @@ export async function getMonitoringEvents(
 export type Withdrawal = {
   id: string
   playerId: string
+  // Читаемый логин вида «roman#491-773-811». null — у старой записи
+  // ник ещё не сгенерирован, тогда показывается playerId.
+  playerNickname?: string | null
   amountRoot: number
   // Sprint 11.8 NanoROOT (этап 2C): параллельное значение суммы в nano.
   amountRootNano?: number | null

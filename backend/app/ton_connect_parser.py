@@ -440,8 +440,16 @@ def extract_sender_address(boc_base64: str) -> str:
     cell = _decode_boc(boc_base64)
 
     # 1. Внешнее сообщение: dest — кошелёк-отправитель.
-    peek = cell.begin_parse()
-    if peek.remaining_bits >= 2 and peek.load_uint(2) == 0b10:
+    #
+    # ВАЖНО: обёрткой считаем только то, что _unwrap_external_envelope
+    # признал ею (её тело начинается с op-кода кошелька V5). Проверять одни
+    # первые два бита нельзя: подпись — 512 случайных бит, и с вероятностью
+    # 1/4 она начинается с 0b10, то есть выглядит как ext_in_msg_info$.
+    # Раньше такая подпись разбиралась как внешнее сообщение, и функция
+    # возвращала МУСОРНЫЙ адрес из середины подписи. Тест на это падал
+    # случайно, примерно раз в четыре прогона.
+    inner = _unwrap_external_envelope(cell)
+    if inner is not cell:
         try:
             outer = MessageAny.deserialize(cell.begin_parse())
             if outer.is_external:
@@ -452,7 +460,6 @@ def extract_sender_address(boc_base64: str) -> str:
             logger.debug("Не удалось прочитать внешнее сообщение целиком")
 
     # 2. Фолбэк: src первого внутреннего сообщения (старое поведение).
-    inner = _unwrap_external_envelope(cell)
     version = _detect_wallet_version(inner.begin_parse())
 
     try:
