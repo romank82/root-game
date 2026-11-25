@@ -998,10 +998,17 @@ rate limiting;
 | 14. Тестирование и защита | Готово частично | 1085 тестов (unittest), tsc/oxlint чисто, аудит безопасности (`security-audit-2026-11-25.md`). **Долг — см. ниже.** |
 
 Открытый технический долг (приоритет сверху вниз)
-1. **PostgreSQL-тесты гонок не выполняются.** `tests/test_economy_pg_9_3_1.py`
-   (конкурентные покупки, идемпотентность fallback) пропускается без локального
-   PostgreSQL. SQLite не моделирует `FOR UPDATE` — это единственная
-   непроверенная область в деньгах.
+1. ~~PostgreSQL-тесты гонок не выполняются.~~ **ЗАКРЫТО (25.11.2026).**
+   Локальный PostgreSQL 18 уже слушает порт 5433, база `chimera_test` создана.
+   Прогнаны на реальном PG: `test_economy_pg_9_3_1.py` (3 теста —
+   `test_pg_infrastructure_ready`, `test_concurrent_shop_purchase_no_overspend`,
+   `test_concurrent_fallback_purchase_idempotent`) и `test_transfer_pg_10_5.py`
+   (8 тестов — параллельные переводы, идемпотентность, лимиты, без overspend).
+   Все 11 OK. Полный прогон: 1085 тестов, **0 пропущенных**.
+   Проверка: `cd backend && ./.venv/bin/python -m unittest tests.test_economy_pg_9_3_1
+   tests.test_transfer_pg_10_5`.
+   Остаточный риск: тесты мягкие — при отсутствии PG молча пропускаются, поэтому
+   в другом окружении дыра вернётся незамеченной.
 2. **Deposit poller работает от `root`** (`deploy/root-game-deposit-poller.service`),
    хотя основной сервис — от `deployer`. В юните стоит TODO.
 3. **`deposit_service.process_incoming_transfer` не сверяет `to_address`** с
