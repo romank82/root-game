@@ -217,19 +217,20 @@ def _verify_local_checks(
             )
         by_query[attempt.query_id] = (withdrawal, attempt)
 
-    # jetton-кошельки получателей: в TEP-74 перевод идёт на jetton-кошелёк
-    # игрока, а НЕ на его обычный адрес. Это разные адреса, и сравнивать
-    # recipient из тела перевода с withdrawal.to_address нельзя — проверка
-    # не пройдёт никогда, хотя перевод верный (подтверждено на реальном BOC:
-    # to_address = kQDDTasL…, recipient = EQDDpvK-… = jetton-кошелёк).
+    # jetton-кошельки получателей: в TEP-74 destination — это адрес ВЛАДЕЛЬЦА
+    # (игрока), а не его jetton-кошелёк. Раньше казалось наоборот, и проверка
+    # «recipient == jetton-кошелёк» ломала подтверждение верных выплат.
+    # Теперь сверяем с адресом заявки — как и требует спецификация.
     addresses = sorted({withdrawal.to_address for withdrawal, _ in items})
     try:
         from app.ton_payout_lookup import resolve_jetton_wallets
 
+        # Нужны только для проверки ДОСТАВКИ (ищем входящие на кошелёк
+        # получателя), а не для сверки адреса в переводе.
         jetton_wallets = resolve_jetton_wallets(addresses)
     except Exception as error:  # noqa: BLE001 — TON API может быть недоступен
         logger.warning(
-            "Не удалось вычислить jetton-кошельки для сверки получателей: %s",
+            "Не удалось вычислить jetton-кошельки для проверки доставки: %s",
             error,
         )
         jetton_wallets = {}
@@ -265,24 +266,14 @@ def _verify_local_checks(
                 f"{transfer['amountNano']}, ожидалось {expected_nano}.",
             )
 
-        # Получатель: сверяем с jetton-кошельком игрока. Если адрес вычислить
-        # не удалось (TON API недоступен), не блокируем выплату: сумма и
-        # query_id уже сошлись, а query_id уникален для заявки.
-        expected_jetton = jetton_wallets.get(withdrawal.to_address)
-        if expected_jetton:
-            if not same_address(transfer["recipient"], expected_jetton):
-                raise BatchConfirmError(
-                    422,
-                    f"Получатель по заявке {withdrawal.id} не совпадает: в BOC "
-                    f"{transfer['recipient']}, ожидался jetton-кошелёк "
-                    f"{expected_jetton}.",
-                )
-        else:
-            logger.warning(
-                "Заявка %s: jetton-кошелёк не вычислен, проверка получателя "
-                "пропущена (в BOC %s)",
-                withdrawal.id,
-                transfer["recipient"],
+        # Получатель в теле transfer — это адрес ВЛАДЕЛЬЦА (игрока), поэтому
+        # сверяем с адресом заявки. Именно так требует TEP-74: destination =
+        # «address of the new owner of the jettons».
+        if not same_address(transfer["recipient"], withdrawal.to_address):
+            raise BatchConfirmError(
+                422,
+                f"Получатель по заявке {withdrawal.id} не совпадает с адресом "
+                "заявки.",
             )
 
         matched.append(
@@ -291,7 +282,7 @@ def _verify_local_checks(
                 "queryId": query_id,
                 "amountNano": transfer["amountNano"],
                 # Нужен для проверки доставки: смотрим входящие на этот адрес.
-                "jettonWallet": expected_jetton or transfer["recipient"],
+                "jettonWallet": jetton_wallets.get(withdrawal.to_address),
             }
         )
 

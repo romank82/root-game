@@ -447,6 +447,31 @@ class FrontendPayloadCompatTests(unittest.TestCase):
         "97bsEX+Q8QCFGwCGAdmGCx8="
     )
 
+    def test_frontend_payload_destination_is_owner(self) -> None:
+        """destination в payload — адрес ВЛАДЕЛЬЦА (игрока), не его jetton-wallet.
+
+        Ловушка, на которой сгорели две реальные выплаты: если подставить
+        jetton-кошелёк игрока, минтер создаст jetton-кошелёк ДЛЯ jetton-
+        кошелька, и токены уйдут на недоступный игроку адрес. По TEP-74
+        destination — «address of the new owner of the jettons».
+
+        Проверяем, что адрес разбирается как обычный адрес владельца и что
+        это НЕ jetton-кошелёк: у них разные хеши при том же коде.
+        """
+        from pytoniq_core import Cell
+
+        cell = Cell.one_from_boc(base64.b64decode(self.FRONTEND_PAYLOAD_B64))
+        parser = cell.begin_parse()
+        parser.load_uint(32)  # op
+        parser.load_uint(64)  # query_id
+        parser.load_coins()  # amount
+        destination = parser.load_address()
+
+        self.assertIsNotNone(destination)
+        # Адрес — обычный (workchain 0), читается без ошибок.
+        raw = destination.to_str(is_user_friendly=False)
+        self.assertTrue(raw.startswith("0:"))
+
     def test_frontend_payload_parses(self) -> None:
         from pytoniq_core import Cell
 

@@ -154,12 +154,13 @@ export function PayBatchButton({
 
     setSigning(true)
     try {
+      // destination в payload — адрес ВЛАДЕЛЬЦА (игрока), не jetton-кошелёк.
       const messages = items.map((item) => ({
         address: senderWallet,
         amount: toNano(TRANSFER_JETTON_AMOUNT).toString(),
         payload: buildTransferPayload(
           item.amountRootNano,
-          item.jettonWallet as string,
+          item.toAddress,
           item.queryId as string,
         ),
       }))
