@@ -1893,6 +1893,9 @@ export type PayoutBatch = {
   txHash: string | null
   payloadText: string | null
   items: PayoutBatchItem[] | null
+  // Jetton-кошелёк САМОГО кошелька выплат: на него отправляется transfer
+  // (TEP-74), получатель указывается внутри payload. null — не вычислен.
+  senderJettonWallet?: string | null
 }
 
 export type PayoutBatchRow = {

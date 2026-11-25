@@ -280,8 +280,8 @@ class PayoutConfirmServiceTests(unittest.TestCase):
             return session.get(PayoutBatch, batch_id)
 
     @staticmethod
-    def _lookup_all(query_id: str, amount_nano: int):
-        return {"txHash": f"tx-{query_id}"}
+    def _lookup_all(query_id: str, amount_nano: int, jetton_wallet=None):
+        return {"txHash": f"tx-{query_id}", "delivered": True}
 
     # --- Тесты -----------------------------------------------------------
     def test_all_paid_confirms_batch(self) -> None:
@@ -314,8 +314,12 @@ class PayoutConfirmServiceTests(unittest.TestCase):
             [(mapping[first], 10 * NANO, RECIPIENT_A)], self.signing_key
         )
 
-        def only_first(query_id: str, amount_nano: int):
-            return {"txHash": "tx-1"} if query_id == mapping[first] else None
+        def only_first(query_id: str, amount_nano: int, jetton_wallet=None):
+            return (
+                {"txHash": "tx-1", "delivered": True}
+                if query_id == mapping[first]
+                else None
+            )
 
         result = self.confirm(batch_id, boc, blockchain_lookup=only_first)
 
@@ -339,7 +343,7 @@ class PayoutConfirmServiceTests(unittest.TestCase):
             self.signing_key,
         )
 
-        def nothing_yet(query_id: str, amount_nano: int):
+        def nothing_yet(query_id: str, amount_nano: int, jetton_wallet=None):
             return None
 
         result = self.confirm(batch_id, boc, blockchain_lookup=nothing_yet)
@@ -496,7 +500,7 @@ class PayoutConfirmServiceTests(unittest.TestCase):
             [(mapping[wid], 10 * NANO, RECIPIENT_A)], self.signing_key
         )
 
-        def broken(query_id: str, amount_nano: int):
+        def broken(query_id: str, amount_nano: int, jetton_wallet=None):
             raise RuntimeError("TON API недоступен")
 
         result = self.confirm(batch_id, boc, blockchain_lookup=broken)

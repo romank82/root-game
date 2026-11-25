@@ -43,6 +43,10 @@ BATCH_STATUS_CONFIRMED = "confirmed"
 BATCH_STATUS_ROLLED_BACK = "rolled_back"
 
 # Все допустимые статусы батча (зеркало CHECK-констрейнта в БД).
+# Кэш jetton-кошелька отправителя: адрес стабилен, а запрос к TON API
+# небесплатный. Пустая строка — «вычисляли, не получилось».
+_SENDER_JETTON_CACHE: str | None = None
+
 BATCH_STATUSES = (
     BATCH_STATUS_READY,
     BATCH_STATUS_SUBMITTED,
@@ -211,7 +215,44 @@ def get_payout_batch(
         if batch is None:  # pragma: no cover
             raise MissionEngineError(404, "Батч не найден.")
         items = _load_batch_items(session, batch_id, wallets)
-        return _serialize_batch(batch, items)
+        result = _serialize_batch(batch, items)
+
+    # Адрес для ОТПРАВКИ transfer: по TEP-74 сообщение 0xf8a7ea5 уходит на
+    # СВОЙ jetton-кошелёк (отправителя), а получатель указан в теле. Если
+    # отправить на jetton-кошелёк получателя, он не существует — сообщение
+    # отбивается (bounce) и деньги не доходят. Именно это случилось на
+    # первой реальной выплате.
+    result["senderJettonWallet"] = _resolve_sender_jetton_wallet()
+    return result
+
+
+def _resolve_sender_jetton_wallet() -> str | None:
+    """jetton-кошелёк кошелька выплат — адрес назначения для transfer.
+
+    Кэшируется в модуле: адрес меняется только при смене кошелька выплат
+    или минтера, а запрос к TON API небесплатный.
+    """
+    global _SENDER_JETTON_CACHE
+    if _SENDER_JETTON_CACHE is not None:
+        return _SENDER_JETTON_CACHE or None
+
+    from app.ton_payout_lookup import _read_payout_wallet, resolve_jetton_wallets
+
+    wallet = _read_payout_wallet()
+    if not wallet:
+        _SENDER_JETTON_CACHE = ""
+        return None
+
+    try:
+        resolved = resolve_jetton_wallets([wallet])
+    except Exception as error:  # noqa: BLE001 — TON API может быть недоступен
+        logger.warning("Не удалось вычислить jetton-кошелёк отправителя: %s", error)
+        return None
+
+    address = resolved.get(wallet)
+    if address:
+        _SENDER_JETTON_CACHE = address
+    return address
 
 
 def _load_batch_items(

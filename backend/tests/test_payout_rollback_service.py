@@ -233,7 +233,7 @@ class PayoutRollbackServiceTests(unittest.TestCase):
         boc = build_signed_boc(transfers, key)
         self.confirm(
             batch_id, boc,
-            blockchain_lookup=lambda q, a: {"txHash": f"tx-{q}"},
+            blockchain_lookup=lambda q, a, w=None: {"txHash": f"tx-{q}", "delivered": True},
         )
 
     def _confirm_partial(self, batch_id: str, mapping: dict[str, str],
@@ -256,7 +256,9 @@ class PayoutRollbackServiceTests(unittest.TestCase):
         qid = mapping[wid_to_confirm]
         self.confirm(
             batch_id, boc,
-            blockchain_lookup=lambda q, a: {"txHash": "tx-1"} if q == qid else None,
+            blockchain_lookup=lambda q, a, w=None: (
+                {"txHash": "tx-1", "delivered": True} if q == qid else None
+            ),
         )
 
     # --- Тесты -----------------------------------------------------------

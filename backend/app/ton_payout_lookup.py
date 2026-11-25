@@ -36,6 +36,12 @@ from app.ton_connect_parser import JETTON_TRANSFER_OP
 
 logger = logging.getLogger(__name__)
 
+# TEP-74 internal_transfer: его публикует jetton-кошелёк ОТПРАВИТЕЛЯ и
+# присылает jetton-кошельку ПОЛУЧАТЕЛЯ. Наличие такого входящего сообщения с
+# нашим query_id — доказательство, что токены реально зачислены.
+INTERNAL_TRANSFER_OP = 0x178D4519
+INTERNAL_TRANSFER_OP_TONAPI = "0x178d4519"
+
 # Сколько транзакций за один запрос к индексеру (максимум у tonapi — 100).
 LOOKUP_LIMIT = 100
 
@@ -86,56 +92,158 @@ def _indexer_endpoint() -> str:
     return "https://testnet.tonapi.io/v2"
 
 
-async def _lookup_async(query_id: str, amount_nano: int) -> dict[str, Any] | None:
-    """Найти перевод по query_id среди исходящих транзакций кошелька выплат.
+def _parse_internal_transfer(in_msg: dict) -> dict[str, Any] | None:
+    """Разобрать входящий internal_transfer (0x178d4519) из tonapi.
+
+    Тело: op(32) + query_id(64) + amount:coins + from:MsgAddress + ...
+    Это сообщение приходит на jetton-кошелёк получателя, и его наличие
+    доказывает зачисление токенов.
+    """
+    raw_body = in_msg.get("raw_body")
+    if not raw_body:
+        return None
+    try:
+        cell = Cell.one_from_boc(_boc_bytes(raw_body))
+    except Exception:  # noqa: BLE001 — не наш формат
+        return None
+
+    try:
+        parser = cell.begin_parse()
+        if parser.load_uint(32) != INTERNAL_TRANSFER_OP:
+            return None
+        query_id = parser.load_uint(64)
+        amount_nano = parser.load_coins()
+    except Exception:  # noqa: BLE001 — обрезанное тело
+        return None
+
+    return {"queryId": str(query_id), "amountNano": amount_nano}
+
+
+async def _lookup_async(
+    query_id: str, amount_nano: int, jetton_wallet: str | None = None
+) -> dict[str, Any] | None:
+    """Проверить, что ROOT ДОШЛИ получателю, а не просто отправлены.
+
+    Почему так: исходящее сообщение transfer (0xf8a7ea5) с кошелька выплат
+    ещё не значит, что игрок получил токены. Если jetton-кошелёк получателя
+    не существует (или не хватило газа), сообщение отбивается (bounce,
+    op 0xffffffff) — деньги остаются у владельца. Это случилось на первой
+    реальной выплате: транзакция «успешна», заявка подтверждена, а игрок
+    ничего не получил.
+
+    Доказательство доставки — ВХОДЯЩИЙ internal_transfer (0x178d4519) на
+    jetton-кошелёк получателя с нашим query_id и суммой. Его публикует
+    jetton-кошелёк отправителя, и он существует, только если перевод реально
+    принят.
 
     Транспорт — tonapi: TonCenter getTransactions на тестнете отдаёт 500.
     """
-    wallet = _read_payout_wallet()
-    if not wallet:
-        raise RuntimeError("ton.payout_wallet не настроен.")
-
     endpoint = _indexer_endpoint()
-    # tonapi ждёт адрес в url-encoded raw-форме (0%3Aabc…).
+    timeout = httpx.Timeout(20.0)
+
     from pytoniq_core import Address
 
-    raw_address = Address(wallet).to_str(is_user_friendly=False).replace(":", "%3A")
-    url = f"{endpoint}/blockchain/accounts/{raw_address}/transactions"
-
-    timeout = httpx.Timeout(20.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        before_lt: str | None = None
+        # --- Основной путь: смотрим входящие на jetton-кошелёк получателя ---
+        if jetton_wallet:
+            raw = Address(jetton_wallet).to_str(is_user_friendly=False)
+            url = (
+                f"{endpoint}/blockchain/accounts/"
+                f"{raw.replace(':', '%3A')}/transactions"
+            )
+            before_lt: str | None = None
+            for _page in range(MAX_PAGES):
+                params: dict[str, Any] = {"limit": LOOKUP_LIMIT}
+                if before_lt:
+                    params["before_lt"] = before_lt
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                transactions = response.json().get("transactions") or []
+                if not transactions:
+                    break
+
+                for tx in transactions:
+                    if not tx.get("success"):
+                        # Неуспешная транзакция не доказывает доставку.
+                        continue
+                    incoming = tx.get("in_msg") or {}
+                    if incoming.get("op_code") != INTERNAL_TRANSFER_OP_TONAPI:
+                        continue
+                    if incoming.get("bounced"):
+                        continue
+
+                    parsed = _parse_internal_transfer(incoming)
+                    if parsed is None:
+                        continue
+                    if parsed["queryId"] != str(query_id):
+                        continue
+                    if parsed["amountNano"] != amount_nano:
+                        logger.warning(
+                            "internal_transfer с query_id %s найден, но сумма "
+                            "%s != %s",
+                            query_id,
+                            parsed["amountNano"],
+                            amount_nano,
+                        )
+                        continue
+                    return {
+                        "txHash": tx.get("hash"),
+                        "lt": tx.get("lt"),
+                        "recipient": jetton_wallet,
+                        "amountNano": parsed["amountNano"],
+                        "delivered": True,
+                    }
+
+                last = transactions[-1]
+                next_lt = last.get("lt")
+                if next_lt is None:
+                    break
+                before_lt = str(next_lt)
+            return None
+
+        # --- Фолбэк: адрес получателя неизвестен, проверяем отправку ---
+        wallet = _read_payout_wallet()
+        if not wallet:
+            raise RuntimeError("ton.payout_wallet не настроен.")
+
+        raw_wallet = Address(wallet).to_str(is_user_friendly=False).replace(":", "%3A")
+        url = f"{endpoint}/blockchain/accounts/{raw_wallet}/transactions"
+        before_lt = None
         for _page in range(MAX_PAGES):
             params: dict[str, Any] = {"limit": LOOKUP_LIMIT}
             if before_lt:
                 params["before_lt"] = before_lt
             response = await client.get(url, params=params)
             response.raise_for_status()
-            payload = response.json()
-            transactions = payload.get("transactions") or []
+            transactions = response.json().get("transactions") or []
             if not transactions:
                 break
 
             for tx in transactions:
+                if not tx.get("success"):
+                    continue
                 for out_msg in tx.get("out_msgs") or []:
+                    if out_msg.get("bounced"):
+                        # Отбитое сообщение — деньги вернулись.
+                        continue
                     parsed = _parse_transfer_from_out_msg(out_msg)
                     if parsed is None:
                         continue
                     if parsed["queryId"] != str(query_id):
                         continue
                     if parsed["amountNano"] != amount_nano:
-                        # query_id совпал, а сумма нет — это не наша выплата
-                        # (или подделка): считаем «не найдено».
                         logger.warning(
                             "query_id %s найден, но сумма %s != %s",
                             query_id, parsed["amountNano"], amount_nano,
                         )
                         continue
+                    # Отправлено, но доставка не подтверждена — помечаем явно.
                     return {
                         "txHash": tx.get("hash"),
                         "lt": tx.get("lt"),
                         "recipient": parsed["recipient"],
                         "amountNano": parsed["amountNano"],
+                        "delivered": False,
                     }
             last = transactions[-1]
             next_lt = last.get("lt")
@@ -164,10 +272,15 @@ def _read_payout_wallet() -> str:
 
 
 def lookup_transfer_by_query_id(
-    query_id: str, amount_nano: int
+    query_id: str, amount_nano: int, jetton_wallet: str | None = None
 ) -> dict[str, Any] | None:
-    """Синхронная обёртка для HTTP-слоя: есть ли перевод в блокчейне."""
-    return asyncio.run(_lookup_async(query_id, amount_nano))
+    """Синхронная обёртка: дошли ли ROOT до получателя.
+
+    jetton_wallet — jetton-кошелёк получателя. Если известен, проверяется
+    факт зачисления (входящий internal_transfer); иначе — только факт
+    отправки, и результат помечается delivered=False.
+    """
+    return asyncio.run(_lookup_async(query_id, amount_nano, jetton_wallet))
 
 
 async def _resolve_many_async(addresses: list[str]) -> dict[str, str | None]:

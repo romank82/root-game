@@ -290,6 +290,8 @@ def _verify_local_checks(
                 "withdrawalId": withdrawal.id,
                 "queryId": query_id,
                 "amountNano": transfer["amountNano"],
+                # Нужен для проверки доставки: смотрим входящие на этот адрес.
+                "jettonWallet": expected_jetton or transfer["recipient"],
             }
         )
 
@@ -344,9 +346,10 @@ def confirm_payout_batch(
         withdrawal_id = entry["withdrawalId"]
         query_id = entry["queryId"]
         amount_nano = entry["amountNano"]
+        jetton_wallet = entry.get("jettonWallet")
 
         try:
-            found = blockchain_lookup(query_id, amount_nano)
+            found = blockchain_lookup(query_id, amount_nano, jetton_wallet)
         except Exception as error:  # noqa: BLE001 — сеть/API
             logger.warning(
                 "Blockchain lookup failed for query_id %s: %s", query_id, error
@@ -366,6 +369,24 @@ def confirm_payout_batch(
                     "withdrawalId": withdrawal_id,
                     "queryId": query_id,
                     "reason": "not_found_in_blockchain",
+                }
+            )
+            continue
+
+        # Ключевая проверка: сообщение может быть отправлено, но отбито
+        # (bounce) — тогда игрок ничего не получил. Подтверждаем только
+        # доставку.
+        if found.get("delivered") is False:
+            logger.warning(
+                "Заявка %s: перевод отправлен, но доставка не подтверждена "
+                "(возможен bounce)",
+                withdrawal_id,
+            )
+            still_pending.append(
+                {
+                    "withdrawalId": withdrawal_id,
+                    "queryId": query_id,
+                    "reason": "not_delivered",
                 }
             )
             continue

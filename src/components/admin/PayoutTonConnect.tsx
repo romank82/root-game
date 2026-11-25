@@ -83,6 +83,10 @@ export function WalletConnectButton() {
  *
  * Важно: переводим не на адрес игрока, а на его jetton-wallet — только он
  * умеет принимать ROOT. Адрес приходит с бэкенда в item.jettonWallet.
+ *
+ * ВАЖНО: transfer уходит на СОБСТВЕННЫЙ jetton-кошелёк (senderJettonWallet),
+ * а получатель указан внутри payload. Отправка на jetton-кошелёк получателя
+ * приводит к bounce: у нового игрока такого кошелька ещё нет.
  */
 export function PayBatchButton({
   batch,
@@ -100,6 +104,7 @@ export function PayBatchButton({
   const [signing, setSigning] = useState(false)
 
   const items = useMemo(() => batch.items ?? [], [batch.items])
+  const senderJettonWallet = batch.senderJettonWallet
   const totalNano = useMemo(
     () => items.reduce((sum, item) => sum + item.amountRootNano, 0),
     [items],
@@ -135,10 +140,22 @@ export function PayBatchButton({
       return
     }
 
+    // Адрес ОТПРАВКИ — jetton-кошелёк владельца (свой), получатель внутри
+    // payload. По TEP-74 transfer уходит на свой jetton-кошелёк; если
+    // отправить его на jetton-кошелёк получателя, тот чаще всего не
+    // существует, сообщение отбивается (bounce) и деньги не доходят.
+    const senderWallet = senderJettonWallet
+    if (!senderWallet) {
+      onError(
+        'Бэкенд не вернул jetton-wallet кошелька выплат — оплата невозможна.',
+      )
+      return
+    }
+
     setSigning(true)
     try {
       const messages = items.map((item) => ({
-        address: item.jettonWallet as string,
+        address: senderWallet,
         amount: toNano(TRANSFER_JETTON_AMOUNT).toString(),
         payload: buildTransferPayload(
           item.amountRootNano,
