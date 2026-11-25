@@ -40,6 +40,10 @@ type PlayersSectionProps = {
   canWrite: boolean
   onError: (message: string) => void
   onNotice: (message: string) => void
+  // Открыть карточку конкретного игрока сразу при входе в раздел. Нужно для
+  // перехода из батчей выплат: клик по нику должен показать карточку, а не
+  // просто список игроков.
+  initialPlayerId?: string | null
 }
 
 const PLAYERS_PAGE_SIZE = 50
@@ -147,6 +151,7 @@ export function PlayersSection({
   canWrite,
   onError,
   onNotice,
+  initialPlayerId,
 }: PlayersSectionProps) {
   const [players, setPlayers] = useState<AdminPlayerSummary[]>([])
   const [total, setTotal] = useState(0)
@@ -168,7 +173,9 @@ export function PlayersSection({
   const [stats, setStats] = useState<PlayersStats | null>(null)
   const [statsError, setStatsError] = useState<string | null>(null)
 
-  const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null)
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(
+    initialPlayerId ?? null,
+  )
   const [profileFields, setProfileFields] = useState<AdminProfileField[]>([])
   const [selectedPlayer, setSelectedPlayer] = useState<AdminPlayerCard | null>(
     null,

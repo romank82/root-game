@@ -42,6 +42,20 @@ const tdStyle: CSSProperties = {
   verticalAlign: 'top',
 }
 
+// Ник игрока как ссылка: выглядит как текст, но кликабелен и ведёт в
+// карточку игрока. Подчёркивание и цвет — чтобы было видно, что это ссылка.
+const playerLinkStyle: CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  color: '#8affc1',
+  textDecoration: 'underline',
+  textDecorationStyle: 'dotted',
+  textUnderlineOffset: '3px',
+  cursor: 'pointer',
+}
+
 const tableStyle: CSSProperties = {
   width: '100%',
   borderCollapse: 'collapse',
@@ -76,7 +90,13 @@ function statusColor(status: string): string {
  * query_id, владелец подписывает переводы в Tonkeeper, сервер проверяет
  * блокчейн. Приватный ключ на сервере не нужен.
  */
-export function PayoutBatchesSection() {
+export function PayoutBatchesSection({
+  onOpenPlayer,
+}: {
+  // Переход в карточку игрока: админ должен иметь возможность посмотреть,
+  // кому именно платим, прямо из батча.
+  onOpenPlayer?: (playerId: string) => void
+} = {}) {
   const [batches, setBatches] = useState<PayoutBatchRow[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -423,7 +443,7 @@ export function PayoutBatchesSection() {
                     <thead>
                       <tr>
                         <th style={thStyle}>Заявка</th>
-                        <th style={thStyle}>PlayerId</th>
+                        <th style={thStyle}>Игрок</th>
                         <th style={thStyle}>Сумма</th>
                         <th style={thStyle}>Адрес игрока</th>
                         <th style={thStyle}>Jetton wallet</th>
@@ -435,7 +455,23 @@ export function PayoutBatchesSection() {
                       {(expanded.items ?? []).map((item) => (
                         <tr key={item.withdrawalId}>
                           <td style={tdStyle}>{shorten(item.withdrawalId)}</td>
-                          <td style={tdStyle}>{shorten(item.playerId)}</td>
+                          <td style={tdStyle}>
+                            {/* player_id админу ничего не говорит — по нему
+                                игрока не найти. Показываем ник и ведём в
+                                карточку. Если ника ещё нет (старые записи),
+                                остаётся id как запасной вариант. */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onOpenPlayer?.(item.playerId)
+                              }
+                              title={item.playerId}
+                              style={playerLinkStyle}
+                            >
+                              {item.playerNickname ??
+                                shorten(item.playerId)}
+                            </button>
+                          </td>
                           <td style={tdStyle}>
                             {formatRootFromNano(item.amountRootNano)}
                           </td>

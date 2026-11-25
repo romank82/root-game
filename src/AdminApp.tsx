@@ -64,6 +64,9 @@ function AdminApp() {
   const [notice, setNotice] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  // Переход «из батча выплат в карточку игрока»: запоминаем, кого открыть,
+  // и переключаем раздел. PlayersSection смонтируется с этим id.
+  const [pendingPlayerId, setPendingPlayerId] = useState<string | null>(null)
   const [section, setSection] = useState<AdminSection>(() => {
     // 13.7-j: если в localStorage сохранена удалённая вкладка ('economy',
     // 'missions', 'seasons', 'chapters', 'story-nodes', 'cascade' и т.п.) —
@@ -539,7 +542,12 @@ function AdminApp() {
 
             <button
               className={section === 'players' ? 'is-active' : ''}
-              onClick={() => setSection('players')}
+              onClick={() => {
+                // Ручной вход в раздел — без заранее выбранного игрока,
+                // иначе останется карточка от прошлого перехода из батчей.
+                setPendingPlayerId(null)
+                setSection('players')
+              }}
             >
               Игроки
             </button>
@@ -649,6 +657,7 @@ function AdminApp() {
           canWrite={canWrite}
           onError={setError}
           onNotice={setNotice}
+          initialPlayerId={pendingPlayerId}
         />
       )}
 
@@ -669,7 +678,12 @@ function AdminApp() {
           подключения кошелька и подписи переводов. */}
       {section === 'payout-batches' && (
         <PayoutTonConnectProvider>
-          <PayoutBatchesSection />
+          <PayoutBatchesSection
+            onOpenPlayer={(playerId) => {
+              setPendingPlayerId(playerId)
+              setSection('players')
+            }}
+          />
         </PayoutTonConnectProvider>
       )}
 

@@ -211,6 +211,33 @@ class PayoutBatchServiceTests(unittest.TestCase):
                 )
             )
 
+    def _player_with_nickname(self, nickname: str) -> str:
+        """Игрок с явным ником: админ видит логин, а не player_id."""
+        from app.models import GamePlayer, Wallet
+
+        player_id = f"player-{uuid.uuid4().hex[:12]}"
+        with self.SessionLocal.begin() as session:
+            session.add(
+                GamePlayer(
+                    id=player_id,
+                    display_name="Nick test",
+                    auth_provider="demo",
+                    external_id=f"tg-{uuid.uuid4().hex}",
+                    status="active",
+                    nickname=nickname,
+                    nickname_lower=nickname.lower(),
+                )
+            )
+            session.add(
+                Wallet(
+                    id=f"wallet-{uuid.uuid4().hex}",
+                    player_id=player_id,
+                    available_balance=10_000,
+                    available_balance_nano=10_000 * NANO,
+                )
+            )
+        return player_id
+
     def _read(self, withdrawal_id: str):
         from app.models import WithdrawalRequest
 
@@ -292,6 +319,33 @@ class PayoutBatchServiceTests(unittest.TestCase):
             sum(item["amountRootNano"] for item in result["items"]),
             sum(amounts) * NANO,
         )
+
+    def test_item_exposes_player_nickname(self) -> None:
+        """В позиции батча есть ник игрока — по player_id игрока не найти.
+
+        Админ должен видеть «roman#491-773-811», а не «player-16a3...»,
+        иначе непонятно, кому платим.
+        """
+        nickname = "roman#491-773-811"
+        player_id = self._player_with_nickname(nickname)
+        self._withdrawal(player_id, 100, "pending")
+
+        batch = self.service()
+        item = next(
+            i for i in batch["items"] if i["playerId"] == player_id
+        )
+        self.assertEqual(item["playerNickname"], nickname)
+
+    def test_item_nickname_is_null_when_missing(self) -> None:
+        """Игрок без ника не роняет сборку батча."""
+        player_id = self._player()
+        self._withdrawal(player_id, 100, "pending")
+
+        batch = self.service()
+        item = next(
+            i for i in batch["items"] if i["playerId"] == player_id
+        )
+        self.assertIsNone(item["playerNickname"])
 
     def test_batch_has_payload_text_snapshot(self) -> None:
         self._withdrawal(self._player(), 42, "pending")

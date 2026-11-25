@@ -25,7 +25,13 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.mission_engine import MissionEngineError
-from app.models import PayoutAttempt, PayoutBatch, PlayerRestriction, WithdrawalRequest
+from app.models import (
+    GamePlayer,
+    PayoutAttempt,
+    PayoutBatch,
+    PlayerRestriction,
+    WithdrawalRequest,
+)
 from app.withdrawal_service import (
     NANO_PER_ROOT,
     PAYOUT_ATTEMPT_ACTIVE_STATUSES,
@@ -115,12 +121,17 @@ def _serialize_item(
     withdrawal: WithdrawalRequest,
     query_id: str | None,
     jetton_wallet: str | None = None,
+    nickname: str | None = None,
 ) -> dict[str, Any]:
     """Заявка в ответе админке: всё, что нужно фронту для TON Connect.
 
     jettonWallet — адрес jetton-кошелька получателя: переводить ROOT нужно
     на него, а не на обычный адрес игрока. None означает «не удалось
     определить» (нет TON API) — фронт в этом случае блокирует оплату.
+
+    nickname — читаемый логин вида «roman#491-773-811». player_id в базе
+    админу ничего не говорит (по нему игрока не найти), поэтому в интерфейсе
+    показывается ник, и он ведёт в карточку игрока.
     """
     amount_nano = withdrawal.amount_root_nano or (
         withdrawal.amount_root * NANO_PER_ROOT
@@ -128,6 +139,7 @@ def _serialize_item(
     return {
         "withdrawalId": withdrawal.id,
         "playerId": withdrawal.player_id,
+        "playerNickname": nickname,
         "toAddress": withdrawal.to_address,
         "jettonWallet": jetton_wallet,
         "amountRoot": withdrawal.amount_root,
@@ -292,6 +304,17 @@ def _load_batch_items(
     for attempt in attempts:
         by_withdrawal.setdefault(attempt.withdrawal_id, attempt)
 
+    # Ники одним запросом: админ должен видеть «кто», а не только id.
+    player_ids = {w.player_id for w in withdrawals if w.player_id}
+    nicknames: dict[str, str | None] = {}
+    if player_ids:
+        rows = session.execute(
+            select(GamePlayer.id, GamePlayer.nickname).where(
+                GamePlayer.id.in_(player_ids)
+            )
+        ).all()
+        nicknames = {row[0]: row[1] for row in rows}
+
     wallets = jetton_wallets or {}
     return [
         _serialize_item(
@@ -300,6 +323,7 @@ def _load_batch_items(
             if withdrawal.id in by_withdrawal
             else None,
             wallets.get(withdrawal.to_address),
+            nicknames.get(withdrawal.player_id),
         )
         for withdrawal in withdrawals
     ]

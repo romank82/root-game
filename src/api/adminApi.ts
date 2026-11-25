@@ -1872,6 +1872,9 @@ export async function listWithdrawals(
 export type PayoutBatchItem = {
   withdrawalId: string
   playerId: string
+  // Читаемый логин игрока вида «roman#491-773-811». null — у старой записи
+  // ник ещё не сгенерирован, тогда показывается playerId.
+  playerNickname: string | null
   toAddress: string
   // Адрес jetton-кошелька получателя: переводить ROOT нужно на него,
   // а не на обычный адрес игрока. null — не удалось определить (нет TON API).
