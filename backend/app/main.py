@@ -778,12 +778,13 @@ def root():
 
 @app.get("/health")
 def health_check(request: Request):
+    # Окружение наружу не отдаём: /health открыт без авторизации и не должен
+    # подсказывать, что за сервис и в каком режиме работает (аудит, F-06).
     return {
         "status": "ok",
         "service": "chimera-api",
         "version": "0.6.0",
         "storage": "sqlalchemy",
-        "environment": settings.app_env,
     }
 
 @limiter.limit("5/minute")

@@ -133,6 +133,19 @@ def start_scheduler() -> None:
         coalesce=True,
         misfire_grace_time=1800,
     )
+    # Автоподтверждение выплат: сеть может показать перевод не сразу, а
+    # админ не обязан помнить про кнопку «Сверить». Раз в 5 минут — часто
+    # достаточно, чтобы подтвердить раньше таймаута отката (по умолчанию 24ч),
+    # и редко достаточно, чтобы не долбить TON API.
+    scheduler.add_job(
+        run_payout_auto_confirm_job,
+        trigger=CronTrigger(minute="*/5"),
+        id="payout-auto-confirm",
+        name="Payout auto-confirm delivered withdrawals",
+        replace_existing=True,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
     scheduler.start()
     _scheduler = scheduler
     logger.info("Retention scheduler started (daily at 03:00 UTC)")
@@ -156,6 +169,51 @@ def run_payout_timeout_job() -> None:
             "Payout timeout job: откачено батчей — %d", len(rolled_back)
         )
 
+
+
+def run_payout_auto_confirm_job() -> None:
+    """Автоподтверждение открытых батчей выплат (CMS-тумблер).
+
+    Зачем: после подписи в Tonkeeper заявка остаётся processing, пока админ
+    не нажмёт «Сверить». Если сеть показала перевод не сразу, а админ забыл
+    вернуться — заявка откатывается по таймауту, хотя деньги уже у игрока.
+
+    Тумблер ton.payout_auto_confirm_enabled (default true) выключает джоб
+    целиком: тогда подтверждение снова только вручную.
+    """
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import SystemSetting
+    from app.payout_confirm_service import auto_confirm_open_batches
+
+    try:
+        with SessionLocal() as session:
+            setting = session.scalar(
+                select(SystemSetting).where(
+                    SystemSetting.key == "ton.payout_auto_confirm_enabled",
+                    SystemSetting.status == "active",
+                )
+            )
+            enabled = (
+                setting.value_json
+                if setting is not None and isinstance(setting.value_json, bool)
+                else True
+            )
+        if not enabled:
+            return
+        results = auto_confirm_open_batches()
+    except Exception:  # noqa: BLE001 — джоб не должен ронять планировщик
+        logger.exception("Payout auto-confirm job failed")
+        return
+
+    changed = [item for item in results if item.get("confirmedCount")]
+    if changed:
+        logger.info(
+            "Payout auto-confirm: обработано батчей %d, подтверждено %d",
+            len(results),
+            sum(int(item.get("confirmedCount") or 0) for item in changed),
+        )
 
 def stop_scheduler() -> None:
     """Остановить планировщик (вызывается при shutdown)."""

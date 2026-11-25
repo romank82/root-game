@@ -6,15 +6,19 @@ incoming-перевод из ton_service.parse_jetton_transfer: dict
  jetton_master, amount_nano, raw_payload}.
 
 Поток process_incoming_transfer:
-  1. ton.deposit_enabled=False -> rejected (reason=disabled);
-  2. amount_nano < ton.min_deposit_root * 10^8 -> rejected (reason=below_minimum);
-  3. jetton_master != settings.ton_root_jetton_master -> rejected (wrong_jetton);
-  4. идемпотентность: JettonDeposit по tx_hash (unique) -> вернуть existing;
-  5. сопоставление: TonWallet по from_address (active) -> player_id; нет -> pending;
-  6. row-lock кошелька (_get_root_wallet_for_update);
-  7. вторая линия идемпотентности: WalletTransaction unique
+  1. идемпотентность: JettonDeposit по tx_hash (unique) -> вернуть existing
+     (первой, чтобы ни одна rejected-ветка не упёрлась в unique tx_hash);
+  2. ton.deposit_enabled=False -> rejected (reason=disabled);
+  3. amount_nano < ton.min_deposit_root * 10^8 -> rejected (reason=below_minimum);
+  4. jetton_master != settings.ton_root_jetton_master -> rejected (wrong_jetton);
+  5. адрес получателя != активный ton.deposit_wallet ->
+     rejected (wrong_destination); кошелёк не настроен ->
+     rejected (deposit_wallet_not_configured);
+  6. сопоставление: TonWallet по from_address (active) -> player_id; нет -> pending;
+  7. row-lock кошелька (_get_root_wallet_for_update);
+  8. вторая линия идемпотентности: WalletTransaction unique
      (wallet_id, reference_type='jetton_deposit', reference_id=tx_hash);
-  8. зачисление nano + ledger-credit + JettonDeposit(confirmed).
+  9. зачисление nano + ledger-credit + JettonDeposit(confirmed).
 
 Физическое удаление записей запрещено: JettonDeposit append-only,
 WalletTransaction immutable. Стиль — transfer_service/withdrawal_service.
@@ -24,12 +28,18 @@ from __future__ import annotations
 
 import logging
 
+from pytoniq_core import Address
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.admin_player_wallet import ACTIVE_SETTING_STATUS
 from app.config import settings
-from app.mission_engine import MissionEngineError, _get_root_wallet_for_update, _new_id, _utcnow
+from app.mission_engine import (
+    MissionEngineError,
+    _get_root_wallet_for_update,
+    _new_id,
+    _utcnow,
+)
 from app.models import (
     JettonDeposit,
     SystemSetting,
@@ -122,6 +132,21 @@ def get_deposit_wallet_address(session: Session) -> str:
     return address
 
 
+def normalize_address_for_compare(address):
+    """Канонический raw-вид TON-адреса для сравнения (None — невалиден).
+
+    TonCenter отдаёт `destination` в raw-форме (`0:hex`), а CMS хранит
+    user-friendly (`EQA…`/`kQA…`), поэтому сравнивать строки нельзя —
+    только нормализованные raw-адреса.
+    """
+    if not isinstance(address, str) or not address.strip():
+        return None
+    try:
+        return Address(address.strip()).to_str(is_user_friendly=False)
+    except Exception:
+        return None
+
+
 def _build_deposit(
     tx: dict,
     player_id: str | None,
@@ -177,14 +202,27 @@ def process_incoming_transfer(session: Session, tx: dict) -> JettonDeposit:
     Идемпотентность двухуровневая: unique tx_hash (модель) + unique
     (wallet_id, reference_type, reference_id=tx_hash) (ledger).
     """
-    # 1. Рубильник депозита (CMS ton.deposit_enabled).
+    # 1. Идемпотентность по tx_hash (unique) — самая первая проверка.
+    # Порядок принципиален: любая ветка rejected ниже вставляет строку
+    # JettonDeposit, а tx_hash уникален. Если повторно обработать тот же
+    # перевод при изменившихся настройках (например, после смены
+    # ton.deposit_wallet), проверка адреса дала бы rejected и вторая вставка
+    # упала бы с IntegrityError. Ранее записанная строка — единственный
+    # правильный ответ на повтор.
+    existing = session.scalar(
+        select(JettonDeposit).where(JettonDeposit.tx_hash == tx["tx_hash"])
+    )
+    if existing is not None:
+        return existing
+
+    # 2. Рубильник депозита (CMS ton.deposit_enabled).
     if not _read_bool_setting(session, DEPOSIT_ENABLED_KEY, False):
         deposit = _build_deposit(tx, None, "rejected", reason="disabled")
         session.add(deposit)
         session.flush()
         return deposit
 
-    # 2. Минимальная сумма (ton.min_deposit_root, целый ROOT).
+    # 3. Минимальная сумма (ton.min_deposit_root, целый ROOT).
     min_root = _read_int_setting(session, DEPOSIT_MIN_AMOUNT_KEY, 1)
     if tx.get("amount_nano", 0) < min_root * NANO_PER_ROOT:
         deposit = _build_deposit(tx, None, "rejected", reason="below_minimum")
@@ -192,7 +230,7 @@ def process_incoming_transfer(session: Session, tx: dict) -> JettonDeposit:
         session.flush()
         return deposit
 
-    # 3. Проверка jetton-мастера == TON_ROOT_JETTON_MASTER.
+    # 4. Проверка jetton-мастера == TON_ROOT_JETTON_MASTER.
     expected_master = settings.ton_root_jetton_master
     if not expected_master or tx.get("jetton_master") != expected_master:
         deposit = _build_deposit(tx, None, "rejected", reason="wrong_jetton")
@@ -200,14 +238,26 @@ def process_incoming_transfer(session: Session, tx: dict) -> JettonDeposit:
         session.flush()
         return deposit
 
-    # 4. Идемпотентность по tx_hash (unique) — повторный перевод.
-    existing = session.scalar(
-        select(JettonDeposit).where(JettonDeposit.tx_hash == tx["tx_hash"])
-    )
-    if existing is not None:
-        return existing
+    # 5. Адрес получателя == активный депозитный кошелёк из CMS.
+    # Poller запрашивает историю только своего адреса, но проверка должна
+    # жить в самом сервисе: вызывающий может передать любой tx-dict.
+    expected_destination = _read_string_setting(session, DEPOSIT_WALLET_KEY).strip()
+    if not expected_destination:
+        deposit = _build_deposit(
+            tx, None, "rejected", reason="deposit_wallet_not_configured"
+        )
+        session.add(deposit)
+        session.flush()
+        return deposit
+    expected_raw = normalize_address_for_compare(expected_destination)
+    actual_raw = normalize_address_for_compare(tx.get("to_address"))
+    if expected_raw is None or actual_raw is None or expected_raw != actual_raw:
+        deposit = _build_deposit(tx, None, "rejected", reason="wrong_destination")
+        session.add(deposit)
+        session.flush()
+        return deposit
 
-    # 5. Сопоставление отправителя с активным TonWallet игрока.
+    # 6. Сопоставление отправителя с активным TonWallet игрока.
     ton_wallet = session.scalar(
         select(TonWallet).where(
             TonWallet.address == tx["from_address"],
@@ -222,10 +272,10 @@ def process_incoming_transfer(session: Session, tx: dict) -> JettonDeposit:
 
     player_id = ton_wallet.player_id
 
-    # 6. Row-lock ROOT-кошелька игрока (сериализация параллельных депозитов).
+    # 7. Row-lock ROOT-кошелька игрока (сериализация параллельных депозитов).
     wallet = _get_root_wallet_for_update(session, player_id)
 
-    # 7. Вторая линия идемпотентности: ledger-проводка с этим reference_id.
+    # 8. Вторая линия идемпотентности: ledger-проводка с этим reference_id.
     ledger_credit = session.scalar(
         select(WalletTransaction).where(
             WalletTransaction.wallet_id == wallet.id,
@@ -239,7 +289,7 @@ def process_incoming_transfer(session: Session, tx: dict) -> JettonDeposit:
         )
         return confirmed if confirmed is not None else existing
 
-    # 8. Зачисление по nano (legacy available_balance = floor(nano / 10^8)).
+    # 9. Зачисление по nano (legacy available_balance = floor(nano / 10^8)).
     wallet_nano = wallet.available_balance_nano
     if wallet_nano is None:
         wallet_nano = wallet.available_balance * NANO_PER_ROOT

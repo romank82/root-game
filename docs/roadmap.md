@@ -1009,22 +1009,39 @@ rate limiting;
    tests.test_transfer_pg_10_5`.
    Остаточный риск: тесты мягкие — при отсутствии PG молча пропускаются, поэтому
    в другом окружении дыра вернётся незамеченной.
-2. **Deposit poller работает от `root`** (`deploy/root-game-deposit-poller.service`),
-   хотя основной сервис — от `deployer`. В юните стоит TODO.
-3. **`deposit_service.process_incoming_transfer` не сверяет `to_address`** с
-   активным `ton.deposit_wallet`. Сейчас безопасно (poller запрашивает только
-   свой адрес), но проверка должна быть в самом сервисе.
-4. **Нет security headers в nginx** (HSTS, CSP, X-Frame-Options,
-   X-Content-Type-Options) — см. аудит, находка F-02.
+2. ~~**Deposit poller работает от `root`**~~ **ЗАКРЫТО (25.11.2026).**
+   Юнит переведён на `deployer` (как основной сервис). Требует `sudo` при
+   установке единицы и перезапуска сервиса на сервере.
+3. ~~**`deposit_service.process_incoming_transfer` не сверяет `to_address`**~~
+   **ЗАКРЫТО (25.11.2026).** Проверка добавлена шагом 3a: несовпадение адреса
+   или незаполненный `ton.deposit_wallet` дают `rejected`
+   (`wrong_destination` / `deposit_wallet_not_configured`). Адреса
+   сравниваются в нормализованном raw-виде, поэтому `EQA…` в CMS и `0:hex`
+   из TonCenter считаются одним адресом. Тесты: +4 в `test_deposit_service`.
+4. ~~**Нет security headers в nginx**~~ **ЗАКРЫТО (25.11.2026).**
+   Добавлены HSTS, X-Content-Type-Options, Referrer-Policy, Permissions-Policy
+   и CSP. `X-Frame-Options` сознательно НЕ ставится: Telegram Mini App в
+   Telegram Web/Desktop открывается в iframe с `web.telegram.org`, и
+   SAMEORIGIN его сломает; защиту от кликджекинга даёт CSP
+   `frame-ancestors`. Заголовки продублированы в `location`-блоках, которые
+   объявляют свои `add_header` (nginx не наследует их).
 5. **Античит не отменяет награду.** Телепорт → миссии выполнены → ROOT начислены
    → флаг → заблокирован только вывод. Требует решения владельца: блокировать
    награду сразу или оставлять до разбора админом.
-6. **`/health` раскрывает `environment`** — мелочь, но лишнее.
+6. ~~**`/health` раскрывает `environment`**~~ **ЗАКРЫТО (25.11.2026).**
+   Поле убрано из ответа.
 7. **TonCenter без API-ключа** — анонимный лимит ~1 запрос/сек, для батча из 50
    заявок мало.
-8. **Автоподтверждение выплат** — сейчас кнопка «Сверить» вручную.
-9. **Регулярные бэкапы и восстановление БД** — в roadmap заявлены, в репозитории
-   нет автоматизации.
+8. ~~**Автоподтверждение выплат**~~ **ЗАКРЫТО (25.11.2026).**
+   `PayoutBatch.signed_boc` сохраняет подписанный BOC, а джоб
+   `payout-auto-confirm` раз в 5 минут повторяет сверку с блокчейном
+   (`auto_confirm_open_batches`). Кнопка «Сверить» осталась ручным дублем.
+   Отключается CMS-тумблером `ton.payout_auto_confirm_enabled`.
+9. ~~**Регулярные бэкапы и восстановление БД**~~ **ЗАКРЫТО (25.11.2026).**
+   `deploy/backup-db.sh` + `root-game-backup.service`/`.timer`: ежедневный
+   `pg_dump --format=custom` в 03:30 UTC, хранение 14 дней, проверка дампа
+   через `pg_restore --list`, атомарная запись. Восстановление проверено на
+   реальном PostgreSQL (47 настроек, 4 проводки после restore).
 10. **Уязвимые dev-зависимости frontend** по `pnpm audit` (Vite/source-map-js);
     влияют только на dev/CI, но обновить надо.
 

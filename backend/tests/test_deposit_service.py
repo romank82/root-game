@@ -15,7 +15,13 @@ disposable SQLite + alembic upgrade head; SessionLocal патчится в дв�
   4. test_below_minimum — rejected, баланс не меняется;
   5. test_deposit_disabled — rejected, баланс не меняется;
   6. test_no_ton_wallet — pending (player_id None), баланс не меняется;
-  7. test_parallel_deposits — два разных tx_hash -> оба зачислены.
+  7. test_parallel_deposits — два разных tx_hash -> оба зачислены;
+  8. test_wrong_destination — to_address != ton.deposit_wallet -> rejected;
+  9. test_deposit_wallet_not_configured — пустой ton.deposit_wallet -> rejected;
+ 10. test_destination_friendly_matches_raw — EQA… в CMS == 0:hex в tx;
+ 11. test_repeat_after_wallet_change_is_idempotent — повторная обработка
+     того же перевода после смены ton.deposit_wallet не падает и не
+     перезачисляет (идемпотентность проверяется первой).
 """
 from __future__ import annotations
 
@@ -48,6 +54,10 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 
 NANO_PER_ROOT = 100_000_000
 ROOT_MASTER = "0:" + "a" * 64
+# Адрес депозитного кошелька (CMS ton.deposit_wallet) для тестов.
+DEPOSIT_WALLET_RAW = "0:" + "c" * 64
+# Та же форма, что хранит CMS в реальности (user-friendly bounceable).
+DEPOSIT_WALLET_FRIENDLY = "EQDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzDA5"
 OTHER_MASTER = "0:" + "b" * 64
 
 
@@ -185,11 +195,14 @@ class DepositServiceTests(unittest.TestCase):
             )
         session.flush()
 
-    def _enable_deposit(self, session, min_root: int = 1) -> None:
+    def _enable_deposit(
+        self, session, min_root: int = 1, deposit_wallet: str = DEPOSIT_WALLET_RAW
+    ) -> None:
         self._seed_setting(session, deposit_service.DEPOSIT_ENABLED_KEY, True, "boolean")
         self._seed_setting(
             session, deposit_service.DEPOSIT_MIN_AMOUNT_KEY, min_root, "integer"
         )
+        self._seed_setting(session, deposit_service.DEPOSIT_WALLET_KEY, deposit_wallet, "string")
 
     def _make_tx(
         self,
@@ -197,6 +210,7 @@ class DepositServiceTests(unittest.TestCase):
         amount_nano: int = NANO_PER_ROOT,
         tx_hash: str | None = None,
         jetton_master: str = ROOT_MASTER,
+        to_address: str = DEPOSIT_WALLET_RAW,
     ) -> dict:
         """Распарсенный incoming-перевод (выход ton_service.parse_jetton_transfer)."""
         return {
@@ -204,7 +218,7 @@ class DepositServiceTests(unittest.TestCase):
             "lt": 12345,
             "query_id": 7,
             "from_address": from_address,
-            "to_address": "0:" + "c" * 64,
+            "to_address": to_address,
             "jetton_master": jetton_master,
             "amount_nano": amount_nano,
             "raw_payload": {"mock": True},
@@ -405,6 +419,126 @@ class DepositServiceTests(unittest.TestCase):
         self.assertEqual(self._get_deposit(deposit_a).status, "confirmed")
         self.assertEqual(self._get_deposit(deposit_b).status, "confirmed")
         self.assertEqual(self._wallet_nano(player_id), 5 * NANO_PER_ROOT)
+
+    def test_wrong_destination(self) -> None:
+        """to_address != ton.deposit_wallet -> rejected, баланс не меняется."""
+        with self.SessionLocal.begin() as session:
+            player_id = self._make_player(session)
+            self._bind_ton_wallet(session, player_id, "0:" + "1" * 64)
+            self._enable_deposit(session)
+
+        tx = self._make_tx(
+            "0:" + "1" * 64,
+            amount_nano=5 * NANO_PER_ROOT,
+            to_address="0:" + "d" * 64,
+        )
+
+        with patch.object(
+            self.deposit_service, "settings",
+            SimpleNamespace(ton_root_jetton_master=ROOT_MASTER),
+        ):
+            deposit_id = self._process(tx)
+
+        deposit = self._get_deposit(deposit_id)
+        self.assertEqual(deposit.status, "rejected")
+        self.assertEqual(deposit.raw_payload.get("reason"), "wrong_destination")
+        self.assertEqual(self._wallet_nano(player_id), 0)
+
+    def test_deposit_wallet_not_configured(self) -> None:
+        """Пустой ton.deposit_wallet -> rejected, баланс не меняется."""
+        with self.SessionLocal.begin() as session:
+            player_id = self._make_player(session)
+            self._bind_ton_wallet(session, player_id, "0:" + "1" * 64)
+            self._seed_setting(
+                session, deposit_service.DEPOSIT_ENABLED_KEY, True, "boolean"
+            )
+            self._seed_setting(
+                session, deposit_service.DEPOSIT_MIN_AMOUNT_KEY, 1, "integer"
+            )
+            self._seed_setting(
+                session, deposit_service.DEPOSIT_WALLET_KEY, "", "string"
+            )
+
+        tx = self._make_tx("0:" + "1" * 64, amount_nano=5 * NANO_PER_ROOT)
+
+        with patch.object(
+            self.deposit_service, "settings",
+            SimpleNamespace(ton_root_jetton_master=ROOT_MASTER),
+        ):
+            deposit_id = self._process(tx)
+
+        deposit = self._get_deposit(deposit_id)
+        self.assertEqual(deposit.status, "rejected")
+        self.assertEqual(
+            deposit.raw_payload.get("reason"), "deposit_wallet_not_configured"
+        )
+        self.assertEqual(self._wallet_nano(player_id), 0)
+
+    def test_destination_friendly_matches_raw(self) -> None:
+        """CMS хранит EQA…, tx приносит 0:hex -> адреса считаются равными."""
+        with self.SessionLocal.begin() as session:
+            player_id = self._make_player(session)
+            self._bind_ton_wallet(session, player_id, "0:" + "1" * 64)
+            self._enable_deposit(session, deposit_wallet=DEPOSIT_WALLET_FRIENDLY)
+
+        tx = self._make_tx(
+            "0:" + "1" * 64,
+            amount_nano=5 * NANO_PER_ROOT,
+            to_address=DEPOSIT_WALLET_RAW,
+        )
+
+        with patch.object(
+            self.deposit_service, "settings",
+            SimpleNamespace(ton_root_jetton_master=ROOT_MASTER),
+        ):
+            deposit_id = self._process(tx)
+
+        deposit = self._get_deposit(deposit_id)
+        self.assertEqual(deposit.status, "confirmed")
+        self.assertEqual(self._wallet_nano(player_id), 5 * NANO_PER_ROOT)
+
+    def test_repeat_after_wallet_change_is_idempotent(self) -> None:
+        """Повтор того же tx после смены deposit_wallet: без IntegrityError."""
+        with self.SessionLocal.begin() as session:
+            player_id = self._make_player(session)
+            self._bind_ton_wallet(session, player_id, "0:" + "1" * 64)
+            self._enable_deposit(session)
+
+        tx = self._make_tx(
+            "0:" + "1" * 64, amount_nano=5 * NANO_PER_ROOT, tx_hash="same-tx"
+        )
+
+        with patch.object(
+            self.deposit_service, "settings",
+            SimpleNamespace(ton_root_jetton_master=ROOT_MASTER),
+        ):
+            first_id = self._process(tx)
+            # Кошелёк приёма сменили: тот же перевод теперь «чужой адрес».
+            with self.SessionLocal.begin() as session:
+                self._seed_setting(
+                    session, deposit_service.DEPOSIT_WALLET_KEY,
+                    "0:" + "e" * 64, "string",
+                )
+            second_id = self._process(tx)
+
+        # Ответ на повтор — уже записанная строка, а не rejected.
+        self.assertEqual(first_id, second_id)
+        self.assertEqual(self._wallet_nano(player_id), 5 * NANO_PER_ROOT)
+
+    def test_normalize_address_for_compare(self) -> None:
+        """Нормализация: raw/friendly/bounceable дают один ключ, мусор -> None."""
+        normalize = self.deposit_service.normalize_address_for_compare
+        self.assertEqual(
+            normalize(DEPOSIT_WALLET_RAW), normalize(DEPOSIT_WALLET_FRIENDLY)
+        )
+        # Non-bounceable (UQ…) форма — тот же адрес.
+        self.assertEqual(
+            normalize("UQDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzG38"),
+            normalize(DEPOSIT_WALLET_RAW),
+        )
+        self.assertIsNone(normalize(None))
+        self.assertIsNone(normalize(""))
+        self.assertIsNone(normalize("не адрес"))
 
     def test_get_deposit_wallet_address(self) -> None:
         """CMS ton.deposit_wallet: пусто -> 503; заполнено -> адрес."""

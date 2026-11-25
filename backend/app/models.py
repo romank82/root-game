@@ -2095,6 +2095,11 @@ class PayoutBatch(TimestampMixin, Base):
     payload_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Хеш транзакции из блокчейна (после успешной сверки).
     tx_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # Подписанный владельцем BOC (base64). Нужен автоподтверждению: пока
+    # перевод виден не сразу (bounce/задержка сети), заявки остаются в
+    # processing, и фоновый джоб повторяет сверку по сохранённому BOC,
+    # не требуя от админа нажимать «Сверить» повторно.
+    signed_boc: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Момент открытия: для контроля «висит N дней без оплаты».
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

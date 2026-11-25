@@ -1,0 +1,22 @@
+[Unit]
+Description=ROOT Game database backup (daily pg_dump)
+Documentation=file:/opt/root-game/deploy/README.md
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+# Работает от deployer, как и остальные юниты проекта: root не нужен,
+# бэкап-каталог создаётся с правами 700 и принадлежит deployer.
+User=deployer
+Group=deployer
+# Каталог бэкапов должен существовать заранее:
+#   sudo install -d -o deployer -g deployer -m 700 /var/backups/root-game
+Environment=BACKUP_DIR=/var/backups/root-game
+Environment=KEEP_DAYS=14
+ExecStart=/bin/sh /opt/root-game/deploy/backup-db.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+StandardOutput=journal
+StandardError=journal

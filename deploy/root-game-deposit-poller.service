@@ -5,10 +5,10 @@ Wants=postgresql.service
 
 [Service]
 Type=simple
-# TODO(deployer): приведено к текущему серверу (root); в бэклоге — отдать
-# под пользователя deployer, как root-game.service.
-User=root
-Group=root
+# Работает от deployer, как и основной сервис: суперпользователь не нужен,
+# поллеру достаточно прав на каталог /opt/root-game/backend и на БД.
+User=deployer
+Group=deployer
 WorkingDirectory=/opt/root-game/backend
 EnvironmentFile=/opt/root-game/backend/.env
 Environment=PYTHONUNBUFFERED=1

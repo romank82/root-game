@@ -111,6 +111,15 @@ sudo systemctl status root-game
 sudo cp /opt/root-game/deploy/root-game-deposit-poller.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now root-game-deposit-poller
+
+# Ежедневный бэкап БД (systemd-таймер 03:30 UTC, хранение 14 дней)
+sudo install -d -o deployer -g deployer -m 700 /var/backups/root-game
+sudo cp /opt/root-game/deploy/root-game-backup.service /etc/systemd/system/
+sudo cp /opt/root-game/deploy/root-game-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now root-game-backup.timer
+sudo systemctl start root-game-backup.service    # проверить первый прогон
+sudo journalctl -u root-game-backup -n 20
 ```
 
 ## 8. nginx + HTTPS
@@ -166,7 +175,29 @@ SITE_URL=https://himeraprotocol.pro sh deploy/deploy.sh
 
 ## Бэкап
 
+Автоматически: `root-game-backup.timer` запускает `deploy/backup-db.sh`
+каждый день в 03:30 UTC. Дампы — `pg_dump --format=custom` в
+`/var/backups/root-game`, хранение 14 дней (`KEEP_DAYS`), права 600.
+
+Проверить вручную:
+
 ```bash
-pg_dump -U rootgame rootgame | gzip > /opt/backups/rootgame_$(date +%F).sql.gz
-find /opt/backups -name 'rootgame_*.sql.gz' -mtime +7 -delete
+sudo systemctl start root-game-backup.service
+sudo journalctl -u root-game-backup -n 30
+ls -la /var/backups/root-game/
 ```
+
+Восстановление (на тестовую БД, не на рабочую!):
+
+```bash
+sudo -u postgres createdb -T template0 restore_check
+sudo -u postgres pg_restore -d restore_check --no-owner \
+  /var/backups/root-game/rootgame_YYYYMMDD_HHMMSS.dump
+sudo -u postgres psql -d restore_check -c "select count(*) from system_settings"
+sudo -u postgres dropdb restore_check
+```
+
+> Скрипт отказывается работать с не-PostgreSQL `DATABASE_URL` и проверяет
+> дамп через `pg_restore --list`: обрезанный файл не будет принят за
+> нормальный. Копии лежат на том же диске, что и БД, поэтому их нужно
+> периодически выгружать на другой сервер или в объектное хранилище.

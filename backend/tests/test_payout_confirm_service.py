@@ -13,7 +13,9 @@
   * повторный query_id в BOC -> отказ;
   * блокчейн недоступен -> 503-подобное поведение (заявки не подтверждены);
   * повторное подтверждение уже подтверждённой заявки -> не дублируется;
-  * батч уже confirmed / rolled_back -> 409.
+  * батч уже confirmed / rolled_back -> 409;
+  * автоподтверждение повторяет сверку по сохранённому BOC и подтверждает
+    то, что сеть увидела позже.
 """
 from __future__ import annotations
 
@@ -170,8 +172,11 @@ class PayoutConfirmServiceTests(unittest.TestCase):
         from app.payout_batch_service import create_payout_batch
         from app.payout_confirm_service import confirm_payout_batch
 
+        from app.payout_confirm_service import auto_confirm_open_batches
+
         cls.create_batch = staticmethod(create_payout_batch)
         cls.confirm = staticmethod(confirm_payout_batch)
+        cls.auto_confirm = staticmethod(auto_confirm_open_batches)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -516,6 +521,94 @@ class PayoutConfirmServiceTests(unittest.TestCase):
             self.assertEqual(attempt.status, "sent")
             self.assertEqual(attempt.tx_hash, f"tx-{mapping[wid]}")
 
+
+
+    # --- Автоподтверждение -----------------------------------------------
+
+    def test_auto_confirm_retries_saved_boc(self) -> None:
+        """Частичная оплата -> автоподтверждение подтверждает, когда сеть догнала."""
+        batch_id, mapping = self._batch_with([(10, RECIPIENT_A), (20, RECIPIENT_B)])
+        first = self._wid_by_amount(mapping, 10)
+        second = self._wid_by_amount(mapping, 20)
+        boc = build_signed_boc(
+            [
+                (mapping[wid], self._read_withdrawal(wid).amount_root_nano,
+                 self._read_withdrawal(wid).to_address)
+                for wid in mapping
+            ],
+            self.signing_key,
+        )
+
+        def only_first(query_id: str, amount_nano: int, jetton_wallet=None):
+            return (
+                {"txHash": "tx-1", "delivered": True}
+                if query_id == mapping[first]
+                else None
+            )
+
+        # Ручная сверка: сеть видит только первую заявку.
+        self.confirm(batch_id, boc, blockchain_lookup=only_first)
+        self.assertEqual(self._read_batch(batch_id).status, "submitted")
+        self.assertIsNotNone(self._read_batch(batch_id).signed_boc)
+
+        # Сеть догнала — автоджоб подтверждает вторую без участия админа.
+        results = self.auto_confirm(blockchain_lookup=self._lookup_all)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["status"], "confirmed")
+        # confirmedCount включает и ранее подтверждённую заявку: сверка
+        # идемпотентна, повторная обработка её не отменяет.
+        self.assertEqual(results[0]["confirmedCount"], 2)
+        self.assertEqual(self._read_withdrawal(first).status, "confirmed")
+        self.assertEqual(self._read_withdrawal(second).status, "confirmed")
+        self.assertEqual(self._read_batch(batch_id).status, "confirmed")
+
+    def test_auto_confirm_skips_batches_without_boc(self) -> None:
+        """Батч ready (подписи нет) не трогается: сверять нечего."""
+        batch_id, _mapping = self._batch_with([(10, RECIPIENT_A)])
+
+        results = self.auto_confirm(blockchain_lookup=self._lookup_all)
+
+        self.assertEqual(results, [])
+        self.assertEqual(self._read_batch(batch_id).status, "ready")
+
+    def test_auto_confirm_ignores_confirmed_batch(self) -> None:
+        """Закрытый батч повторно не сверяется (не долбим сеть зря)."""
+        batch_id, mapping = self._batch_with([(10, RECIPIENT_A)])
+        boc = build_signed_boc(
+            [(mapping[next(iter(mapping))], 10 * NANO, RECIPIENT_A)],
+            self.signing_key,
+        )
+        self.confirm(batch_id, boc, blockchain_lookup=self._lookup_all)
+        self.assertEqual(self._read_batch(batch_id).status, "confirmed")
+
+        results = self.auto_confirm(blockchain_lookup=self._lookup_all)
+
+        self.assertEqual(results, [])
+
+    def test_auto_confirm_survives_lookup_failure(self) -> None:
+        """Сбой сети по батчу не ломает джоб: заявки остаются processing."""
+        batch_id, mapping = self._batch_with([(10, RECIPIENT_A)])
+        boc = build_signed_boc(
+            [(mapping[next(iter(mapping))], 10 * NANO, RECIPIENT_A)],
+            self.signing_key,
+        )
+
+        def nothing_yet(query_id: str, amount_nano: int, jetton_wallet=None):
+            return None
+
+        self.confirm(batch_id, boc, blockchain_lookup=nothing_yet)
+
+        def broken(query_id: str, amount_nano: int, jetton_wallet=None):
+            raise RuntimeError("TON API недоступен")
+
+        results = self.auto_confirm(blockchain_lookup=broken)
+
+        # Сбой сети по заявке гасится внутри сверки и не пробрасывается:
+        # ни одна заявка не подтверждена, батч остался открытым.
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["confirmedCount"], 0)
+        self.assertEqual(self._read_batch(batch_id).status, "submitted")
 
 if __name__ == "__main__":
     unittest.main()

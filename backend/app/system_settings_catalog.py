@@ -213,6 +213,19 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         ),
         is_sensitive=False,
     ),
+    "ton.payout_auto_confirm_enabled": SystemSettingDefinition(
+        key="ton.payout_auto_confirm_enabled",
+        value_type="boolean",
+        default_value=True,
+        category="ton",
+        title="Автоподтверждение выплат",
+        description=(
+            "Фоновый джоб сам повторяет сверку с блокчейном по сохранённому "
+            "подписанному BOC и подтверждает доставленные выплаты. Кнопка "
+            "«Сверить» остаётся ручным дублем на случай отключения."
+        ),
+        is_sensitive=False,
+    ),
     "ton.min_amount_root": SystemSettingDefinition(
         key="ton.min_amount_root",
         value_type="integer",

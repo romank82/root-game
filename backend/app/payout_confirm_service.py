@@ -417,6 +417,12 @@ def confirm_payout_batch(
         if batch is None:  # pragma: no cover
             raise BatchConfirmError(404, "Батч исчез во время подтверждения.")
 
+        # Сохраняем подписанный BOC: по нему автоподтверждение повторит
+        # сверку позже, когда сеть увидит оставшиеся переводы. Перезапись не
+        # страшна (владелец мог переподписать), но пустым не затираем.
+        if boc_base64:
+            batch.signed_boc = boc_base64
+
         remaining = session.scalar(
             select(WithdrawalRequest.id)
             .where(
@@ -459,6 +465,66 @@ def confirm_payout_batch(
         "confirmed": confirmed,
         "pending": still_pending,
     }
+
+
+def auto_confirm_open_batches(
+    blockchain_lookup: Callable[[str, int], dict[str, Any] | None] | None = None,
+) -> list[dict[str, Any]]:
+    """Автоподтверждение: повторная сверка открытых батчей по сохранённому BOC.
+
+    Зачем: сеть может показать перевод не сразу (задержка индексатора,
+    временный bounce). Без автоподтверждения админ обязан помнить про кнопку
+    «Сверить», иначе заявка висит в processing до таймаута и откатывается,
+    хотя деньги уже у игрока.
+
+    Берём только батчи в статусе submitted с сохранённым signed_boc: на
+    ready-батче подписи ещё нет, а на confirmed/rolled_back сверять нечего.
+
+    Ошибки по отдельному батчу логируются и не мешают остальным: следующий
+    запуск джоба повторит попытку.
+    """
+    from app.ton_payout_lookup import lookup_transfer_by_query_id
+
+    lookup = blockchain_lookup or lookup_transfer_by_query_id
+
+    with SessionLocal() as session:
+        batch_ids = list(
+            session.scalars(
+                select(PayoutBatch.id).where(
+                    PayoutBatch.status == BATCH_STATUS_SUBMITTED,
+                    PayoutBatch.signed_boc.is_not(None),
+                )
+            ).all()
+        )
+
+    results: list[dict[str, Any]] = []
+    for batch_id in batch_ids:
+        try:
+            with SessionLocal() as session:
+                boc = session.scalar(
+                    select(PayoutBatch.signed_boc).where(
+                        PayoutBatch.id == batch_id
+                    )
+                )
+            if not boc:
+                continue
+            result = confirm_payout_batch(
+                batch_id, boc, admin_id=None, blockchain_lookup=lookup
+            )
+            result["batchId"] = batch_id
+            results.append(result)
+            logger.info(
+                "Автоподтверждение: батч %s -> %s (подтверждено %d из %d)",
+                batch_id,
+                result.get("status"),
+                result.get("confirmedCount", 0),
+                result.get("totalCount", 0),
+            )
+        except Exception as error:  # noqa: BLE001 — один батч не должен ломать джоб
+            logger.warning(
+                "Автоподтверждение: батч %s не подтверждён (%s)", batch_id, error
+            )
+    return results
 
 
 def _confirm_one(withdrawal_id: str, query_id: str, tx_hash: str) -> None:
