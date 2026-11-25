@@ -20,7 +20,12 @@ SITE_URL=https://himeraprotocol.pro sh deploy/deploy.sh
 ## 1. Подготовка сервера
 
 ```bash
-# Ubuntu 22.04+, пользователь deployer (не root)
+# Ubuntu 22.04+
+# ВНИМАНИЕ: на действующем сервере (himeraprotocol.pro) пользователя deployer
+# НЕТ — /opt/root-game принадлежит root, и все сервисы работают от root.
+# Создавать deployer на живой машине можно только вместе с chown каталога,
+# venv, frontend/dist и .env и выдачей прав в PostgreSQL, иначе прод упадёт.
+# Ниже — вариант для чистой машины.
 sudo adduser deployer
 sudo usermod -aG sudo deployer
 
@@ -113,7 +118,9 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now root-game-deposit-poller
 
 # Ежедневный бэкап БД (systemd-таймер 03:30 UTC, хранение 14 дней)
-sudo install -d -o deployer -g deployer -m 700 /var/backups/root-game
+# На текущем сервере всё работает от root (нет пользователя deployer),
+# поэтому юниты не задают User= и запускаются от root.
+sudo install -d -m 700 /var/backups/root-game
 sudo cp /opt/root-game/deploy/root-game-backup.service /etc/systemd/system/
 sudo cp /opt/root-game/deploy/root-game-backup.timer /etc/systemd/system/
 sudo systemctl daemon-reload

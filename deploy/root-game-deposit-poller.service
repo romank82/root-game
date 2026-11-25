@@ -5,10 +5,11 @@ Wants=postgresql.service
 
 [Service]
 Type=simple
-# Работает от deployer, как и основной сервис: суперпользователь не нужен,
-# поллеру достаточно прав на каталог /opt/root-game/backend и на БД.
-User=deployer
-Group=deployer
+# На этом сервере нет непривилегированного пользователя: каталог /opt/root-game
+# принадлежит root и основной сервис root-game тоже работает от root. Юнит без
+# User= запустится от root — как и всё остальное на машине. Переход на
+# отдельного пользователя — отдельная задача (chown каталога, venv, dist, .env
+# и права в PostgreSQL), иначе прод сломается в момент переключения.
 WorkingDirectory=/opt/root-game/backend
 EnvironmentFile=/opt/root-game/backend/.env
 Environment=PYTHONUNBUFFERED=1

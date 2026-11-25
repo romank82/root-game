@@ -6,12 +6,13 @@ Wants=postgresql.service
 
 [Service]
 Type=oneshot
-# Работает от deployer, как и остальные юниты проекта: root не нужен,
-# бэкап-каталог создаётся с правами 700 и принадлежит deployer.
-User=deployer
-Group=deployer
-# Каталог бэкапов должен существовать заранее:
-#   sudo install -d -o deployer -g deployer -m 700 /var/backups/root-game
+# На этом сервере нет непривилегированного пользователя: каталог /opt/root-game
+# принадлежит root и основной сервис root-game тоже работает от root. Юнит без
+# User= запустится от root — так же, как всё остальное на машине. Переход на
+# отдельного пользователя (deployer) — отдельная задача: он требует chown
+# каталога, venv, dist, .env и прав в PostgreSQL, иначе прод сломается.
+# Каталог бэкапов создаётся заранее:
+#   install -d -m 700 /var/backups/root-game
 Environment=BACKUP_DIR=/var/backups/root-game
 Environment=KEEP_DAYS=14
 ExecStart=/bin/sh /opt/root-game/deploy/backup-db.sh
