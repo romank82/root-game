@@ -1,0 +1,23 @@
+{
+  "header": {
+    "eyebrow": "RISK / ACCESS",
+    "title": "Risk"
+  },
+  "locked": {
+    "message": "Games are locked. Unlock costs {{cost}} gas.",
+    "balance": "Your balance: {{balance}} gas.",
+    "notice": "This is a one-time payment: gas is charged once and access stays forever.",
+    "payButton": "Pay",
+    "declineButton": "Decline",
+    "notEnoughGas": "Not enough gas to unlock."
+  },
+  "confirm": {
+    "message": "Confirm the charge: {{cost}} gas will be deducted, leaving {{remaining}} gas. Access opens permanently.",
+    "confirmButton": "Charge gas",
+    "cancelButton": "Cancel",
+    "paying": "Charging…"
+  },
+  "unlocked": {
+    "placeholder": "The section is open. Games will appear here later."
+  }
+}

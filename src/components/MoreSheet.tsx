@@ -18,6 +18,7 @@ const MORE_ITEMS: MoreItem[] = [
   { screen: 'inventory', labelKey: 'common:tabs.inventory', icon: '◈' },
   { screen: 'shop', labelKey: 'common:tabs.shop', icon: '⊕' },
   { screen: 'transfer', labelKey: 'common:tabs.transfer', icon: '⇄' },
+  { screen: 'risk', labelKey: 'common:tabs.risk', icon: '⚄' },
 ]
 
 export function MoreSheet({ open, onClose, onScreenChange }: MoreSheetProps) {

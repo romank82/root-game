@@ -1339,3 +1339,37 @@ export async function sendTeamSessionMessage(
   return response.json() as Promise<EngineTeamMessage>
 }
 
+// ---------- Раздел «Риск» (docs/risk-section-contract.md) ----------
+// Только контейнер: состояние доступа и разовая оплата газом.
+// Мини-игры раздела здесь не реализуются.
+
+export type EngineRiskState = 'hidden' | 'locked' | 'unlocked'
+
+export type EngineRiskAccess = {
+  state: EngineRiskState
+  unlocked: boolean
+  // Газ — Numeric(18,4) на сервере, поэтому строка, а не number.
+  gasCost: string
+  gasBalance: string
+  mode: string
+}
+
+export async function getRiskState(): Promise<EngineRiskAccess> {
+  const response = await apiFetch('/api/v1/risk/state')
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+  return response.json() as Promise<EngineRiskAccess>
+}
+
+// Разовая оплата газом. Повторный вызов после успеха газ не двигает:
+// сервер возвращает уже открытое состояние.
+export async function unlockRiskSection(): Promise<EngineRiskAccess> {
+  const response = await apiFetch('/api/v1/risk/unlock', {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+  return response.json() as Promise<EngineRiskAccess>
+}

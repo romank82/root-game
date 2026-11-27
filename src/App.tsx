@@ -20,6 +20,7 @@ import { MapScreen } from './components/screens/MapScreen'
 import { CameraTestScreen } from './components/screens/CameraTestScreen'
 import { CipherScreen } from './components/screens/CipherScreen'
 import { MemoryScreen } from './components/screens/MemoryScreen'
+import { RiskScreen } from './components/screens/RiskScreen'
 import { TeamSessionScreen } from './components/screens/TeamSessionScreen'
 
 function App() {
@@ -366,6 +367,10 @@ function App() {
       )}
 
       {/* Sprint Memory-2b: мини-игра «память» (пары карточек). */}
+      {screen === 'risk' && (
+        <RiskScreen onScreenChange={setScreen} />
+      )}
+
       {screen === 'memory' && (
         <MemoryScreen
           missions={missions}

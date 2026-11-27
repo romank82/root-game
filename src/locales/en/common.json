@@ -29,7 +29,8 @@
     "camera": "Camera",
     "inventory": "Items",
     "transfer": "Transfer",
-    "more": "More"
+        "risk": "Risk",
+"more": "More"
   },
   "sidebar": {
     "navigation": "NAVIGATION",

@@ -1,0 +1,23 @@
+{
+  "header": {
+    "eyebrow": "风险 / 访问",
+    "title": "风险"
+  },
+  "locked": {
+    "message": "游戏已锁定。解锁费用为 {{cost}} 燃气。",
+    "balance": "您的余额：{{balance}} 燃气。",
+    "notice": "这是一次性支付：燃气只扣除一次，访问权限永久有效。",
+    "payButton": "支付",
+    "declineButton": "拒绝",
+    "notEnoughGas": "燃气不足以解锁。"
+  },
+  "confirm": {
+    "message": "确认扣费：将扣除 {{cost}} 燃气，剩余 {{remaining}} 燃气。访问权限永久开启。",
+    "confirmButton": "扣除燃气",
+    "cancelButton": "取消",
+    "paying": "扣费中…"
+  },
+  "unlocked": {
+    "placeholder": "该区域已开放。游戏将在此处出现。"
+  }
+}

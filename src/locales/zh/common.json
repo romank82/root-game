@@ -29,7 +29,8 @@
     "camera": "相机",
     "inventory": "物品",
     "transfer": "转账",
-    "more": "更多"
+        "risk": "风险",
+"more": "更多"
   },
   "sidebar": {
     "navigation": "导航",

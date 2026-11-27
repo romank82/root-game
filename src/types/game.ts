@@ -11,6 +11,7 @@ export type Screen =
   | 'camera-test'
   | 'cipher'
   | 'memory'
+  | 'risk'
 
 export type AuthStatus = 'checking' | 'authenticated' | 'unavailable' | 'error'
 export type ApiStatus = 'checking' | 'online' | 'offline'

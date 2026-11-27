@@ -2186,3 +2186,34 @@ class JettonDeposit(TimestampMixin, Base):
         Index("ix_jetton_deposits_player_id", "player_id"),
     )
 
+class RiskAccessGrant(TimestampMixin, Base):
+    """Постоянный доступ игрока к разделу «Риск» (см. docs/risk-section-contract.md).
+
+    Одна запись на игрока, навсегда: разовая оплата газом. Уникальный индекс
+    по player_id — жёсткая гарантия «оплатил один раз», а не только логика
+    приложения. Запись не удаляется и не перезаписывается: газ уже списан
+    immutable-проводкой GasTransaction с reference_type='risk_unlock'.
+    """
+
+    __tablename__ = "risk_access_grants"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    player_id: Mapped[str] = mapped_column(
+        ForeignKey("game_players.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    gas_cost_paid: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), nullable=False
+    )
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("player_id", name="uq_risk_access_grants_player_id"),
+        CheckConstraint(
+            "gas_cost_paid >= 0",
+            name="ck_risk_access_grants_cost_nonnegative",
+        ),
+    )

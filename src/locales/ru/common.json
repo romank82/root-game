@@ -29,7 +29,8 @@
     "camera": "Камера",
     "inventory": "Вещи",
     "transfer": "Перевод",
-    "more": "Ещё"
+        "risk": "Риск",
+"more": "Ещё"
   },
   "sidebar": {
     "navigation": "НАВИГАЦИЯ",

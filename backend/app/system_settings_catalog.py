@@ -143,6 +143,30 @@ SYSTEM_SETTING_CATALOG: dict[str, SystemSettingDefinition] = {
         description="Стоимость пакета 1000 газа в звёздах Telegram.",
         is_sensitive=True,
     ),
+    "risk.access_mode": SystemSettingDefinition(
+        key="risk.access_mode",
+        value_type="string",
+        default_value="hidden",
+        category="risk",
+        title="Режим доступа к разделу «Риск»",
+        description=(
+            "hidden — раздел скрыт от всех; locked — виден, но требует "
+            "разовой оплаты газом; open — доступен всем без оплаты."
+        ),
+        is_sensitive=False,
+    ),
+    "risk.unlock_gas_cost": SystemSettingDefinition(
+        key="risk.unlock_gas_cost",
+        value_type="integer",
+        default_value=100,
+        category="risk",
+        title="Стоимость разблокировки раздела «Риск»",
+        description=(
+            "Сколько газа списывается один раз с игрока за постоянный "
+            "доступ к разделу «Риск»."
+        ),
+        is_sensitive=False,
+    ),
     "economy.manual_adjustment_approval_threshold": SystemSettingDefinition(
         key="economy.manual_adjustment_approval_threshold",
         value_type="integer",
@@ -517,6 +541,8 @@ def validate_value(definition: SystemSettingDefinition, value: Any) -> None:
             raise ValueError("geo.anticheat_min_elapsed_seconds должен быть от 1 до 300.")
         if definition.key == "geo.anticheat_accuracy_min_meters" and not 0 <= value <= 100:
             raise ValueError("geo.anticheat_accuracy_min_meters должен быть от 0 до 100.")
+        if definition.key == "risk.unlock_gas_cost" and not 1 <= value <= 1000000:
+            raise ValueError("risk.unlock_gas_cost должен быть от 1 до 1000000.")
         return
 
     if definition.value_type == "boolean":
@@ -529,6 +555,14 @@ def validate_value(definition: SystemSettingDefinition, value: Any) -> None:
             raise ValueError("Значение должно быть строкой.")
         if definition.key == "geo.solo_proof_mode" and value not in ("off", "enforce"):
             raise ValueError("geo.solo_proof_mode должен быть 'off' или 'enforce'.")
+        if definition.key == "risk.access_mode" and value not in (
+            "hidden",
+            "locked",
+            "open",
+        ):
+            raise ValueError(
+                "risk.access_mode должен быть 'hidden', 'locked' или 'open'."
+            )
         if definition.key == "geo.anticheat_mode" and value not in (
             "off",
             "flag",

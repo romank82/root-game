@@ -37,6 +37,11 @@ from app.mission_engine import (
     submit_mission,
     submit_solo_location_proof_entrypoint,
 )
+from app.risk_service import (
+    RiskError,
+    resolve_state as resolve_risk_state,
+    unlock_with_gas,
+)
 from app.models import GamePlayer, GasWallet, TonWallet
 from app.fallback_shop import get_fallback_offers, purchase_fallback_offer_entrypoint
 from app.shop_service import list_catalog_items, purchase_catalog_item
@@ -1390,6 +1395,44 @@ def get_engine_fallback_offers_route(
     try:
         return get_fallback_offers(player_id)
     except MissionEngineError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+
+@limiter.limit("20/minute")
+@app.get("/api/v1/risk/state")
+def get_risk_state_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Состояние раздела «Риск» для игрока (docs/risk-section-contract.md).
+
+    state: hidden — раздел скрыт; locked — виден, требует оплаты газом;
+    unlocked — доступен. Стоимость и баланс газа отдаются строками, потому
+    что газ — Numeric(18,4).
+    """
+    with SessionLocal() as session:
+        return resolve_risk_state(session, player_id)
+
+
+@limiter.limit("5/minute")
+@app.post("/api/v1/risk/unlock")
+def post_risk_unlock_route(
+    request: Request,
+    player_id: str = Depends(get_current_player_id),
+):
+    """Разовая оплата газом: постоянный доступ к разделу «Риск».
+
+    Атомарно списывает газ immutable-проводкой GasTransaction
+    (reference_type='risk_unlock') и создаёт запись постоянного доступа.
+    Повторный вызов после успеха газ не двигает.
+    """
+    try:
+        with SessionLocal.begin() as session:
+            return unlock_with_gas(session, player_id)
+    except RiskError as error:
         raise HTTPException(
             status_code=error.status_code,
             detail=error.detail,
